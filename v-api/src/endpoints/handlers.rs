@@ -2,12 +2,13 @@
 macro_rules! v_system_endpoints {
     ($context_type:ident) => {
         use dropshot::{
-            endpoint, HttpError, HttpResponseCreated, HttpResponseOk, HttpResponseTemporaryRedirect,
-            HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
+            endpoint, HttpError, HttpResponseCreated, HttpResponseOk,
+            HttpResponseTemporaryRedirect, HttpResponseUpdatedNoContent, Path, Query,
+            RequestContext, TypedBody,
         };
-        use v_model::{Mapper, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret};
         use http::Response;
         use hyper::Body;
+        use v_model::{Mapper, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret};
 
         use v_api::endpoints::{
             api_user::{
@@ -15,8 +16,8 @@ macro_rules! v_system_endpoints {
                 delete_api_user_token_op, get_api_user_op, get_api_user_token_op, get_self_op,
                 link_provider_op, list_api_user_tokens_op, remove_api_user_from_group_op,
                 update_api_user_op, AddGroupBody, ApiKeyCreateParams, ApiKeyResponse, ApiUserPath,
-                ApiUserProviderLinkPayload, ApiUserRemoveGroupPath, ApiUserTokenPath, ApiUserUpdateParams,
-                GetUserResponse, InitialApiKeyResponse, UserResponse,
+                ApiUserProviderLinkPayload, ApiUserRemoveGroupPath, ApiUserTokenPath,
+                ApiUserUpdateParams, GetUserResponse, InitialApiKeyResponse, UserResponse,
             },
             api_user_provider::{
                 create_link_token_op, ApiUserLinkRequestPayload, ApiUserLinkRequestResponse,
@@ -31,14 +32,15 @@ macro_rules! v_system_endpoints {
                     create_oauth_client_op, create_oauth_client_redirect_uri_op,
                     create_oauth_client_secret_op, delete_oauth_client_redirect_uri_op,
                     delete_oauth_client_secret_op, get_oauth_client_op, list_oauth_clients_op,
-                    AddOAuthClientRedirectBody, AddOAuthClientRedirectPath, AddOAuthClientSecretPath,
-                    DeleteOAuthClientRedirectPath, DeleteOAuthClientSecretPath, GetOAuthClientPath,
+                    AddOAuthClientRedirectBody, AddOAuthClientRedirectPath,
+                    AddOAuthClientSecretPath, DeleteOAuthClientRedirectPath,
+                    DeleteOAuthClientSecretPath, GetOAuthClientPath,
                     InitialOAuthClientSecretResponse,
                 },
                 code::{
                     authz_code_callback_op, authz_code_exchange_op, authz_code_redirect_op,
-                    OAuthAuthzCodeExchangeBody, OAuthAuthzCodeExchangeResponse, OAuthAuthzCodeQuery,
-                    OAuthAuthzCodeReturnQuery,
+                    OAuthAuthzCodeExchangeBody, OAuthAuthzCodeExchangeResponse,
+                    OAuthAuthzCodeQuery, OAuthAuthzCodeReturnQuery,
                 },
                 device_token::{
                     exchange_device_token_op, get_device_provider_op, AccessTokenExchangeRequest,
@@ -56,9 +58,9 @@ macro_rules! v_system_endpoints {
 
         /// List OAuth clients
         #[endpoint {
-            method = GET,
-            path = "/oauth/client"
-        }]
+                    method = GET,
+                    path = "/oauth/client"
+                }]
         pub async fn list_oauth_clients(
             rqctx: RequestContext<$context_type>,
         ) -> Result<HttpResponseOk<Vec<OAuthClient>>, HttpError> {
@@ -67,9 +69,9 @@ macro_rules! v_system_endpoints {
 
         /// Create a new OAuth Client
         #[endpoint {
-            method = POST,
-            path = "/oauth/client"
-        }]
+                    method = POST,
+                    path = "/oauth/client"
+                }]
         pub async fn create_oauth_client(
             rqctx: RequestContext<$context_type>,
         ) -> Result<HttpResponseCreated<OAuthClient>, HttpError> {
@@ -78,9 +80,9 @@ macro_rules! v_system_endpoints {
 
         /// Get an new OAuth Client
         #[endpoint {
-            method = GET,
-            path = "/oauth/client/{client_id}"
-        }]
+                    method = GET,
+                    path = "/oauth/client/{client_id}"
+                }]
         pub async fn get_oauth_client(
             rqctx: RequestContext<$context_type>,
             path: Path<GetOAuthClientPath>,
@@ -90,9 +92,9 @@ macro_rules! v_system_endpoints {
 
         /// Add an OAuth client secret
         #[endpoint {
-            method = POST,
-            path = "/oauth/client/{client_id}/secret"
-        }]
+                    method = POST,
+                    path = "/oauth/client/{client_id}/secret"
+                }]
         pub async fn create_oauth_client_secret(
             rqctx: RequestContext<$context_type>,
             path: Path<AddOAuthClientSecretPath>,
@@ -102,9 +104,9 @@ macro_rules! v_system_endpoints {
 
         /// Delete an OAuth client secret
         #[endpoint {
-            method = DELETE,
-            path = "/oauth/client/{client_id}/secret/{secret_id}"
-        }]
+                    method = DELETE,
+                    path = "/oauth/client/{client_id}/secret/{secret_id}"
+                }]
         pub async fn delete_oauth_client_secret(
             rqctx: RequestContext<$context_type>,
             path: Path<DeleteOAuthClientSecretPath>,
@@ -114,9 +116,9 @@ macro_rules! v_system_endpoints {
 
         /// Add an OAuth client redirect uri
         #[endpoint {
-            method = POST,
-            path = "/oauth/client/{client_id}/redirect_uri"
-        }]
+                    method = POST,
+                    path = "/oauth/client/{client_id}/redirect_uri"
+                }]
         pub async fn create_oauth_client_redirect_uri(
             rqctx: RequestContext<$context_type>,
             path: Path<AddOAuthClientRedirectPath>,
@@ -127,9 +129,9 @@ macro_rules! v_system_endpoints {
 
         /// Delete an OAuth client redirect uri
         #[endpoint {
-            method = DELETE,
-            path = "/oauth/client/{client_id}/redirect_uri/{redirect_uri_id}"
-        }]
+                    method = DELETE,
+                    path = "/oauth/client/{client_id}/redirect_uri/{redirect_uri_id}"
+                }]
         pub async fn delete_oauth_client_redirect_uri(
             rqctx: RequestContext<$context_type>,
             path: Path<DeleteOAuthClientRedirectPath>,
@@ -141,9 +143,9 @@ macro_rules! v_system_endpoints {
 
         /// Generate the remote provider login url and redirect the user
         #[endpoint {
-            method = GET,
-            path = "/login/oauth/{provider}/code/authorize"
-        }]
+                    method = GET,
+                    path = "/login/oauth/{provider}/code/authorize"
+                }]
         pub async fn authz_code_redirect(
             rqctx: RequestContext<$context_type>,
             path: Path<OAuthProviderNameParam>,
@@ -154,9 +156,9 @@ macro_rules! v_system_endpoints {
 
         /// Handle return calls from a remote OAuth provider
         #[endpoint {
-            method = GET,
-            path = "/login/oauth/{provider}/code/callback"
-        }]
+                    method = GET,
+                    path = "/login/oauth/{provider}/code/callback"
+                }]
         pub async fn authz_code_callback(
             rqctx: RequestContext<$context_type>,
             path: Path<OAuthProviderNameParam>,
@@ -167,10 +169,10 @@ macro_rules! v_system_endpoints {
 
         /// Exchange an authorization code for an access token
         #[endpoint {
-            method = POST,
-            path = "/login/oauth/{provider}/code/token",
-            content_type = "application/x-www-form-urlencoded",
-        }]
+                    method = POST,
+                    path = "/login/oauth/{provider}/code/token",
+                    content_type = "application/x-www-form-urlencoded",
+                }]
         pub async fn authz_code_exchange(
             rqctx: RequestContext<$context_type>,
             path: Path<OAuthProviderNameParam>,
@@ -183,9 +185,9 @@ macro_rules! v_system_endpoints {
 
         // Get the metadata about an OAuth provider necessary to begin a device code exchange
         #[endpoint {
-            method = GET,
-            path = "/login/oauth/{provider}/device"
-        }]
+                    method = GET,
+                    path = "/login/oauth/{provider}/device"
+                }]
         pub async fn get_device_provider(
             rqctx: RequestContext<$context_type>,
             path: Path<OAuthProviderNameParam>,
@@ -194,10 +196,10 @@ macro_rules! v_system_endpoints {
         }
 
         #[endpoint {
-            method = POST,
-            path = "/login/oauth/{provider}/device/exchange",
-            content_type = "application/x-www-form-urlencoded",
-        }]
+                    method = POST,
+                    path = "/login/oauth/{provider}/device/exchange",
+                    content_type = "application/x-www-form-urlencoded",
+                }]
         pub async fn exchange_device_token(
             rqctx: RequestContext<$context_type>,
             path: Path<OAuthProviderNameParam>,
@@ -209,9 +211,9 @@ macro_rules! v_system_endpoints {
         // WELL KNOWN
 
         #[endpoint {
-            method = GET,
-            path = "/.well-known/openid-configuration",
-        }]
+                    method = GET,
+                    path = "/.well-known/openid-configuration",
+                }]
         pub async fn openid_configuration(
             rqctx: RequestContext<$context_type>,
         ) -> Result<HttpResponseOk<OpenIdConfiguration>, HttpError> {
@@ -219,9 +221,9 @@ macro_rules! v_system_endpoints {
         }
 
         #[endpoint {
-            method = GET,
-            path = "/.well-known/jwks.json",
-        }]
+                    method = GET,
+                    path = "/.well-known/jwks.json",
+                }]
         pub async fn jwks_json(
             rqctx: RequestContext<$context_type>,
         ) -> Result<HttpResponseOk<Jwks>, HttpError> {
@@ -232,9 +234,9 @@ macro_rules! v_system_endpoints {
 
         /// Create a new link token for linking this provider to a different api user
         #[endpoint {
-            method = POST,
-            path = "/api-user-provider/{identifier}/link-token",
-        }]
+                    method = POST,
+                    path = "/api-user-provider/{identifier}/link-token",
+                }]
         pub async fn create_link_token(
             rqctx: RequestContext<$context_type>,
             path: Path<ApiUserProviderPath>,
@@ -247,9 +249,9 @@ macro_rules! v_system_endpoints {
 
         /// Retrieve the user information of the calling user
         #[endpoint {
-            method = GET,
-            path = "/self",
-        }]
+                    method = GET,
+                    path = "/self",
+                }]
         pub async fn get_self(
             rqctx: RequestContext<$context_type>,
         ) -> Result<HttpResponseOk<GetUserResponse>, HttpError> {
@@ -258,9 +260,9 @@ macro_rules! v_system_endpoints {
 
         /// Get user information for a given user id
         #[endpoint {
-            method = GET,
-            path = "/api-user/{identifier}",
-        }]
+                    method = GET,
+                    path = "/api-user/{identifier}",
+                }]
         pub async fn get_api_user(
             rqctx: RequestContext<$context_type>,
             path: Path<ApiUserPath>,
@@ -270,9 +272,9 @@ macro_rules! v_system_endpoints {
 
         /// Create a new user with a given set of permissions
         #[endpoint {
-            method = POST,
-            path = "/api-user",
-        }]
+                    method = POST,
+                    path = "/api-user",
+                }]
         pub async fn create_api_user(
             rqctx: RequestContext<$context_type>,
             body: TypedBody<ApiUserUpdateParams>,
@@ -282,9 +284,9 @@ macro_rules! v_system_endpoints {
 
         /// Update the permissions assigned to a given user
         #[endpoint {
-            method = POST,
-            path = "/api-user/{identifier}",
-        }]
+                    method = POST,
+                    path = "/api-user/{identifier}",
+                }]
         pub async fn update_api_user(
             rqctx: RequestContext<$context_type>,
             path: Path<ApiUserPath>,
@@ -295,9 +297,9 @@ macro_rules! v_system_endpoints {
 
         /// List the active and expired API tokens for a given user
         #[endpoint {
-            method = GET,
-            path = "/api-user/{identifier}/token",
-        }]
+                    method = GET,
+                    path = "/api-user/{identifier}/token",
+                }]
         pub async fn list_api_user_tokens(
             rqctx: RequestContext<$context_type>,
             path: Path<ApiUserPath>,
@@ -308,9 +310,9 @@ macro_rules! v_system_endpoints {
         // Create a new API token for a given user with a specific set of permissions and expiration. This
         // is the only time that the returned token will be accessible
         #[endpoint {
-            method = POST,
-            path = "/api-user/{identifier}/token",
-        }]
+                    method = POST,
+                    path = "/api-user/{identifier}/token",
+                }]
         pub async fn create_api_user_token(
             rqctx: RequestContext<$context_type>,
             path: Path<ApiUserPath>,
@@ -321,9 +323,9 @@ macro_rules! v_system_endpoints {
 
         // Get details for a specific API token
         #[endpoint {
-            method = GET,
-            path = "/api-user/{identifier}/token/{token_identifier}",
-        }]
+                    method = GET,
+                    path = "/api-user/{identifier}/token/{token_identifier}",
+                }]
         pub async fn get_api_user_token(
             rqctx: RequestContext<$context_type>,
             path: Path<ApiUserTokenPath>,
@@ -333,9 +335,9 @@ macro_rules! v_system_endpoints {
 
         // Revoke a specific API token so it can no longer be used
         #[endpoint {
-            method = DELETE,
-            path = "/api-user/{identifier}/token/{token_identifier}",
-        }]
+                    method = DELETE,
+                    path = "/api-user/{identifier}/token/{token_identifier}",
+                }]
         pub async fn delete_api_user_token(
             rqctx: RequestContext<$context_type>,
             path: Path<ApiUserTokenPath>,
@@ -344,9 +346,9 @@ macro_rules! v_system_endpoints {
         }
 
         #[endpoint {
-            method = POST,
-            path = "/api-user/{identifier}/group",
-        }]
+                    method = POST,
+                    path = "/api-user/{identifier}/group",
+                }]
         pub async fn add_api_user_to_group(
             rqctx: RequestContext<$context_type>,
             path: Path<ApiUserPath>,
@@ -356,9 +358,9 @@ macro_rules! v_system_endpoints {
         }
 
         #[endpoint {
-            method = DELETE,
-            path = "/api-user/{identifier}/group/{group_id}",
-        }]
+                    method = DELETE,
+                    path = "/api-user/{identifier}/group/{group_id}",
+                }]
         pub async fn remove_api_user_from_group(
             rqctx: RequestContext<$context_type>,
             path: Path<ApiUserRemoveGroupPath>,
@@ -368,9 +370,9 @@ macro_rules! v_system_endpoints {
 
         /// Link an existing login provider to this user
         #[endpoint {
-            method = POST,
-            path = "/api-user/{identifier}/link",
-        }]
+                    method = POST,
+                    path = "/api-user/{identifier}/link",
+                }]
         pub async fn link_provider(
             rqctx: RequestContext<$context_type>,
             path: Path<ApiUserPath>,
@@ -382,9 +384,9 @@ macro_rules! v_system_endpoints {
         // GROUPS
 
         #[endpoint {
-            method = GET,
-            path = "/group",
-        }]
+                    method = GET,
+                    path = "/group",
+                }]
         pub async fn get_groups(
             rqctx: RequestContext<$context_type>,
         ) -> Result<HttpResponseOk<Vec<GroupResponse>>, HttpError> {
@@ -392,9 +394,9 @@ macro_rules! v_system_endpoints {
         }
 
         #[endpoint {
-            method = POST,
-            path = "/group",
-        }]
+                    method = POST,
+                    path = "/group",
+                }]
         pub async fn create_group(
             rqctx: RequestContext<$context_type>,
             body: TypedBody<AccessGroupUpdateParams>,
@@ -403,9 +405,9 @@ macro_rules! v_system_endpoints {
         }
 
         #[endpoint {
-            method = PUT,
-            path = "/group/{group_id}",
-        }]
+                    method = PUT,
+                    path = "/group/{group_id}",
+                }]
         pub async fn update_group(
             rqctx: RequestContext<$context_type>,
             path: Path<AccessGroupPath>,
@@ -415,9 +417,9 @@ macro_rules! v_system_endpoints {
         }
 
         #[endpoint {
-            method = DELETE,
-            path = "/group/{group_id}",
-        }]
+                    method = DELETE,
+                    path = "/group/{group_id}",
+                }]
         pub async fn delete_group(
             rqctx: RequestContext<$context_type>,
             path: Path<AccessGroupPath>,
@@ -428,9 +430,9 @@ macro_rules! v_system_endpoints {
         // MAPPERS
 
         #[endpoint {
-            method = GET,
-            path = "/mapper",
-        }]
+                    method = GET,
+                    path = "/mapper",
+                }]
         pub async fn get_mappers(
             rqctx: RequestContext<$context_type>,
             query: Query<ListMappersQuery>,
@@ -439,9 +441,9 @@ macro_rules! v_system_endpoints {
         }
 
         #[endpoint {
-            method = POST,
-            path = "/mapper",
-        }]
+                    method = POST,
+                    path = "/mapper",
+                }]
         pub async fn create_mapper(
             rqctx: RequestContext<$context_type>,
             body: TypedBody<CreateMapper>,
@@ -450,9 +452,9 @@ macro_rules! v_system_endpoints {
         }
 
         #[endpoint {
-            method = DELETE,
-            path = "/mapper/{identifier}",
-        }]
+                    method = DELETE,
+                    path = "/mapper/{identifier}",
+                }]
         pub async fn delete_mapper(
             rqctx: RequestContext<$context_type>,
             path: Path<MapperPath>,

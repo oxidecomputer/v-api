@@ -352,6 +352,20 @@ pub async fn authz_code_callback_op(
     // Verify and extract the attempt id before performing any work
     let attempt_id = verify_csrf(&rqctx.request, &query)?;
 
+    http_response_temporary_redirect(
+        authz_code_callback_op_inner(&ctx, &attempt_id, query.code, query.error).await?,
+    )
+}
+
+pub async fn authz_code_callback_op_inner<T>(
+    ctx: &VContext<T>,
+    attempt_id: &Uuid,
+    code: Option<String>,
+    error: Option<String>,
+) -> Result<String, HttpError>
+where
+    T: Permission + From<ApiPermission>,
+{
     // We have now verified the attempt id and can use it to look up the rest of the login attempt
     // material to try and complete the flow
     let mut attempt = ctx
@@ -371,7 +385,7 @@ pub async fn authz_code_callback_op(
             }
         })?;
 
-    attempt = match (query.code, query.error) {
+    attempt = match (code, error) {
         (Some(code), None) => {
             tracing::info!(?attempt.id, "Received valid login attempt. Storing authorization code");
 
@@ -404,7 +418,7 @@ pub async fn authz_code_callback_op(
     };
 
     // Redirect back to the original authenticator
-    http_response_temporary_redirect(attempt.callback_url())
+    Ok(attempt.callback_url())
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -688,13 +702,13 @@ mod tests {
     use hyper::Body;
     use mockall::predicate::eq;
     use oauth2::PkceCodeChallenge;
+    use secrecy::SecretString;
+    use uuid::Uuid;
     use v_model::{
         schema_ext::LoginAttemptState,
         storage::{MockLoginAttemptStore, MockOAuthClientStore},
         LoginAttempt, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret,
     };
-    use secrecy::SecretString;
-    use uuid::Uuid;
 
     use crate::{
         authn::key::RawApiKey,
@@ -704,22 +718,21 @@ mod tests {
         },
         endpoints::login::oauth::{
             code::{
-                verify_csrf, verify_login_attempt, OAuthAuthzCodeReturnQuery, OAuthError,
-                OAuthErrorCode, LOGIN_ATTEMPT_COOKIE,
+                authz_code_callback_op_inner, verify_csrf, verify_login_attempt,
+                OAuthAuthzCodeReturnQuery, OAuthError, OAuthErrorCode, LOGIN_ATTEMPT_COOKIE,
             },
             OAuthProviderName,
         },
+        permissions::ApiPermission,
     };
 
-    use super::{
-        authorize_code_exchange, authz_code_callback_op, get_oauth_client, oauth_redirect_response,
-    };
+    use super::{authorize_code_exchange, get_oauth_client, oauth_redirect_response};
 
-    async fn mock_client() -> (VContext, OAuthClient, SecretString) {
+    async fn mock_client() -> (VContext<ApiPermission>, OAuthClient, SecretString) {
         let ctx = mock_context(MockStorage::new()).await;
         let client_id = Uuid::new_v4();
         let key = RawApiKey::generate::<8>(&Uuid::new_v4())
-            .sign(&*ctx.secrets.signer)
+            .sign(&*ctx.signer())
             .await
             .unwrap();
         let secret_signature = key.signature().to_string();
@@ -795,7 +808,7 @@ mod tests {
     async fn test_remote_provider_redirect_url() {
         let storage = MockStorage::new();
         let mut ctx = mock_context(storage).await;
-        ctx.public_url = "https://api.oxeng.dev".to_string();
+        ctx.with_public_url("https://api.oxeng.dev");
 
         let (challenge, _) = PkceCodeChallenge::new_random_sha256();
         let attempt = LoginAttempt {
@@ -819,7 +832,7 @@ mod tests {
         };
 
         let response = oauth_redirect_response(
-            &ctx.public_url,
+            &ctx.public_url(),
             &*ctx
                 .get_oauth_provider(&OAuthProviderName::Google)
                 .await
@@ -970,9 +983,13 @@ mod tests {
             storage.login_attempt_store = Some(Arc::new(attempt_store));
 
             let ctx = mock_context(storage).await;
-            let err =
-                authz_code_callback_op(&ctx, &attempt_id, Some("remote-code".to_string()), None)
-                    .await;
+            let err = authz_code_callback_op_inner(
+                &ctx,
+                &attempt_id,
+                Some("remote-code".to_string()),
+                None,
+            )
+            .await;
 
             assert_eq!(StatusCode::UNAUTHORIZED, err.unwrap_err().status_code);
         }
@@ -1023,7 +1040,7 @@ mod tests {
         storage.login_attempt_store = Some(Arc::new(attempt_store));
         let ctx = mock_context(storage).await;
 
-        let location = authz_code_callback_op(
+        let location = authz_code_callback_op_inner(
             &ctx,
             &attempt_id,
             Some("remote-code".to_string()),
@@ -1083,7 +1100,7 @@ mod tests {
         storage.login_attempt_store = Some(Arc::new(attempt_store));
         let ctx = mock_context(storage).await;
 
-        let location = authz_code_callback_op(
+        let location = authz_code_callback_op_inner(
             &ctx,
             &attempt_id,
             Some("remote-code".to_string()),
@@ -1146,7 +1163,7 @@ mod tests {
         let ctx = mock_context(storage).await;
 
         let location =
-            authz_code_callback_op(&ctx, &attempt_id, Some("remote-code".to_string()), None)
+            authz_code_callback_op_inner(&ctx, &attempt_id, Some("remote-code".to_string()), None)
                 .await
                 .unwrap();
 
@@ -1293,7 +1310,7 @@ mod tests {
         ctx.set_storage(Arc::new(storage));
 
         let invalid_secret = RawApiKey::generate::<8>(&Uuid::new_v4())
-            .sign(&*ctx.secrets.signer)
+            .sign(&*ctx.signer())
             .await
             .unwrap()
             .signature()

@@ -17,7 +17,7 @@ pub mod permissions;
 mod secrets;
 mod util;
 
-pub use context::{ApiContext, VContext, SecretContext};
+pub use context::{ApiContext, SecretContext, VContext};
 
 type ApiCaller = Caller<ApiPermission>;
 type ApiPermissions = Permissions<ApiPermission>;

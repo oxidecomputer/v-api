@@ -42,6 +42,7 @@ pub enum JwtError {
     UnsupportedAlgorithm,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Jwt {
     pub claims: Claims,
 }

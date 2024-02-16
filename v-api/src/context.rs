@@ -325,6 +325,11 @@ where
         &self.public_url
     }
 
+    pub fn with_public_url(&mut self, public_url: &str) -> &mut Self {
+        self.public_url = public_url.to_string();
+        self
+    }
+
     #[instrument(skip(self, auth))]
     pub async fn get_caller(&self, auth: Option<&AuthToken>) -> Result<Caller<T>, CallerError> {
         match auth {
@@ -1531,13 +1536,13 @@ where
 #[cfg(test)]
 mod tests {
     use chrono::{Duration, Utc};
+    use mockall::predicate::eq;
+    use std::{collections::BTreeSet, ops::Add, sync::Arc};
+    use uuid::Uuid;
     use v_model::{
         storage::{AccessGroupFilter, ListPagination, MockAccessGroupStore, MockApiUserStore},
         AccessGroup, ApiUser, ApiUserProvider,
     };
-    use mockall::predicate::eq;
-    use std::{collections::BTreeSet, ops::Add, sync::Arc};
-    use uuid::Uuid;
 
     use crate::{
         authn::{
@@ -1554,7 +1559,11 @@ mod tests {
         VContext,
     };
 
-    async fn create_token(ctx: &VContext, user_id: Uuid, scope: Vec<String>) -> AuthToken {
+    async fn create_token(
+        ctx: &VContext<ApiPermission>,
+        user_id: Uuid,
+        scope: Vec<String>,
+    ) -> AuthToken {
         let user = User {
             id: user_id,
             permissions: vec![].into(),
@@ -1619,7 +1628,7 @@ mod tests {
             .returning(move |_, _| Ok(vec![group.clone()]));
 
         let user_id = Uuid::new_v4();
-        let user_permissions: ApiPermissions = vec![ApiPermission::CreateAccessToken].into();
+        let user_permissions: ApiPermissions = vec![ApiPermission::ListMappers].into();
         let mut groups = BTreeSet::new();
         groups.insert(group_id);
         let user = ApiUser {
@@ -1645,17 +1654,22 @@ mod tests {
         let permissions = ctx.get_caller(Some(&token_with_no_scope)).await.unwrap();
         assert_eq!(ApiPermissions::new(), permissions.permissions);
 
-        let token_with_rfd_read_scope =
-            create_token(&ctx, user_id, vec!["rfd:content:r".to_string()]).await;
+        let token_with_read_user_info = create_token(
+            &ctx,
+            user_id,
+            vec![
+                "group:w".to_string(),
+                "mapper:r".to_string(),
+                "user:info:r".to_string(),
+            ],
+        )
+        .await;
         let permissions = ctx
-            .get_caller(Some(&token_with_rfd_read_scope))
+            .get_caller(Some(&token_with_read_user_info))
             .await
             .unwrap();
         assert_eq!(
-            ApiPermissions::from(vec![
-                ApiPermission::CreateGroup,
-                ApiPermission::CreateAccessToken
-            ]),
+            ApiPermissions::from(vec![ApiPermission::CreateGroup, ApiPermission::ListMappers,]),
             permissions.permissions
         );
     }
@@ -1664,6 +1678,8 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod test_mocks {
     use async_trait::async_trait;
+    use std::sync::Arc;
+    use v_api_permissions::Caller;
     use v_model::{
         storage::{
             AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserProviderStore, ApiUserStore,
@@ -1676,8 +1692,6 @@ pub(crate) mod test_mocks {
         ApiKey, ApiUserProvider, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
         NewApiUserProvider, NewLoginAttempt, NewMapper,
     };
-    use std::sync::Arc;
-    use v_api_permissions::Caller;
 
     use crate::{
         config::JwtConfig,
@@ -1689,7 +1703,7 @@ pub(crate) mod test_mocks {
     use super::VContext;
 
     // Construct a mock context that can be used in tests
-    pub async fn mock_context(storage: MockStorage) -> VContext {
+    pub async fn mock_context(storage: MockStorage) -> VContext<ApiPermission> {
         let mut ctx = VContext::new(
             "".to_string(),
             Arc::new(storage),
@@ -1758,10 +1772,7 @@ pub(crate) mod test_mocks {
             &self,
             id: &uuid::Uuid,
             deleted: bool,
-        ) -> Result<
-            Option<v_model::ApiUser<ApiPermission>>,
-            v_model::storage::StoreError,
-        > {
+        ) -> Result<Option<v_model::ApiUser<ApiPermission>>, v_model::storage::StoreError> {
             self.api_user_store.as_ref().unwrap().get(id, deleted).await
         }
 
@@ -1769,10 +1780,7 @@ pub(crate) mod test_mocks {
             &self,
             filter: v_model::storage::ApiUserFilter,
             pagination: &ListPagination,
-        ) -> Result<
-            Vec<v_model::ApiUser<ApiPermission>>,
-            v_model::storage::StoreError,
-        > {
+        ) -> Result<Vec<v_model::ApiUser<ApiPermission>>, v_model::storage::StoreError> {
             self.api_user_store
                 .as_ref()
                 .unwrap()
@@ -1783,18 +1791,14 @@ pub(crate) mod test_mocks {
         async fn upsert(
             &self,
             api_user: NewApiUser<ApiPermission>,
-        ) -> Result<v_model::ApiUser<ApiPermission>, v_model::storage::StoreError>
-        {
+        ) -> Result<v_model::ApiUser<ApiPermission>, v_model::storage::StoreError> {
             self.api_user_store.as_ref().unwrap().upsert(api_user).await
         }
 
         async fn delete(
             &self,
             id: &uuid::Uuid,
-        ) -> Result<
-            Option<v_model::ApiUser<ApiPermission>>,
-            v_model::storage::StoreError,
-        > {
+        ) -> Result<Option<v_model::ApiUser<ApiPermission>>, v_model::storage::StoreError> {
             self.api_user_store.as_ref().unwrap().delete(id).await
         }
     }
@@ -1911,8 +1915,7 @@ pub(crate) mod test_mocks {
             &self,
             id: &uuid::Uuid,
             revoked: bool,
-        ) -> Result<Option<v_model::AccessToken>, v_model::storage::StoreError>
-        {
+        ) -> Result<Option<v_model::AccessToken>, v_model::storage::StoreError> {
             self.device_token_store
                 .as_ref()
                 .unwrap()
@@ -1924,8 +1927,7 @@ pub(crate) mod test_mocks {
             &self,
             filter: v_model::storage::AccessTokenFilter,
             pagination: &ListPagination,
-        ) -> Result<Vec<v_model::AccessToken>, v_model::storage::StoreError>
-        {
+        ) -> Result<Vec<v_model::AccessToken>, v_model::storage::StoreError> {
             self.device_token_store
                 .as_ref()
                 .unwrap()
@@ -1950,8 +1952,7 @@ pub(crate) mod test_mocks {
         async fn get(
             &self,
             id: &uuid::Uuid,
-        ) -> Result<Option<v_model::LoginAttempt>, v_model::storage::StoreError>
-        {
+        ) -> Result<Option<v_model::LoginAttempt>, v_model::storage::StoreError> {
             self.login_attempt_store.as_ref().unwrap().get(id).await
         }
 
@@ -1959,8 +1960,7 @@ pub(crate) mod test_mocks {
             &self,
             filter: v_model::storage::LoginAttemptFilter,
             pagination: &ListPagination,
-        ) -> Result<Vec<v_model::LoginAttempt>, v_model::storage::StoreError>
-        {
+        ) -> Result<Vec<v_model::LoginAttempt>, v_model::storage::StoreError> {
             self.login_attempt_store
                 .as_ref()
                 .unwrap()
@@ -1986,8 +1986,7 @@ pub(crate) mod test_mocks {
             &self,
             id: &uuid::Uuid,
             deleted: bool,
-        ) -> Result<Option<v_model::OAuthClient>, v_model::storage::StoreError>
-        {
+        ) -> Result<Option<v_model::OAuthClient>, v_model::storage::StoreError> {
             self.oauth_client_store
                 .as_ref()
                 .unwrap()
@@ -1999,8 +1998,7 @@ pub(crate) mod test_mocks {
             &self,
             filter: v_model::storage::OAuthClientFilter,
             pagination: &ListPagination,
-        ) -> Result<Vec<v_model::OAuthClient>, v_model::storage::StoreError>
-        {
+        ) -> Result<Vec<v_model::OAuthClient>, v_model::storage::StoreError> {
             self.oauth_client_store
                 .as_ref()
                 .unwrap()
@@ -2022,8 +2020,7 @@ pub(crate) mod test_mocks {
         async fn delete(
             &self,
             id: &uuid::Uuid,
-        ) -> Result<Option<v_model::OAuthClient>, v_model::storage::StoreError>
-        {
+        ) -> Result<Option<v_model::OAuthClient>, v_model::storage::StoreError> {
             self.oauth_client_store.as_ref().unwrap().delete(id).await
         }
     }
@@ -2033,8 +2030,7 @@ pub(crate) mod test_mocks {
         async fn upsert(
             &self,
             secret: v_model::NewOAuthClientSecret,
-        ) -> Result<v_model::OAuthClientSecret, v_model::storage::StoreError>
-        {
+        ) -> Result<v_model::OAuthClientSecret, v_model::storage::StoreError> {
             self.oauth_client_secret_store
                 .as_ref()
                 .unwrap()
@@ -2045,8 +2041,7 @@ pub(crate) mod test_mocks {
         async fn delete(
             &self,
             id: &uuid::Uuid,
-        ) -> Result<Option<v_model::OAuthClientSecret>, v_model::storage::StoreError>
-        {
+        ) -> Result<Option<v_model::OAuthClientSecret>, v_model::storage::StoreError> {
             self.oauth_client_secret_store
                 .as_ref()
                 .unwrap()
@@ -2060,8 +2055,7 @@ pub(crate) mod test_mocks {
         async fn upsert(
             &self,
             redirect_uri: v_model::NewOAuthClientRedirectUri,
-        ) -> Result<v_model::OAuthClientRedirectUri, v_model::storage::StoreError>
-        {
+        ) -> Result<v_model::OAuthClientRedirectUri, v_model::storage::StoreError> {
             self.oauth_client_redirect_uri_store
                 .as_ref()
                 .unwrap()
@@ -2072,10 +2066,7 @@ pub(crate) mod test_mocks {
         async fn delete(
             &self,
             id: &uuid::Uuid,
-        ) -> Result<
-            Option<v_model::OAuthClientRedirectUri>,
-            v_model::storage::StoreError,
-        > {
+        ) -> Result<Option<v_model::OAuthClientRedirectUri>, v_model::storage::StoreError> {
             self.oauth_client_redirect_uri_store
                 .as_ref()
                 .unwrap()
@@ -2090,10 +2081,8 @@ pub(crate) mod test_mocks {
             &self,
             id: &uuid::Uuid,
             deleted: bool,
-        ) -> Result<
-            Option<v_model::AccessGroup<ApiPermission>>,
-            v_model::storage::StoreError,
-        > {
+        ) -> Result<Option<v_model::AccessGroup<ApiPermission>>, v_model::storage::StoreError>
+        {
             self.access_group_store
                 .as_ref()
                 .unwrap()
@@ -2105,10 +2094,8 @@ pub(crate) mod test_mocks {
             &self,
             filter: v_model::storage::AccessGroupFilter,
             pagination: &ListPagination,
-        ) -> Result<
-            Vec<v_model::AccessGroup<ApiPermission>>,
-            v_model::storage::StoreError,
-        > {
+        ) -> Result<Vec<v_model::AccessGroup<ApiPermission>>, v_model::storage::StoreError>
+        {
             self.access_group_store
                 .as_ref()
                 .unwrap()
@@ -2119,8 +2106,7 @@ pub(crate) mod test_mocks {
         async fn upsert(
             &self,
             group: &NewAccessGroup<ApiPermission>,
-        ) -> Result<v_model::AccessGroup<ApiPermission>, v_model::storage::StoreError>
-        {
+        ) -> Result<v_model::AccessGroup<ApiPermission>, v_model::storage::StoreError> {
             self.access_group_store
                 .as_ref()
                 .unwrap()
@@ -2131,10 +2117,8 @@ pub(crate) mod test_mocks {
         async fn delete(
             &self,
             id: &uuid::Uuid,
-        ) -> Result<
-            Option<v_model::AccessGroup<ApiPermission>>,
-            v_model::storage::StoreError,
-        > {
+        ) -> Result<Option<v_model::AccessGroup<ApiPermission>>, v_model::storage::StoreError>
+        {
             self.access_group_store.as_ref().unwrap().delete(id).await
         }
     }
@@ -2188,8 +2172,7 @@ pub(crate) mod test_mocks {
             id: &uuid::Uuid,
             expired: bool,
             completed: bool,
-        ) -> Result<Option<v_model::LinkRequest>, v_model::storage::StoreError>
-        {
+        ) -> Result<Option<v_model::LinkRequest>, v_model::storage::StoreError> {
             self.link_request_store
                 .as_ref()
                 .unwrap()
@@ -2201,8 +2184,7 @@ pub(crate) mod test_mocks {
             &self,
             filter: v_model::storage::LinkRequestFilter,
             pagination: &ListPagination,
-        ) -> Result<Vec<v_model::LinkRequest>, v_model::storage::StoreError>
-        {
+        ) -> Result<Vec<v_model::LinkRequest>, v_model::storage::StoreError> {
             self.link_request_store
                 .as_ref()
                 .unwrap()

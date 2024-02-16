@@ -50,7 +50,10 @@ pub enum AuthToken {
 
 impl Debug for AuthToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AuthToken").finish()
+        match self {
+            Self::ApiKey(_) => f.debug_struct("AuthToken").finish(),
+            Self::Jwt(jwt) => f.debug_struct("AuthToken").field("jwt", jwt).finish(),
+        }
     }
 }
 
