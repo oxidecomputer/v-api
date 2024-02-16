@@ -45,7 +45,7 @@ impl ApiContext for MyContext {
 }
 ```
 
-3. Use the injection macros to register the `v-api` endpoints. Notable these must both be used with
+3. Use the injection macros to register the `v-api` endpoints. Note that these must both be used with
 in the file.
 
 ```rust
