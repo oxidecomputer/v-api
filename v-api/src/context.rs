@@ -606,6 +606,12 @@ where
                             emails: info.verified_emails,
                             provider: info.external_id.provider().to_string(),
                             provider_id: info.external_id.id().to_string(),
+                            // TODO: Refactor in generic display name across providers. This cascades
+                            // into changes needed within mappers
+                            display_names: info
+                                .github_username
+                                .map(|name| vec![name])
+                                .unwrap_or_default(),
                         },
                     )
                     .await
@@ -618,7 +624,21 @@ where
                 tracing::info!("Found an existing user. Ensuring mapped permissions and groups.");
 
                 // This branch ensures that there is a 0th indexed item
-                let provider = api_user_providers.into_iter().nth(0).unwrap();
+                let mut provider = api_user_providers.into_iter().nth(0).unwrap();
+
+                // Update the provider with the newest user info
+                provider.emails = info.verified_emails;
+                provider.display_names = info
+                    .github_username
+                    .map(|name| vec![name])
+                    .unwrap_or_default();
+
+                tracing::info!(?provider.id, "Updating provider for user");
+
+                self.update_api_user_provider(caller, provider.clone().into())
+                    .await
+                    .map_err(|err| err.into())
+                    .to_resource_result()?;
 
                 // Update the found user to ensure it has at least the mapped permissions and groups
                 let user = self
@@ -988,13 +1008,13 @@ where
     pub async fn update_api_user_provider(
         &self,
         caller: &Caller<T>,
-        api_user: NewApiUserProvider,
+        api_user_provider: NewApiUserProvider,
     ) -> ResourceResult<ApiUserProvider, StoreError> {
         if caller.any(&[
-            &ApiPermission::UpdateApiUser(api_user.id).into(),
+            &ApiPermission::UpdateApiUser(api_user_provider.id).into(),
             &ApiPermission::UpdateApiUserAll.into(),
         ]) {
-            ApiUserProviderStore::upsert(&*self.storage, api_user)
+            ApiUserProviderStore::upsert(&*self.storage, api_user_provider)
                 .await
                 .to_resource_result()
         } else {
@@ -1584,6 +1604,7 @@ mod tests {
             provider: "test".to_string(),
             provider_id: "test_id".to_string(),
             emails: vec![],
+            display_names: vec![],
             created_at: Utc::now(),
             updated_at: Utc::now(),
             deleted_at: None,
