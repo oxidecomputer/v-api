@@ -467,8 +467,13 @@ where
             }
             AuthToken::Jwt(jwt) => {
                 // AuthnToken::Jwt can only be generated from a verified JWT
-                let permissions = ApiPermission::from_scope(jwt.claims.scp.iter())?;
-                Ok((jwt.claims.sub, BasePermissions::Restricted(permissions)))
+                let permissions = match &jwt.claims.scp {
+                    Some(scp) => {
+                        BasePermissions::Restricted(ApiPermission::from_scope(scp.iter())?)
+                    }
+                    None => BasePermissions::Full,
+                };
+                Ok((jwt.claims.sub, permissions))
             }
         }?)
     }
@@ -747,7 +752,7 @@ where
         caller: &Caller<T>,
         api_user: &ApiUser<ApiPermission>,
         api_user_provider: &ApiUserProvider,
-        scope: Vec<String>,
+        scope: Option<Vec<String>>,
     ) -> Result<RegisteredAccessToken, ApiError> {
         let expires_at = Utc::now() + Duration::seconds(self.default_jwt_expiration());
 
@@ -1589,7 +1594,7 @@ mod tests {
                 ctx,
                 &user,
                 &provider,
-                scope,
+                Some(scope),
                 Utc::now().add(Duration::seconds(300)),
             ))
             .await

@@ -53,7 +53,7 @@ pub struct Claims {
     pub aud: String,
     pub sub: Uuid,
     pub prv: Uuid,
-    pub scp: Vec<String>,
+    pub scp: Option<Vec<String>>,
     pub exp: i64,
     pub nbf: i64,
     pub jti: Uuid,
@@ -64,7 +64,7 @@ impl Claims {
         ctx: &VContext<T>,
         user: &User,
         provider: &ApiUserProvider,
-        scope: Vec<String>,
+        scope: Option<Vec<String>>,
         expires_at: DateTime<Utc>,
     ) -> Self
     where
