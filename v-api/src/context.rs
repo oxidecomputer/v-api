@@ -58,7 +58,7 @@ use crate::{
 
 static UNLIMITED: i64 = 9999999;
 
-pub trait Storage:
+pub trait VApiStorage:
     ApiUserStore<ApiPermission>
     + ApiKeyStore<ApiPermission>
     + ApiUserProviderStore
@@ -75,7 +75,7 @@ pub trait Storage:
     + 'static
 {
 }
-impl<T> Storage for T where
+impl<T> VApiStorage for T where
     T: ApiUserStore<ApiPermission>
         + ApiKeyStore<ApiPermission>
         + ApiUserProviderStore
@@ -95,7 +95,7 @@ impl<T> Storage for T where
 
 pub struct VContext<T> {
     public_url: String,
-    storage: Arc<dyn Storage>,
+    storage: Arc<dyn VApiStorage>,
     unauthenticated_caller: ApiCaller,
     registration_caller: ApiCaller,
     jwt: JwtContext,
@@ -229,7 +229,7 @@ where
 {
     pub async fn new(
         public_url: String,
-        storage: Arc<dyn Storage>,
+        storage: Arc<dyn VApiStorage>,
         jwt: JwtConfig,
         keys: Vec<AsymmetricKey>,
     ) -> Result<Self, AppError> {
@@ -287,7 +287,7 @@ where
         }
     }
 
-    pub fn set_storage(&mut self, storage: Arc<dyn Storage>) {
+    pub fn set_storage(&mut self, storage: Arc<dyn VApiStorage>) {
         self.storage = storage;
     }
 
