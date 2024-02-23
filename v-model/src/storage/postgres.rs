@@ -45,7 +45,7 @@ use super::{
 pub type DbPool = Pool<ConnectionManager<PgConnection>>;
 
 pub struct PostgresStore {
-    pool: DbPool,
+    pub pool: DbPool,
 }
 
 #[derive(Debug)]
