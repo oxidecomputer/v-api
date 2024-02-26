@@ -19,7 +19,7 @@ use crate::{
 
 #[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
 #[diesel(table_name = api_user)]
-pub struct ApiUserModel<T: Ord> {
+pub struct ApiUserModel<T> {
     pub id: Uuid,
     pub permissions: Permissions<T>,
     pub created_at: DateTime<Utc>,
@@ -30,7 +30,7 @@ pub struct ApiUserModel<T: Ord> {
 
 #[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
 #[diesel(table_name = api_key)]
-pub struct ApiKeyModel<T: Ord> {
+pub struct ApiKeyModel<T> {
     pub id: Uuid,
     pub api_user_id: Uuid,
     pub key_signature: String,
@@ -117,7 +117,7 @@ pub struct OAuthClientRedirectUriModel {
 
 #[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
 #[diesel(table_name = access_groups)]
-pub struct AccessGroupModel<T: Ord> {
+pub struct AccessGroupModel<T> {
     pub id: Uuid,
     pub name: String,
     pub permissions: Permissions<T>,

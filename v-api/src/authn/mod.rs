@@ -21,11 +21,13 @@ use sha2::{Digest, Sha256};
 use std::{fmt::Debug, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
+use v_api_permissions::Permissions;
 
 use crate::{
     authn::key::RawApiKey,
     config::AsymmetricKey,
     context::ApiContext,
+    permissions::{PermissionStorage, VAppPermission},
     util::{cloud_kms_client, response::unauthorized},
 };
 
@@ -59,7 +61,13 @@ impl Debug for AuthToken {
 
 impl AuthToken {
     // Extract an AuthToken from a Dropshot request
-    pub async fn extract(rqctx: &RequestContext<impl ApiContext>) -> Result<AuthToken, AuthError> {
+    pub async fn extract<T>(
+        rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+    ) -> Result<AuthToken, AuthError>
+    where
+        T: VAppPermission,
+        Permissions<T>: PermissionStorage,
+    {
         // Ensure there is a bearer, without it there is nothing else to do
         let bearer = BearerAuth::from_request(rqctx).await.map_err(|err| {
             tracing::info!(?err, "Failed to extract bearer auth");

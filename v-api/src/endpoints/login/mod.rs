@@ -12,7 +12,7 @@ use serde::{
 use thiserror::Error;
 
 use crate::{
-    permissions::ApiPermission,
+    permissions::VPermission,
     util::response::{bad_request, internal_error},
 };
 
@@ -21,7 +21,7 @@ pub mod oauth;
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub enum LoginPermissions {
     All,
-    Specific(Vec<ApiPermission>),
+    Specific(Vec<VPermission>),
 }
 
 #[derive(Debug, Error)]

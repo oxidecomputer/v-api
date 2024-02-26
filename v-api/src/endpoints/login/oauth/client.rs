@@ -8,28 +8,37 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use uuid::Uuid;
+use v_api_permissions::Permissions;
 use v_model::{OAuthClient, OAuthClientRedirectUri, OAuthClientSecret};
 
 use crate::{
     authn::key::RawApiKey,
     context::{ApiContext, VContextWithCaller},
-    permissions::ApiPermission,
+    permissions::{PermissionStorage, VAppPermission, VPermission},
     secrets::OpenApiSecretString,
     util::response::to_internal_error,
 };
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn list_oauth_clients_op(
-    rqctx: &RequestContext<impl ApiContext>,
-) -> Result<HttpResponseOk<Vec<OAuthClient>>, HttpError> {
+pub async fn list_oauth_clients_op<T>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+) -> Result<HttpResponseOk<Vec<OAuthClient>>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+{
     let (ctx, caller) = rqctx.as_ctx().await?;
     Ok(HttpResponseOk(ctx.list_oauth_clients(&caller).await?))
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn create_oauth_client_op(
-    rqctx: &RequestContext<impl ApiContext>,
-) -> Result<HttpResponseCreated<OAuthClient>, HttpError> {
+pub async fn create_oauth_client_op<T>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+) -> Result<HttpResponseCreated<OAuthClient>, HttpError>
+where
+    T: VAppPermission + From<VPermission>,
+    Permissions<T>: PermissionStorage,
+{
     let (ctx, caller) = rqctx.as_ctx().await?;
 
     // Create the new client
@@ -40,9 +49,9 @@ pub async fn create_oauth_client_op(
         &caller,
         &caller.id,
         vec![
-            ApiPermission::GetOAuthClient(client.id),
-            ApiPermission::UpdateOAuthClient(client.id),
-            ApiPermission::DeleteOAuthClient(client.id),
+            VPermission::GetOAuthClient(client.id),
+            VPermission::UpdateOAuthClient(client.id),
+            VPermission::DeleteOAuthClient(client.id),
         ]
         .into(),
     )
@@ -57,10 +66,14 @@ pub struct GetOAuthClientPath {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn get_oauth_client_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn get_oauth_client_op<T>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<GetOAuthClientPath>,
-) -> Result<HttpResponseOk<OAuthClient>, HttpError> {
+) -> Result<HttpResponseOk<OAuthClient>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+{
     let (ctx, caller) = rqctx.as_ctx().await?;
     let path = path.into_inner();
     Ok(HttpResponseOk(
@@ -81,10 +94,14 @@ pub struct InitialOAuthClientSecretResponse {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn create_oauth_client_secret_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn create_oauth_client_secret_op<T>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<AddOAuthClientSecretPath>,
-) -> Result<HttpResponseOk<InitialOAuthClientSecretResponse>, HttpError> {
+) -> Result<HttpResponseOk<InitialOAuthClientSecretResponse>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+{
     let (ctx, caller) = rqctx.as_ctx().await?;
     let path = path.into_inner();
 
@@ -111,10 +128,14 @@ pub struct DeleteOAuthClientSecretPath {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn delete_oauth_client_secret_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn delete_oauth_client_secret_op<T>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<DeleteOAuthClientSecretPath>,
-) -> Result<HttpResponseOk<OAuthClientSecret>, HttpError> {
+) -> Result<HttpResponseOk<OAuthClientSecret>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+{
     let (ctx, caller) = rqctx.as_ctx().await?;
     let path = path.into_inner();
     Ok(HttpResponseOk(
@@ -134,11 +155,15 @@ pub struct AddOAuthClientRedirectBody {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn create_oauth_client_redirect_uri_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn create_oauth_client_redirect_uri_op<T>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<AddOAuthClientRedirectPath>,
     body: TypedBody<AddOAuthClientRedirectBody>,
-) -> Result<HttpResponseOk<OAuthClientRedirectUri>, HttpError> {
+) -> Result<HttpResponseOk<OAuthClientRedirectUri>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+{
     let (ctx, caller) = rqctx.as_ctx().await?;
     let path = path.into_inner();
     let body = body.into_inner();
@@ -155,10 +180,14 @@ pub struct DeleteOAuthClientRedirectPath {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn delete_oauth_client_redirect_uri_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn delete_oauth_client_redirect_uri_op<T>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<DeleteOAuthClientRedirectPath>,
-) -> Result<HttpResponseOk<OAuthClientRedirectUri>, HttpError> {
+) -> Result<HttpResponseOk<OAuthClientRedirectUri>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+{
     let (ctx, caller) = rqctx.as_ctx().await?;
     let path = path.into_inner();
     Ok(HttpResponseOk(

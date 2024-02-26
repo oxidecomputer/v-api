@@ -70,7 +70,7 @@ mod macros {
             pub async fn list_oauth_clients(
                 rqctx: RequestContext<$context_type>,
             ) -> Result<HttpResponseOk<Vec<OAuthClient>>, HttpError> {
-                list_oauth_clients_op(&rqctx).await
+                list_oauth_clients_op(rqctx).await
             }
     
             /// Create a new OAuth Client
@@ -81,7 +81,7 @@ mod macros {
             pub async fn create_oauth_client(
                 rqctx: RequestContext<$context_type>,
             ) -> Result<HttpResponseCreated<OAuthClient>, HttpError> {
-                create_oauth_client_op(&rqctx).await
+                create_oauth_client_op(rqctx).await
             }
     
             /// Get an new OAuth Client
@@ -93,7 +93,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<GetOAuthClientPath>,
             ) -> Result<HttpResponseOk<OAuthClient>, HttpError> {
-                get_oauth_client_op(&rqctx, path).await
+                get_oauth_client_op(rqctx, path).await
             }
     
             /// Add an OAuth client secret
@@ -105,7 +105,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<AddOAuthClientSecretPath>,
             ) -> Result<HttpResponseOk<InitialOAuthClientSecretResponse>, HttpError> {
-                create_oauth_client_secret_op(&rqctx, path).await
+                create_oauth_client_secret_op(rqctx, path).await
             }
     
             /// Delete an OAuth client secret
@@ -117,7 +117,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<DeleteOAuthClientSecretPath>,
             ) -> Result<HttpResponseOk<OAuthClientSecret>, HttpError> {
-                delete_oauth_client_secret_op(&rqctx, path).await
+                delete_oauth_client_secret_op(rqctx, path).await
             }
     
             /// Add an OAuth client redirect uri
@@ -130,7 +130,7 @@ mod macros {
                 path: Path<AddOAuthClientRedirectPath>,
                 body: TypedBody<AddOAuthClientRedirectBody>,
             ) -> Result<HttpResponseOk<OAuthClientRedirectUri>, HttpError> {
-                create_oauth_client_redirect_uri_op(&rqctx, path, body).await
+                create_oauth_client_redirect_uri_op(rqctx, path, body).await
             }
     
             /// Delete an OAuth client redirect uri
@@ -142,7 +142,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<DeleteOAuthClientRedirectPath>,
             ) -> Result<HttpResponseOk<OAuthClientRedirectUri>, HttpError> {
-                delete_oauth_client_redirect_uri_op(&rqctx, path).await
+                delete_oauth_client_redirect_uri_op(rqctx, path).await
             }
     
             // AUTHZ CODE
@@ -157,7 +157,7 @@ mod macros {
                 path: Path<OAuthProviderNameParam>,
                 query: Query<OAuthAuthzCodeQuery>,
             ) -> Result<Response<Body>, HttpError> {
-                authz_code_redirect_op(&rqctx, path, query).await
+                authz_code_redirect_op(rqctx, path, query).await
             }
     
             /// Handle return calls from a remote OAuth provider
@@ -170,7 +170,7 @@ mod macros {
                 path: Path<OAuthProviderNameParam>,
                 query: Query<OAuthAuthzCodeReturnQuery>,
             ) -> Result<HttpResponseTemporaryRedirect, HttpError> {
-                authz_code_callback_op(&rqctx, path, query).await
+                authz_code_callback_op(rqctx, path, query).await
             }
     
             /// Exchange an authorization code for an access token
@@ -184,7 +184,7 @@ mod macros {
                 path: Path<OAuthProviderNameParam>,
                 body: TypedBody<OAuthAuthzCodeExchangeBody>,
             ) -> Result<HttpResponseOk<OAuthAuthzCodeExchangeResponse>, HttpError> {
-                authz_code_exchange_op(&rqctx, path, body).await
+                authz_code_exchange_op(rqctx, path, body).await
             }
     
             // DEVICE CODE
@@ -198,7 +198,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<OAuthProviderNameParam>,
             ) -> Result<HttpResponseOk<OAuthProviderInfo>, HttpError> {
-                get_device_provider_op(&rqctx, path).await
+                get_device_provider_op(rqctx, path).await
             }
     
             #[endpoint {
@@ -211,7 +211,7 @@ mod macros {
                 path: Path<OAuthProviderNameParam>,
                 body: TypedBody<AccessTokenExchangeRequest>,
             ) -> Result<Response<Body>, HttpError> {
-                exchange_device_token_op(&rqctx, path, body).await
+                exchange_device_token_op(rqctx, path, body).await
             }
     
             // WELL KNOWN
@@ -223,7 +223,7 @@ mod macros {
             pub async fn openid_configuration(
                 rqctx: RequestContext<$context_type>,
             ) -> Result<HttpResponseOk<OpenIdConfiguration>, HttpError> {
-                openid_configuration_op(&rqctx).await
+                openid_configuration_op(rqctx).await
             }
     
             #[endpoint {
@@ -233,7 +233,7 @@ mod macros {
             pub async fn jwks_json(
                 rqctx: RequestContext<$context_type>,
             ) -> Result<HttpResponseOk<Jwks>, HttpError> {
-                jwks_json_op(&rqctx).await
+                jwks_json_op(rqctx).await
             }
     
             // API USER PROVIDER
@@ -248,7 +248,7 @@ mod macros {
                 path: Path<ApiUserProviderPath>,
                 body: TypedBody<ApiUserLinkRequestPayload>,
             ) -> Result<HttpResponseOk<ApiUserLinkRequestResponse>, HttpError> {
-                create_link_token_op(&rqctx, path, body).await
+                create_link_token_op(rqctx, path, body).await
             }
     
             // API USER
@@ -261,7 +261,7 @@ mod macros {
             pub async fn get_self(
                 rqctx: RequestContext<$context_type>,
             ) -> Result<HttpResponseOk<GetUserResponse>, HttpError> {
-                get_self_op(&rqctx).await
+                get_self_op(rqctx).await
             }
     
             /// Get user information for a given user id
@@ -273,7 +273,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<ApiUserPath>,
             ) -> Result<HttpResponseOk<GetUserResponse>, HttpError> {
-                get_api_user_op(&rqctx, path).await
+                get_api_user_op(rqctx, path).await
             }
     
             /// Create a new user with a given set of permissions
@@ -285,7 +285,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 body: TypedBody<ApiUserUpdateParams>,
             ) -> Result<HttpResponseCreated<UserResponse>, HttpError> {
-                create_api_user_op(&rqctx, body).await
+                create_api_user_op(rqctx, body).await
             }
     
             /// Update the permissions assigned to a given user
@@ -298,7 +298,7 @@ mod macros {
                 path: Path<ApiUserPath>,
                 body: TypedBody<ApiUserUpdateParams>,
             ) -> Result<HttpResponseOk<UserResponse>, HttpError> {
-                update_api_user_op(&rqctx, path.into_inner(), body.into_inner()).await
+                update_api_user_op(rqctx, path.into_inner(), body.into_inner()).await
             }
     
             /// List the active and expired API tokens for a given user
@@ -310,7 +310,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<ApiUserPath>,
             ) -> Result<HttpResponseOk<Vec<ApiKeyResponse>>, HttpError> {
-                list_api_user_tokens_op(&rqctx, path.into_inner()).await
+                list_api_user_tokens_op(rqctx, path.into_inner()).await
             }
     
             // Create a new API token for a given user with a specific set of permissions and expiration. This
@@ -324,7 +324,7 @@ mod macros {
                 path: Path<ApiUserPath>,
                 body: TypedBody<ApiKeyCreateParams>,
             ) -> Result<HttpResponseCreated<InitialApiKeyResponse>, HttpError> {
-                create_api_user_token_op(&rqctx, path.into_inner(), body.into_inner()).await
+                create_api_user_token_op(rqctx, path.into_inner(), body.into_inner()).await
             }
     
             // Get details for a specific API token
@@ -336,7 +336,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<ApiUserTokenPath>,
             ) -> Result<HttpResponseOk<ApiKeyResponse>, HttpError> {
-                get_api_user_token_op(&rqctx, path.into_inner()).await
+                get_api_user_token_op(rqctx, path.into_inner()).await
             }
     
             // Revoke a specific API token so it can no longer be used
@@ -348,7 +348,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<ApiUserTokenPath>,
             ) -> Result<HttpResponseOk<ApiKeyResponse>, HttpError> {
-                delete_api_user_token_op(&rqctx, path.into_inner()).await
+                delete_api_user_token_op(rqctx, path.into_inner()).await
             }
     
             #[endpoint {
@@ -360,7 +360,7 @@ mod macros {
                 path: Path<ApiUserPath>,
                 body: TypedBody<AddGroupBody>,
             ) -> Result<HttpResponseOk<UserResponse>, HttpError> {
-                add_api_user_to_group_op(&rqctx, path.into_inner(), body.into_inner()).await
+                add_api_user_to_group_op(rqctx, path.into_inner(), body.into_inner()).await
             }
     
             #[endpoint {
@@ -371,7 +371,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<ApiUserRemoveGroupPath>,
             ) -> Result<HttpResponseOk<UserResponse>, HttpError> {
-                remove_api_user_from_group_op(&rqctx, path.into_inner()).await
+                remove_api_user_from_group_op(rqctx, path.into_inner()).await
             }
     
             /// Link an existing login provider to this user
@@ -384,7 +384,7 @@ mod macros {
                 path: Path<ApiUserPath>,
                 body: TypedBody<ApiUserProviderLinkPayload>,
             ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-                link_provider_op(&rqctx, path.into_inner(), body.into_inner()).await
+                link_provider_op(rqctx, path.into_inner(), body.into_inner()).await
             }
     
             // GROUPS
@@ -396,7 +396,7 @@ mod macros {
             pub async fn get_groups(
                 rqctx: RequestContext<$context_type>,
             ) -> Result<HttpResponseOk<Vec<GroupResponse>>, HttpError> {
-                get_groups_op(&rqctx).await
+                get_groups_op(rqctx).await
             }
     
             #[endpoint {
@@ -407,7 +407,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 body: TypedBody<AccessGroupUpdateParams>,
             ) -> Result<HttpResponseCreated<GroupResponse>, HttpError> {
-                create_group_op(&rqctx, body.into_inner()).await
+                create_group_op(rqctx, body.into_inner()).await
             }
     
             #[endpoint {
@@ -419,7 +419,7 @@ mod macros {
                 path: Path<AccessGroupPath>,
                 body: TypedBody<AccessGroupUpdateParams>,
             ) -> Result<HttpResponseOk<GroupResponse>, HttpError> {
-                update_group_op(&rqctx, path.into_inner(), body.into_inner()).await
+                update_group_op(rqctx, path.into_inner(), body.into_inner()).await
             }
     
             #[endpoint {
@@ -430,7 +430,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<AccessGroupPath>,
             ) -> Result<HttpResponseOk<GroupResponse>, HttpError> {
-                delete_group_op(&rqctx, path.into_inner()).await
+                delete_group_op(rqctx, path.into_inner()).await
             }
     
             // MAPPERS
@@ -443,7 +443,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 query: Query<ListMappersQuery>,
             ) -> Result<HttpResponseOk<Vec<Mapper>>, HttpError> {
-                get_mappers_op(&rqctx, query.into_inner()).await
+                get_mappers_op(rqctx, query.into_inner()).await
             }
     
             #[endpoint {
@@ -454,7 +454,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 body: TypedBody<CreateMapper>,
             ) -> Result<HttpResponseCreated<Mapper>, HttpError> {
-                create_mapper_op(&rqctx, body.into_inner()).await
+                create_mapper_op(rqctx, body.into_inner()).await
             }
     
             #[endpoint {
@@ -465,7 +465,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<MapperPath>,
             ) -> Result<HttpResponseOk<Mapper>, HttpError> {
-                delete_mapper_op(&rqctx, path.into_inner()).await
+                delete_mapper_op(rqctx, path.into_inner()).await
             }
         };
     }

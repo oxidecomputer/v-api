@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::BTreeSet, fmt::Debug, hash::Hash};
+use std::{collections::BTreeSet, fmt::Debug};
 
 use diesel::{
     backend::Backend,
@@ -17,26 +17,16 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use uuid::Uuid;
 
 pub trait Permission:
-    Clone + Debug + Ord + Eq + PartialEq + Hash + Serialize + DeserializeOwned + Send + Sync + 'static
+    Clone + Debug + Serialize + DeserializeOwned + PartialEq + Send + Sync + 'static
 {
 }
 impl<T> Permission for T where
-    T: Clone
-        + Debug
-        + Ord
-        + Eq
-        + PartialEq
-        + Hash
-        + Serialize
-        + DeserializeOwned
-        + Send
-        + Sync
-        + 'static
+    T: Clone + Debug + Serialize + DeserializeOwned + PartialEq + Send + Sync + 'static
 {
 }
 
-#[derive(Clone, Debug)]
-pub struct Caller<T: Permission> {
+#[derive(Debug, Clone)]
+pub struct Caller<T> {
     pub id: Uuid,
     pub permissions: Permissions<T>,
 }
@@ -66,14 +56,11 @@ where
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, FromSqlRow, AsExpression, JsonSchema)]
 #[diesel(sql_type = Jsonb)]
-pub struct Permissions<T: Ord>(BTreeSet<T>);
+pub struct Permissions<T>(Vec<T>);
 
-impl<T> Default for Permissions<T>
-where
-    T: Permission,
-{
+impl<T> Default for Permissions<T> {
     fn default() -> Self {
-        Self::new()
+        Self(Vec::new())
     }
 }
 
@@ -82,7 +69,7 @@ where
     T: Permission,
 {
     pub fn new() -> Self {
-        Self(BTreeSet::new())
+        Self(Vec::new())
     }
 
     pub fn all(&self, permissions: &[&T]) -> bool {
@@ -100,16 +87,23 @@ where
     }
 
     pub fn intersect(&self, other: &Permissions<T>) -> Permissions<T> {
-        self.0
-            .intersection(&other.0)
-            .into_iter()
-            .map(|p| p.clone())
-            .collect::<BTreeSet<_>>()
-            .into()
+        let mut new_permissions = vec![];
+        for perm in &self.0 {
+            if other.iter().any(|other_perm| perm == other_perm) {
+                new_permissions.push(perm.clone());
+            }
+        }
+
+        Permissions(new_permissions)
     }
 
     pub fn insert(&mut self, item: T) -> bool {
-        self.0.insert(item)
+        if !self.can(&item) {
+            self.0.push(item);
+            true
+        } else {
+            false
+        }
     }
 
     pub fn append(&mut self, other: &mut Self) {
@@ -117,7 +111,16 @@ where
     }
 
     pub fn remove(&mut self, item: &T) -> bool {
-        self.0.remove(item)
+        let mut removed = false;
+        self.0.retain(|perm| {
+            if perm == item {
+                removed = true;
+            }
+
+            perm == item
+        });
+
+        removed
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &T> {
@@ -142,16 +145,17 @@ where
     T: Permission,
 {
     fn from(value: BTreeSet<T>) -> Self {
-        Self(value)
+        Self(value.into_iter().collect::<Vec<_>>())
     }
 }
 
-impl<T> From<Vec<T>> for Permissions<T>
+impl<T, U> From<Vec<T>> for Permissions<U>
 where
     T: Permission,
+    U: Permission + From<T>,
 {
     fn from(value: Vec<T>) -> Self {
-        Self::from_iter(value)
+        Self::from_iter(value.into_iter().map(|v| v.into()))
     }
 }
 
@@ -160,15 +164,15 @@ where
     T: Permission,
 {
     fn from_iter<Iter: IntoIterator<Item = T>>(iter: Iter) -> Self {
-        let mut set = BTreeSet::new();
-        set.extend::<Iter>(iter);
-        Self(set)
+        let mut v = Vec::new();
+        v.extend::<Iter>(iter);
+        Self(v)
     }
 }
 
 impl<T> ToSql<Jsonb, Pg> for Permissions<T>
 where
-    T: Serialize + Debug + Ord,
+    T: Serialize + Debug,
 {
     fn to_sql(&self, out: &mut Output<Pg>) -> serialize::Result {
         let value = serde_json::to_value(self)?;
@@ -178,7 +182,7 @@ where
 
 impl<T> FromSql<Jsonb, Pg> for Permissions<T>
 where
-    T: DeserializeOwned + Debug + Ord,
+    T: DeserializeOwned + Debug,
 {
     fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> deserialize::Result<Self> {
         let value = <serde_json::Value as FromSql<Jsonb, Pg>>::from_sql(bytes)?;

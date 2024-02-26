@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tap::TapFallible;
 use tracing::instrument;
 use uuid::Uuid;
-use v_api_permissions::Permissions;
+use v_api_permissions::{Permission, Permissions};
 use v_model::{
     storage::{ApiUserProviderFilter, ListPagination},
     ApiUser, ApiUserProvider, NewApiKey, NewApiUser,
@@ -25,22 +25,23 @@ use crate::{
     authn::key::RawApiKey,
     context::ApiContext,
     error::ApiError,
-    permissions::ApiPermissionResponse,
+    permissions::{PermissionStorage, VAppPermission},
     secrets::OpenApiSecretString,
     util::response::{bad_request, not_found, to_internal_error, unauthorized},
-    ApiPermissions, User,
 };
 
-pub type UserResponse = ApiUser<ApiPermissionResponse>;
-
-fn into_user_response(user: User) -> UserResponse {
+fn into_user_response<T, U>(user: ApiUser<T>) -> ApiUser<U>
+where
+    T: Permission,
+    U: Permission + From<T>,
+{
     ApiUser {
         id: user.id,
         permissions: user
             .permissions
             .into_iter()
             .map(|p| p.into())
-            .collect::<Permissions<ApiPermissionResponse>>(),
+            .collect::<Permissions<U>>(),
         groups: user.groups,
         created_at: user.created_at,
         updated_at: user.updated_at,
@@ -49,24 +50,30 @@ fn into_user_response(user: User) -> UserResponse {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct GetUserResponse {
-    info: ApiUser<ApiPermissionResponse>,
+pub struct GetUserResponse<T> {
+    info: ApiUser<T>,
     providers: Vec<ApiUserProvider>,
 }
 
-impl GetUserResponse {
-    pub fn new(user: User, providers: Vec<ApiUserProvider>) -> Self {
+impl<T> GetUserResponse<T> where T: Permission {
+    pub fn new<U>(user: ApiUser<U>, providers: Vec<ApiUserProvider>) -> Self where T: From<U>, U: Permission {
+        let info = into_user_response(user);
         Self {
-            info: into_user_response(user),
+            info,
             providers,
         }
     }
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn get_self_op(
-    rqctx: &RequestContext<impl ApiContext>,
-) -> Result<HttpResponseOk<GetUserResponse>, HttpError> {
+pub async fn get_self_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+) -> Result<HttpResponseOk<GetUserResponse<U>>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+    U: VAppPermission + From<T> + JsonSchema,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
@@ -83,10 +90,15 @@ pub async fn get_self_op(
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn get_api_user_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn get_api_user_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<ApiUserPath>,
-) -> Result<HttpResponseOk<GetUserResponse>, HttpError> {
+) -> Result<HttpResponseOk<GetUserResponse<U>>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+    U: VAppPermission + From<T> + JsonSchema,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
@@ -104,16 +116,21 @@ pub async fn get_api_user_op(
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
-pub struct ApiUserUpdateParams {
-    permissions: ApiPermissions,
+pub struct ApiUserUpdateParams<T> {
+    permissions: Permissions<T>,
     groups: BTreeSet<Uuid>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn create_api_user_op(
-    rqctx: &RequestContext<impl ApiContext>,
-    body: TypedBody<ApiUserUpdateParams>,
-) -> Result<HttpResponseCreated<UserResponse>, HttpError> {
+pub async fn create_api_user_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+    body: TypedBody<ApiUserUpdateParams<T>>,
+) -> Result<HttpResponseCreated<ApiUser<U>>, HttpError>
+where
+    T: VAppPermission + JsonSchema,
+    Permissions<T>: PermissionStorage,
+    U: VAppPermission + From<T> + JsonSchema,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
@@ -131,11 +148,16 @@ pub struct ApiUserPath {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn update_api_user_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn update_api_user_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: ApiUserPath,
-    body: ApiUserUpdateParams,
-) -> Result<HttpResponseOk<UserResponse>, HttpError> {
+    body: ApiUserUpdateParams<T>,
+) -> Result<HttpResponseOk<ApiUser<U>>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+    U: VAppPermission + From<T> + JsonSchema,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
@@ -154,10 +176,15 @@ pub async fn update_api_user_op(
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn list_api_user_tokens_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn list_api_user_tokens_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: ApiUserPath,
-) -> Result<HttpResponseOk<Vec<ApiKeyResponse>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<ApiKeyResponse<U>>>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+    U: VAppPermission + From<T> + JsonSchema,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
@@ -182,27 +209,32 @@ pub async fn list_api_user_tokens_op(
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct ApiKeyCreateParams {
-    permissions: Option<Permissions<ApiPermissionResponse>>,
+pub struct ApiKeyCreateParams<T> {
+    permissions: Option<Permissions<T>>,
     expires_at: DateTime<Utc>,
 }
 
 #[partial(ApiKeyResponse)]
 #[derive(Debug, Serialize, JsonSchema)]
-pub struct InitialApiKeyResponse {
+pub struct InitialApiKeyResponse<T> {
     pub id: Uuid,
     #[partial(ApiKeyResponse(skip))]
     pub key: OpenApiSecretString,
-    pub permissions: Option<Permissions<ApiPermissionResponse>>,
+    pub permissions: Option<Permissions<T>>,
     pub created_at: DateTime<Utc>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn create_api_user_token_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn create_api_user_token_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: ApiUserPath,
-    body: ApiKeyCreateParams,
-) -> Result<HttpResponseCreated<InitialApiKeyResponse>, HttpError> {
+    body: ApiKeyCreateParams<T>,
+) -> Result<HttpResponseCreated<InitialApiKeyResponse<U>>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+    U: VAppPermission + From<T> + JsonSchema,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
@@ -247,10 +279,15 @@ pub struct ApiUserTokenPath {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn get_api_user_token_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn get_api_user_token_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: ApiUserTokenPath,
-) -> Result<HttpResponseOk<ApiKeyResponse>, HttpError> {
+) -> Result<HttpResponseOk<ApiKeyResponse<U>>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+    U: VAppPermission + From<T> + JsonSchema,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
@@ -266,10 +303,15 @@ pub async fn get_api_user_token_op(
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn delete_api_user_token_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn delete_api_user_token_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: ApiUserTokenPath,
-) -> Result<HttpResponseOk<ApiKeyResponse>, HttpError> {
+) -> Result<HttpResponseOk<ApiKeyResponse<U>>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+    U: VAppPermission + From<T> + JsonSchema,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
@@ -290,11 +332,16 @@ pub struct AddGroupBody {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn add_api_user_to_group_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn add_api_user_to_group_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: ApiUserPath,
     body: AddGroupBody,
-) -> Result<HttpResponseOk<UserResponse>, HttpError> {
+) -> Result<HttpResponseOk<ApiUser<U>>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+    U: VAppPermission + From<T> + JsonSchema,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
@@ -313,10 +360,15 @@ pub struct ApiUserRemoveGroupPath {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn remove_api_user_from_group_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn remove_api_user_from_group_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: ApiUserRemoveGroupPath,
-) -> Result<HttpResponseOk<UserResponse>, HttpError> {
+) -> Result<HttpResponseOk<ApiUser<U>>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+    U: VAppPermission + From<T> + JsonSchema,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
@@ -336,11 +388,15 @@ pub struct ApiUserProviderLinkPayload {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn link_provider_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn link_provider_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: ApiUserPath,
     body: ApiUserProviderLinkPayload,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseUpdatedNoContent, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
@@ -391,25 +447,29 @@ pub async fn link_provider_op(
     }
 }
 
-fn into_permissions(
-    permissions: Option<Permissions<ApiPermissionResponse>>,
-) -> Option<ApiPermissions> {
+fn into_permissions<T, U>(permissions: Option<Permissions<T>>) -> Option<Permissions<U>>
+where
+    T: Permission,
+    U: Permission + From<T>,
+{
     permissions.map(|permissions| {
         permissions
             .into_iter()
             .map(|p| p.into())
-            .collect::<ApiPermissions>()
+            .collect::<Permissions<U>>()
     })
 }
 
-fn into_permissions_response(
-    permissions: Option<ApiPermissions>,
-) -> Option<Permissions<ApiPermissionResponse>> {
+fn into_permissions_response<T, U>(permissions: Option<Permissions<T>>) -> Option<Permissions<U>>
+where
+    T: Permission,
+    U: Permission + From<T>,
+{
     permissions.map(|permissions| {
         permissions
             .into_iter()
             .map(|p| p.into())
-            .collect::<Permissions<ApiPermissionResponse>>()
+            .collect::<Permissions<U>>()
     })
 }
 

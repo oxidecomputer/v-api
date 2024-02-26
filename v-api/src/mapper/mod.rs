@@ -6,15 +6,17 @@ use std::collections::BTreeSet;
 
 use async_trait::async_trait;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tap::TapFallible;
 use uuid::Uuid;
-use v_api_permissions::Permission;
+use v_api_permissions::{Permission, Permissions};
 use v_model::{storage::StoreError, Mapper};
 
 use crate::{
-    context::VContext, endpoints::login::UserInfo, permissions::ApiPermission,
-    util::response::ResourceResult, ApiPermissions,
+    context::VContext,
+    endpoints::login::UserInfo,
+    permissions::{AsScope, PermissionStorage, VPermission},
+    util::response::ResourceResult,
 };
 
 use self::{
@@ -30,13 +32,14 @@ pub mod github_username;
 #[async_trait]
 pub trait MapperRule<T>: Send + Sync
 where
-    T: Permission + From<ApiPermission>,
+    T: Permission + From<VPermission> + AsScope,
+    Permissions<T>: PermissionStorage,
 {
     async fn permissions_for(
         &self,
         ctx: &VContext<T>,
         user: &UserInfo,
-    ) -> Result<ApiPermissions, StoreError>;
+    ) -> Result<Permissions<T>, StoreError>;
     async fn groups_for(
         &self,
         ctx: &VContext<T>,
@@ -45,19 +48,22 @@ where
 }
 
 #[derive(Debug, Serialize)]
-pub struct Mapping {
+pub struct Mapping<T> {
     pub id: Uuid,
     pub name: String,
-    pub rule: MappingRules,
+    pub rule: MappingRules<T>,
     pub activations: Option<i32>,
     pub max_activations: Option<i32>,
 }
 
-impl TryFrom<Mapper> for Mapping {
+impl<T> TryFrom<Mapper> for Mapping<T>
+where
+    T: DeserializeOwned,
+{
     type Error = serde_json::Error;
 
     fn try_from(value: Mapper) -> Result<Self, Self::Error> {
-        serde_json::from_value::<MappingRules>(value.rule)
+        serde_json::from_value::<MappingRules<T>>(value.rule)
             .tap_err(|err| {
                 tracing::error!(?err, "Failed to translate stored rule to mapper");
             })
@@ -73,24 +79,25 @@ impl TryFrom<Mapper> for Mapping {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "rule", rename_all = "snake_case")]
-pub enum MappingRules {
-    Default(DefaultMapper),
-    EmailAddress(EmailAddressMapper),
-    EmailDomain(EmailDomainMapper),
+pub enum MappingRules<T> {
+    Default(DefaultMapper<T>),
+    EmailAddress(EmailAddressMapper<T>),
+    EmailDomain(EmailDomainMapper<T>),
     #[serde(rename = "github_username")]
-    GitHubUsername(GitHubUsernameMapper),
+    GitHubUsername(GitHubUsernameMapper<T>),
 }
 
 #[async_trait]
-impl<T> MapperRule<T> for MappingRules
+impl<T> MapperRule<T> for MappingRules<T>
 where
-    T: Permission + From<ApiPermission>,
+    T: Permission + From<VPermission> + AsScope,
+    Permissions<T>: PermissionStorage,
 {
     async fn permissions_for(
         &self,
         ctx: &VContext<T>,
         user: &UserInfo,
-    ) -> Result<ApiPermissions, StoreError> {
+    ) -> Result<Permissions<T>, StoreError> {
         match self {
             Self::Default(rule) => rule.permissions_for(ctx, user).await,
             Self::EmailAddress(rule) => rule.permissions_for(ctx, user).await,

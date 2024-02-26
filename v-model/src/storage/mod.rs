@@ -12,7 +12,6 @@ pub use diesel::result::Error as DbError;
 use mockall::automock;
 use thiserror::Error;
 use uuid::Uuid;
-use v_api_permissions::Permission;
 
 use crate::{
     schema_ext::LoginAttemptState, AccessGroup, AccessToken, ApiKey, ApiUser, ApiUserProvider,
@@ -79,7 +78,7 @@ pub struct ApiUserFilter {
 
 #[cfg_attr(feature = "mock", automock)]
 #[async_trait]
-pub trait ApiUserStore<T: Permission + Ord> {
+pub trait ApiUserStore<T: Send + Sync> {
     async fn get(&self, id: &Uuid, deleted: bool) -> Result<Option<ApiUser<T>>, StoreError>;
     async fn list(
         &self,
@@ -101,7 +100,7 @@ pub struct ApiKeyFilter {
 
 #[cfg_attr(feature = "mock", automock)]
 #[async_trait]
-pub trait ApiKeyStore<T: Permission + Ord> {
+pub trait ApiKeyStore<T: Send + Sync> {
     async fn get(&self, id: &Uuid, deleted: bool) -> Result<Option<ApiKey<T>>, StoreError>;
     async fn list(
         &self,
@@ -224,7 +223,7 @@ pub struct AccessGroupFilter {
 
 #[cfg_attr(feature = "mock", automock)]
 #[async_trait]
-pub trait AccessGroupStore<T: Permission + Ord> {
+pub trait AccessGroupStore<T: Send + Sync> {
     async fn get(&self, id: &Uuid, deleted: bool) -> Result<Option<AccessGroup<T>>, StoreError>;
     async fn list(
         &self,

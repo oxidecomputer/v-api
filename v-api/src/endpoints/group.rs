@@ -2,19 +2,26 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::fmt::Debug;
+
 use dropshot::{HttpError, HttpResponseCreated, HttpResponseOk, RequestContext};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tracing::instrument;
 use uuid::Uuid;
-use v_api_permissions::Permissions;
+use v_api_permissions::{Permission, Permissions};
 use v_model::{AccessGroup, NewAccessGroup};
 
-use crate::{context::ApiContext, permissions::ApiPermissionResponse, ApiPermissions, Group};
+use crate::{
+    context::ApiContext,
+    permissions::{PermissionStorage, VAppPermission},
+};
 
-pub type GroupResponse = AccessGroup<ApiPermissionResponse>;
-
-fn into_group_response(group: Group) -> GroupResponse {
+fn into_group_response<T, U>(group: AccessGroup<T>) -> AccessGroup<U>
+where
+    T: Permission,
+    U: Permission + From<T>,
+{
     AccessGroup {
         id: group.id,
         name: group.name,
@@ -22,7 +29,7 @@ fn into_group_response(group: Group) -> GroupResponse {
             .permissions
             .into_iter()
             .map(|p| p.into())
-            .collect::<Permissions<ApiPermissionResponse>>(),
+            .collect::<Permissions<U>>(),
         created_at: group.created_at,
         updated_at: group.updated_at,
         deleted_at: group.deleted_at,
@@ -30,9 +37,14 @@ fn into_group_response(group: Group) -> GroupResponse {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn get_groups_op(
-    rqctx: &RequestContext<impl ApiContext>,
-) -> Result<HttpResponseOk<Vec<GroupResponse>>, HttpError> {
+pub async fn get_groups_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+) -> Result<HttpResponseOk<Vec<AccessGroup<U>>>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+    U: From<T> + Permission + JsonSchema,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
@@ -47,16 +59,21 @@ pub async fn get_groups_op(
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
-pub struct AccessGroupUpdateParams {
+pub struct AccessGroupUpdateParams<T> {
     name: String,
-    permissions: ApiPermissions,
+    permissions: Permissions<T>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn create_group_op(
-    rqctx: &RequestContext<impl ApiContext>,
-    body: AccessGroupUpdateParams,
-) -> Result<HttpResponseCreated<GroupResponse>, HttpError> {
+pub async fn create_group_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+    body: AccessGroupUpdateParams<T>,
+) -> Result<HttpResponseCreated<AccessGroup<U>>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+    U: From<T> + Permission + JsonSchema,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
@@ -81,11 +98,16 @@ pub struct AccessGroupPath {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn update_group_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn update_group_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: AccessGroupPath,
-    body: AccessGroupUpdateParams,
-) -> Result<HttpResponseOk<GroupResponse>, HttpError> {
+    body: AccessGroupUpdateParams<T>,
+) -> Result<HttpResponseOk<AccessGroup<U>>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+    U: From<T> + Permission + JsonSchema,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
@@ -105,10 +127,15 @@ pub async fn update_group_op(
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn delete_group_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn delete_group_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: AccessGroupPath,
-) -> Result<HttpResponseOk<GroupResponse>, HttpError> {
+) -> Result<HttpResponseOk<AccessGroup<U>>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+    U: From<T> + Permission + JsonSchema,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;

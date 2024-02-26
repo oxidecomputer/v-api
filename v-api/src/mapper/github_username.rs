@@ -8,35 +8,38 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use v_api_permissions::Permission;
+use v_api_permissions::{Permission, Permissions};
 use v_model::storage::StoreError;
 
 use crate::{
-    context::VContext, endpoints::login::UserInfo, permissions::ApiPermission,
-    util::response::ResourceResult, ApiPermissions,
+    context::VContext,
+    endpoints::login::UserInfo,
+    permissions::{AsScope, PermissionStorage, VPermission},
+    util::response::ResourceResult,
 };
 
 use super::MapperRule;
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct GitHubUsernameMapper {
+pub struct GitHubUsernameMapper<T> {
     github_username: String,
     #[serde(default)]
-    permissions: ApiPermissions,
+    permissions: Permissions<T>,
     #[serde(default)]
     groups: Vec<String>,
 }
 
 #[async_trait]
-impl<T> MapperRule<T> for GitHubUsernameMapper
+impl<T> MapperRule<T> for GitHubUsernameMapper<T>
 where
-    T: Permission + From<ApiPermission>,
+    T: Permission + From<VPermission> + AsScope,
+    Permissions<T>: PermissionStorage,
 {
     async fn permissions_for(
         &self,
         _ctx: &VContext<T>,
         user: &UserInfo,
-    ) -> Result<ApiPermissions, StoreError> {
+    ) -> Result<Permissions<T>, StoreError> {
         if user
             .github_username
             .as_ref()
@@ -45,7 +48,7 @@ where
         {
             Ok(self.permissions.clone())
         } else {
-            Ok(ApiPermissions::new())
+            Ok(Permissions::new())
         }
     }
 

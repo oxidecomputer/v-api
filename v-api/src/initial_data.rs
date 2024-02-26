@@ -8,31 +8,33 @@ use serde::Deserialize;
 use thiserror::Error;
 use tracing::Instrument;
 use uuid::Uuid;
-use v_api_permissions::Permission;
+use v_api_permissions::{Permission, Permissions};
 use v_model::{storage::StoreError, NewAccessGroup, NewMapper};
 
 use crate::{
-    context::VContext, mapper::MappingRules, permissions::ApiPermission,
-    util::response::ResourceError, ApiPermissions,
+    context::VContext,
+    mapper::MappingRules,
+    permissions::{AsScope, PermissionStorage, VAppPermission, VPermission},
+    util::response::ResourceError,
 };
 
 #[derive(Debug, Deserialize)]
-pub struct InitialData {
+pub struct InitialData<T> {
     pub groups: Vec<InitialGroup>,
-    pub mappers: Vec<InitialMapper>,
+    pub mappers: Vec<InitialMapper<T>>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct InitialGroup {
     pub name: String,
-    pub permissions: ApiPermissions,
+    pub permissions: VPermission,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct InitialMapper {
+pub struct InitialMapper<T> {
     pub name: String,
     #[serde(flatten)]
-    pub rule: MappingRules,
+    pub rule: MappingRules<T>,
     pub max_activations: Option<u32>,
 }
 
@@ -48,7 +50,11 @@ pub enum InitError {
     Storage(#[from] StoreError),
 }
 
-impl InitialData {
+impl<T> InitialData<T>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+{
     pub fn new(config_sources: Option<Vec<String>>) -> Result<Self, InitError> {
         let mut config =
             Config::builder().add_source(File::with_name("mappers.toml").required(false));
@@ -63,59 +69,56 @@ impl InitialData {
             .try_deserialize()?)
     }
 
-    pub async fn initialize<T>(self, ctx: &VContext<T>) -> Result<(), InitError>
-    where
-        T: Permission + From<ApiPermission>,
-    {
-        let existing_groups = ctx.get_groups(&ctx.builtin_registration_user()).await?;
+    pub async fn initialize(self, ctx: &VContext<T>) -> Result<(), InitError> {
+        // let existing_groups = ctx.get_groups(&ctx.builtin_registration_user()).await?;
 
-        for group in self.groups {
-            let span = tracing::info_span!("Initializing group", group = ?group);
+        // for group in self.groups {
+        //     let span = tracing::info_span!("Initializing group", group = ?group);
 
-            async {
-                let id = existing_groups
-                    .iter()
-                    .find(|g| g.name == group.name)
-                    .map(|g| g.id)
-                    .unwrap_or(Uuid::new_v4());
+        //     async {
+        //         let id = existing_groups
+        //             .iter()
+        //             .find(|g| g.name == group.name)
+        //             .map(|g| g.id)
+        //             .unwrap_or(Uuid::new_v4());
 
-                ctx.create_group(
-                    &ctx.builtin_registration_user(),
-                    NewAccessGroup {
-                        id,
-                        name: group.name,
-                        permissions: group.permissions,
-                    },
-                )
-                .await
-                .map(|_| ())
-                .or_else(handle_unique_violation_error)
-            }
-            .instrument(span)
-            .await?
-        }
+        //         ctx.create_group(
+        //             &ctx.builtin_registration_user(),
+        //             NewAccessGroup {
+        //                 id,
+        //                 name: group.name,
+        //                 permissions: group.permissions,
+        //             },
+        //         )
+        //         .await
+        //         .map(|_| ())
+        //         .or_else(handle_unique_violation_error)
+        //     }
+        //     .instrument(span)
+        //     .await?
+        // }
 
-        for mapper in self.mappers {
-            let span = tracing::info_span!("Initializing mapper", mapper = ?mapper);
-            async {
-                let new_mapper = NewMapper {
-                    id: Uuid::new_v4(),
-                    name: mapper.name,
-                    rule: serde_json::to_value(&mapper.rule)?,
-                    activations: None,
-                    max_activations: mapper.max_activations.map(|i| i as i32),
-                };
+        // for mapper in self.mappers {
+        //     let span = tracing::info_span!("Initializing mapper", mapper = ?mapper);
+        //     async {
+        //         let new_mapper = NewMapper {
+        //             id: Uuid::new_v4(),
+        //             name: mapper.name,
+        //             rule: serde_json::to_value(&mapper.rule)?,
+        //             activations: None,
+        //             max_activations: mapper.max_activations.map(|i| i as i32),
+        //         };
 
-                ctx.add_mapper(&ctx.builtin_registration_user(), &new_mapper)
-                    .await
-                    .map(|_| ())
-                    .or_else(handle_unique_violation_error)?;
+        //         ctx.add_mapper(&ctx.builtin_registration_user(), &new_mapper)
+        //             .await
+        //             .map(|_| ())
+        //             .or_else(handle_unique_violation_error)?;
 
-                Ok::<(), InitError>(())
-            }
-            .instrument(span)
-            .await?;
-        }
+        //         Ok::<(), InitError>(())
+        //     }
+        //     .instrument(span)
+        //     .await?;
+        // }
 
         Ok(())
     }

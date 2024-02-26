@@ -7,8 +7,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use uuid::Uuid;
+use v_api_permissions::Permissions;
 
-use crate::{context::ApiContext, secrets::OpenApiSecretString, util::response::forbidden};
+use crate::{
+    context::ApiContext,
+    permissions::{PermissionStorage, VAppPermission},
+    secrets::OpenApiSecretString,
+    util::response::forbidden,
+};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ApiUserProviderPath {
@@ -27,11 +33,15 @@ pub struct ApiUserLinkRequestResponse {
 
 /// Create a new link token for linking this provider to a different api user
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn create_link_token_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn create_link_token_op<T>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<ApiUserProviderPath>,
     body: TypedBody<ApiUserLinkRequestPayload>,
-) -> Result<HttpResponseOk<ApiUserLinkRequestResponse>, HttpError> {
+) -> Result<HttpResponseOk<ApiUserLinkRequestResponse>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;

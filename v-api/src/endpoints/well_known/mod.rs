@@ -7,8 +7,12 @@ use jsonwebtoken::jwk::{AlgorithmParameters, JwkSet, PublicKeyUse};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
+use v_api_permissions::Permissions;
 
-use crate::context::ApiContext;
+use crate::{
+    context::ApiContext,
+    permissions::{PermissionStorage, VAppPermission},
+};
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct OpenIdConfiguration {
@@ -16,11 +20,15 @@ pub struct OpenIdConfiguration {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn openid_configuration_op(
-    rqctx: &RequestContext<impl ApiContext>,
-) -> Result<HttpResponseOk<OpenIdConfiguration>, HttpError> {
+pub async fn openid_configuration_op<T>(
+    rqctx: RequestContext<impl ApiContext<AppPermissions = T>>,
+) -> Result<HttpResponseOk<OpenIdConfiguration>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+{
     Ok(HttpResponseOk(OpenIdConfiguration {
-        jwks_uri: format!("{}/.well-known/jwks.json", &rqctx.v_ctx().public_url()),
+        jwks_uri: format!("{}/.well-known/jwks.json", rqctx.v_ctx().public_url()),
     }))
 }
 
@@ -40,9 +48,13 @@ pub struct Jwk {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn jwks_json_op(
-    rqctx: &RequestContext<impl ApiContext>,
-) -> Result<HttpResponseOk<Jwks>, HttpError> {
+pub async fn jwks_json_op<T>(
+    rqctx: RequestContext<impl ApiContext<AppPermissions = T>>,
+) -> Result<HttpResponseOk<Jwks>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+{
     let jwks = rqctx.v_ctx().jwks().await;
     Ok(HttpResponseOk(jwks.into()))
 }

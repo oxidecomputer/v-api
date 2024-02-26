@@ -14,19 +14,28 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tap::TapFallible;
 use tracing::instrument;
+use v_api_permissions::Permissions;
 
 use super::{
     ClientType, OAuthProvider, OAuthProviderInfo, OAuthProviderNameParam, UserInfoProvider,
 };
 use crate::{
-    context::ApiContext, endpoints::login::LoginError, error::ApiError, util::response::bad_request,
+    context::ApiContext,
+    endpoints::login::LoginError,
+    error::ApiError,
+    permissions::{PermissionStorage, VAppPermission},
+    util::response::bad_request,
 };
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn get_device_provider_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn get_device_provider_op<T>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<OAuthProviderNameParam>,
-) -> Result<HttpResponseOk<OAuthProviderInfo>, HttpError> {
+) -> Result<HttpResponseOk<OAuthProviderInfo>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+{
     let path = path.into_inner();
 
     tracing::trace!("Getting OAuth data for {}", path.provider);
@@ -104,11 +113,15 @@ pub struct ProxyTokenError {
 // new internal user as needed. The user is then returned an token that is valid for interacting
 // with the RFD API
 #[instrument(skip(rqctx, body), err(Debug))]
-pub async fn exchange_device_token_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn exchange_device_token_op<T>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<OAuthProviderNameParam>,
     body: TypedBody<AccessTokenExchangeRequest>,
-) -> Result<Response<Body>, HttpError> {
+) -> Result<Response<Body>, HttpError>
+where
+    T: VAppPermission,
+    Permissions<T>: PermissionStorage,
+{
     let ctx = rqctx.v_ctx();
     let path = path.into_inner();
     let mut provider = ctx

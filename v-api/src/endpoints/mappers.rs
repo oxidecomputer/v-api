@@ -7,11 +7,13 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use uuid::Uuid;
+use v_api_permissions::{Permission, Permissions};
 use v_model::{Mapper, NewMapper};
 
 use crate::{
     context::ApiContext,
     mapper::MappingRules,
+    permissions::{AsScope, PermissionStorage, VPermission},
     util::{
         is_uniqueness_error,
         response::{conflict, ResourceError},
@@ -25,10 +27,15 @@ pub struct ListMappersQuery {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn get_mappers_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn get_mappers_op<T>(
+    rqctx: RequestContext<T>,
     query: ListMappersQuery,
-) -> Result<HttpResponseOk<Vec<Mapper>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<Mapper>>, HttpError>
+where
+    T: ApiContext,
+    T::AppPermissions: Permission + From<VPermission> + AsScope,
+    Permissions<T::AppPermissions>: PermissionStorage,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
@@ -40,17 +47,22 @@ pub async fn get_mappers_op(
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CreateMapper {
+pub struct CreateMapper<T> {
     name: String,
-    rule: MappingRules,
+    rule: MappingRules<T>,
     max_activations: Option<i32>,
 }
 
-#[instrument(skip(rqctx), err(Debug))]
-pub async fn create_mapper_op(
-    rqctx: &RequestContext<impl ApiContext>,
-    body: CreateMapper,
-) -> Result<HttpResponseCreated<Mapper>, HttpError> {
+#[instrument(skip(rqctx, body), err(Debug))]
+pub async fn create_mapper_op<T, U>(
+    rqctx: RequestContext<T>,
+    body: CreateMapper<U>,
+) -> Result<HttpResponseCreated<Mapper>, HttpError>
+where
+    T: ApiContext<AppPermissions = U>,
+    T::AppPermissions: Permission + From<VPermission> + AsScope,
+    Permissions<T::AppPermissions>: PermissionStorage,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
@@ -86,10 +98,15 @@ pub struct MapperPath {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn delete_mapper_op(
-    rqctx: &RequestContext<impl ApiContext>,
+pub async fn delete_mapper_op<T>(
+    rqctx: RequestContext<T>,
     path: MapperPath,
-) -> Result<HttpResponseOk<Mapper>, HttpError> {
+) -> Result<HttpResponseOk<Mapper>, HttpError>
+where
+    T: ApiContext,
+    T::AppPermissions: Permission + From<VPermission> + AsScope,
+    Permissions<T::AppPermissions>: PermissionStorage,
+{
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;

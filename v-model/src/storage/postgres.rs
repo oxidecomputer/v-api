@@ -10,10 +10,7 @@ use diesel::{
     insert_into, pg::PgConnection, query_dsl::QueryDsl, update, upsert::excluded,
     ExpressionMethods, OptionalExtension as OptionalExtension2, PgArrayExpressionMethods,
 };
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    time::Duration,
-};
+use std::{collections::BTreeMap, time::Duration};
 use tracing::instrument;
 use uuid::Uuid;
 use v_api_permissions::Permission;
@@ -75,7 +72,7 @@ impl PostgresStore {
 #[async_trait]
 impl<T> ApiUserStore<T> for PostgresStore
 where
-    T: Permission + Ord,
+    T: Permission,
 {
     async fn get(&self, id: &Uuid, deleted: bool) -> Result<Option<ApiUser<T>>, StoreError> {
         let user = ApiUserStore::list(
@@ -190,7 +187,7 @@ where
 #[async_trait]
 impl<T> ApiKeyStore<T> for PostgresStore
 where
-    T: Permission + Ord,
+    T: Permission,
 {
     async fn get(&self, id: &Uuid, deleted: bool) -> Result<Option<ApiKey<T>>, StoreError> {
         let mut query = api_key::dsl::api_key
@@ -717,16 +714,16 @@ impl OAuthClientStore for PostgresStore {
                 |mut clients, (client, secret, redirect)| {
                     let value = clients.entry(client.id).or_insert((
                         client,
-                        BTreeSet::<OAuthClientSecret>::new(),
-                        BTreeSet::<OAuthClientRedirectUri>::new(),
+                        Vec::<OAuthClientSecret>::new(),
+                        Vec::<OAuthClientRedirectUri>::new(),
                     ));
 
                     if let Some(secret) = secret {
-                        value.1.insert(secret.into());
+                        value.1.push(secret.into());
                     }
 
                     if let Some(redirect) = redirect {
-                        value.2.insert(redirect.into());
+                        value.2.push(redirect.into());
                     }
 
                     clients
@@ -863,7 +860,7 @@ impl OAuthClientRedirectUriStore for PostgresStore {
 #[async_trait]
 impl<T> AccessGroupStore<T> for PostgresStore
 where
-    T: Permission + Ord,
+    T: Permission,
 {
     async fn get(&self, id: &Uuid, deleted: bool) -> Result<Option<AccessGroup<T>>, StoreError> {
         let client = AccessGroupStore::list(

@@ -28,7 +28,7 @@ pub use schema_ext::LoginAttemptState;
 
 #[partial(NewApiUser)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct ApiUser<T: Ord> {
+pub struct ApiUser<T> {
     pub id: Uuid,
     pub permissions: Permissions<T>,
     pub groups: BTreeSet<Uuid>,
@@ -59,7 +59,7 @@ pub struct ApiUserProvider {
 
 #[partial(NewApiKey)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct ApiKey<T: Ord> {
+pub struct ApiKey<T> {
     pub id: Uuid,
     pub api_user_id: Uuid,
     pub key_signature: String,
@@ -213,7 +213,7 @@ pub struct OAuthClient {
 }
 
 #[partial(NewOAuthClientSecret)]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OAuthClientSecret {
     pub id: Uuid,
     pub oauth_client_id: Uuid,
@@ -237,7 +237,7 @@ impl From<OAuthClientSecretModel> for OAuthClientSecret {
 }
 
 #[partial(NewOAuthClientRedirectUri)]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OAuthClientRedirectUri {
     pub id: Uuid,
     pub oauth_client_id: Uuid,
@@ -262,7 +262,7 @@ impl From<OAuthClientRedirectUriModel> for OAuthClientRedirectUri {
 
 #[partial(NewAccessGroup)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct AccessGroup<T: Ord> {
+pub struct AccessGroup<T> {
     pub id: Uuid,
     pub name: String,
     pub permissions: Permissions<T>,
@@ -274,10 +274,7 @@ pub struct AccessGroup<T: Ord> {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
-impl<T> From<AccessGroupModel<T>> for AccessGroup<T>
-where
-    T: Ord,
-{
+impl<T> From<AccessGroupModel<T>> for AccessGroup<T> {
     fn from(value: AccessGroupModel<T>) -> Self {
         AccessGroup {
             id: value.id,

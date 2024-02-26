@@ -19,10 +19,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::instrument;
 use uuid::Uuid;
-use v_api_permissions::Permission;
-use v_model::ApiUserProvider;
+use v_api_permissions::{Permission, Permissions};
+use v_model::{ApiUser, ApiUserProvider};
 
-use crate::{config::AsymmetricKey, context::VContext, permissions::ApiPermission, User};
+use crate::{
+    config::AsymmetricKey,
+    context::VContext,
+    permissions::{AsScope, PermissionStorage, VPermission},
+};
 
 use super::{Signer, SigningKeyError};
 
@@ -62,13 +66,14 @@ pub struct Claims {
 impl Claims {
     pub fn new<T>(
         ctx: &VContext<T>,
-        user: &User,
+        user: &ApiUser<T>,
         provider: &ApiUserProvider,
         scope: Option<Vec<String>>,
         expires_at: DateTime<Utc>,
     ) -> Self
     where
-        T: Permission + From<ApiPermission>,
+        T: Permission + From<VPermission> + AsScope,
+        Permissions<T>: PermissionStorage,
     {
         Claims {
             iss: ctx.public_url().to_string(),
@@ -86,7 +91,8 @@ impl Claims {
 impl Jwt {
     pub async fn new<T>(ctx: &VContext<T>, token: &str) -> Result<Self, JwtError>
     where
-        T: Permission + From<ApiPermission>,
+        T: Permission + From<VPermission> + AsScope,
+        Permissions<T>: PermissionStorage,
     {
         tracing::trace!("Decode JWT from headers");
 
