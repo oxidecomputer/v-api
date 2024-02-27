@@ -23,8 +23,7 @@ use super::MapperRule;
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct EmailDomainMapper<T> {
     domain: String,
-    #[serde(default)]
-    permissions: Permissions<T>,
+    permissions: Option<Permissions<T>>,
     #[serde(default)]
     groups: Vec<String>,
 }

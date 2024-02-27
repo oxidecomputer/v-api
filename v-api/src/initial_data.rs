@@ -8,26 +8,26 @@ use serde::Deserialize;
 use thiserror::Error;
 use tracing::Instrument;
 use uuid::Uuid;
-use v_api_permissions::{Permission, Permissions};
+use v_api_permissions::Permissions;
 use v_model::{storage::StoreError, NewAccessGroup, NewMapper};
 
 use crate::{
     context::VContext,
     mapper::MappingRules,
-    permissions::{AsScope, PermissionStorage, VAppPermission, VPermission},
+    permissions::{PermissionStorage, VAppPermission},
     util::response::ResourceError,
 };
 
 #[derive(Debug, Deserialize)]
 pub struct InitialData<T> {
-    pub groups: Vec<InitialGroup>,
+    pub groups: Vec<InitialGroup<T>>,
     pub mappers: Vec<InitialMapper<T>>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct InitialGroup {
+pub struct InitialGroup<T> {
     pub name: String,
-    pub permissions: VPermission,
+    pub permissions: Permissions<T>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,55 +70,55 @@ where
     }
 
     pub async fn initialize(self, ctx: &VContext<T>) -> Result<(), InitError> {
-        // let existing_groups = ctx.get_groups(&ctx.builtin_registration_user()).await?;
+        let existing_groups = ctx.get_groups(&ctx.builtin_registration_user()).await?;
 
-        // for group in self.groups {
-        //     let span = tracing::info_span!("Initializing group", group = ?group);
+        for group in self.groups {
+            let span = tracing::info_span!("Initializing group", group = ?group);
 
-        //     async {
-        //         let id = existing_groups
-        //             .iter()
-        //             .find(|g| g.name == group.name)
-        //             .map(|g| g.id)
-        //             .unwrap_or(Uuid::new_v4());
+            async {
+                let id = existing_groups
+                    .iter()
+                    .find(|g| g.name == group.name)
+                    .map(|g| g.id)
+                    .unwrap_or(Uuid::new_v4());
 
-        //         ctx.create_group(
-        //             &ctx.builtin_registration_user(),
-        //             NewAccessGroup {
-        //                 id,
-        //                 name: group.name,
-        //                 permissions: group.permissions,
-        //             },
-        //         )
-        //         .await
-        //         .map(|_| ())
-        //         .or_else(handle_unique_violation_error)
-        //     }
-        //     .instrument(span)
-        //     .await?
-        // }
+                ctx.create_group(
+                    &ctx.builtin_registration_user(),
+                    NewAccessGroup {
+                        id,
+                        name: group.name,
+                        permissions: group.permissions,
+                    },
+                )
+                .await
+                .map(|_| ())
+                .or_else(handle_unique_violation_error)
+            }
+            .instrument(span)
+            .await?
+        }
 
-        // for mapper in self.mappers {
-        //     let span = tracing::info_span!("Initializing mapper", mapper = ?mapper);
-        //     async {
-        //         let new_mapper = NewMapper {
-        //             id: Uuid::new_v4(),
-        //             name: mapper.name,
-        //             rule: serde_json::to_value(&mapper.rule)?,
-        //             activations: None,
-        //             max_activations: mapper.max_activations.map(|i| i as i32),
-        //         };
+        for mapper in self.mappers {
+            let span = tracing::info_span!("Initializing mapper", mapper = ?mapper);
+            async {
+                let new_mapper = NewMapper {
+                    id: Uuid::new_v4(),
+                    name: mapper.name,
+                    rule: serde_json::to_value(&mapper.rule)?,
+                    activations: None,
+                    max_activations: mapper.max_activations.map(|i| i as i32),
+                };
 
-        //         ctx.add_mapper(&ctx.builtin_registration_user(), &new_mapper)
-        //             .await
-        //             .map(|_| ())
-        //             .or_else(handle_unique_violation_error)?;
+                ctx.add_mapper(&ctx.builtin_registration_user(), &new_mapper)
+                    .await
+                    .map(|_| ())
+                    .or_else(handle_unique_violation_error)?;
 
-        //         Ok::<(), InitError>(())
-        //     }
-        //     .instrument(span)
-        //     .await?;
-        // }
+                Ok::<(), InitError>(())
+            }
+            .instrument(span)
+            .await?;
+        }
 
         Ok(())
     }

@@ -23,8 +23,7 @@ use super::MapperRule;
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct GitHubUsernameMapper<T> {
     github_username: String,
-    #[serde(default)]
-    permissions: Permissions<T>,
+    permissions: Option<Permissions<T>>,
     #[serde(default)]
     groups: Vec<String>,
 }
@@ -46,7 +45,7 @@ where
             .map(|u| u == &self.github_username)
             .unwrap_or(false)
         {
-            Ok(self.permissions.clone())
+            Ok(self.permissions.clone().unwrap_or_default())
         } else {
             Ok(Permissions::new())
         }

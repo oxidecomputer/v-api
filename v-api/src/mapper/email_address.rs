@@ -23,8 +23,7 @@ use super::MapperRule;
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct EmailAddressMapper<T> {
     email: String,
-    #[serde(default)]
-    permissions: Permissions<T>,
+    permissions: Option<Permissions<T>>,
     #[serde(default)]
     groups: Vec<String>,
 }
@@ -45,7 +44,7 @@ where
             .iter()
             .fold(false, |found, email| found || email == &self.email)
         {
-            Ok(self.permissions.clone())
+            Ok(self.permissions.clone().unwrap_or_default())
         } else {
             Ok(Permissions::new())
         }

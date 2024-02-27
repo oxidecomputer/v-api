@@ -83,7 +83,6 @@ pub enum MappingRules<T> {
     Default(DefaultMapper<T>),
     EmailAddress(EmailAddressMapper<T>),
     EmailDomain(EmailDomainMapper<T>),
-    #[serde(rename = "github_username")]
     GitHubUsername(GitHubUsernameMapper<T>),
 }
 

@@ -25,7 +25,7 @@ use std::{fmt::Debug, ops::Add};
 use tap::TapFallible;
 use tracing::instrument;
 use uuid::Uuid;
-use v_api_permissions::{Permission, Permissions};
+use v_api_permissions::Permissions;
 use v_model::{schema_ext::LoginAttemptState, LoginAttempt, NewLoginAttempt, OAuthClient};
 
 use super::{OAuthProvider, OAuthProviderNameParam, UserInfoProvider};

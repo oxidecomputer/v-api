@@ -55,13 +55,17 @@ pub struct GetUserResponse<T> {
     providers: Vec<ApiUserProvider>,
 }
 
-impl<T> GetUserResponse<T> where T: Permission {
-    pub fn new<U>(user: ApiUser<U>, providers: Vec<ApiUserProvider>) -> Self where T: From<U>, U: Permission {
+impl<T> GetUserResponse<T>
+where
+    T: Permission,
+{
+    pub fn new<U>(user: ApiUser<U>, providers: Vec<ApiUserProvider>) -> Self
+    where
+        T: From<U>,
+        U: Permission,
+    {
         let info = into_user_response(user);
-        Self {
-            info,
-            providers,
-        }
+        Self { info, providers }
     }
 }
 

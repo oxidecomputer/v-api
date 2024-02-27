@@ -21,8 +21,7 @@ use super::MapperRule;
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DefaultMapper<T> {
-    #[serde(default)]
-    permissions: Permissions<T>,
+    permissions: Option<Permissions<T>>,
     #[serde(default)]
     groups: Vec<String>,
 }
@@ -38,7 +37,7 @@ where
         _ctx: &VContext<T>,
         _user: &UserInfo,
     ) -> Result<Permissions<T>, StoreError> {
-        Ok(self.permissions.clone())
+        Ok(self.permissions.clone().unwrap_or_default())
     }
 
     async fn groups_for(
