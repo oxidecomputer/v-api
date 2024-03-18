@@ -320,7 +320,7 @@ mod tests {
 
         let ctx = mock_context(storage).await;
 
-        let mut client = create_oauth_client_inner(&ctx, caller).await.unwrap().0;
+        let mut client = create_oauth_client_inner(&ctx, caller.clone()).await.unwrap().0;
         caller
             .permissions
             .insert(VPermission::UpdateOAuthClient(client.id));

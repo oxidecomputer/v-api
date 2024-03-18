@@ -160,7 +160,7 @@ where
     Ok(HttpResponseCreated(into_user_response(user)))
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct ApiUserPath {
     identifier: Uuid,
 }
@@ -331,7 +331,7 @@ where
 
 // The identifier field is currently unused
 #[allow(dead_code)]
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct ApiUserTokenPath {
     identifier: Uuid,
     token_identifier: Uuid,
@@ -574,11 +574,11 @@ mod tests {
 
     use crate::{
         context::test_mocks::{mock_context, MockStorage}, endpoints::api_user::{
-            create_api_user_inner, create_api_user_token_inner, create_api_user_token_op, delete_api_user_token_inner, delete_api_user_token_op, get_api_user_token_inner, get_api_user_token_op, into_permissions_response, list_api_user_tokens_inner, list_api_user_tokens_op, update_api_user_inner, update_api_user_op, ApiKeyCreateParams, ApiUserPath, ApiUserTokenPath
+            create_api_user_inner, create_api_user_token_inner, delete_api_user_token_inner, get_api_user_token_inner, list_api_user_tokens_inner, update_api_user_inner, ApiKeyCreateParams, ApiUserPath, ApiUserTokenPath
         }, permissions::{VPermission, VPermissionResponse}, util::tests::get_status
     };
 
-    use super::{create_api_user_op, ApiUserUpdateParams};
+    use super::ApiUserUpdateParams;
 
     fn mock_user() -> ApiUser<VPermission> {
         ApiUser {
@@ -652,7 +652,7 @@ mod tests {
             permissions: vec![VPermission::CreateApiUser].into(),
         };
 
-        let resp = create_api_user_inner::<VPermission, VPermissionResponse>(&ctx, with_permissions, successful_update.clone()).await;
+        let resp = create_api_user_inner::<VPermission, VPermissionResponse>(&ctx, with_permissions.clone(), successful_update.clone()).await;
 
         assert!(resp.is_ok());
         assert_eq!(get_status(&resp), StatusCode::CREATED);
@@ -720,7 +720,7 @@ mod tests {
         let resp = update_api_user_inner::<VPermission, VPermissionResponse>(
             &ctx,
             no_permissions,
-            success_path,
+            success_path.clone(),
             successful_update.clone(),
         )
         .await;
@@ -739,7 +739,7 @@ mod tests {
         let resp = update_api_user_inner::<VPermission, VPermissionResponse>(
             &ctx,
             with_specific_permissions,
-            success_path,
+            success_path.clone(),
             successful_update.clone(),
         )
         .await;
@@ -757,7 +757,7 @@ mod tests {
 
         let resp = update_api_user_inner::<VPermission, VPermissionResponse>(
             &ctx,
-            with_general_permissions,
+            with_general_permissions.clone(),
             success_path,
             successful_update.clone(),
         )
@@ -916,7 +916,7 @@ mod tests {
         };
 
         let new_token = ApiKeyCreateParams {
-            permissions: into_permissions_response::<VPermission, VPermissionResponse>(None),
+            permissions: None,
             expires_at: Utc::now() + Duration::seconds(5 * 60),
         };
 
@@ -966,7 +966,7 @@ mod tests {
         };
 
         let resp =
-            create_api_user_token_inner(&ctx, no_permissions, api_user_path, new_token.clone())
+            create_api_user_token_inner::<VPermission, VPermissionResponse>(&ctx, no_permissions, api_user_path.clone(), new_token.clone())
                 .await;
 
         assert!(resp.is_err());
@@ -980,10 +980,10 @@ mod tests {
             permissions: vec![VPermission::CreateApiUserToken(Uuid::new_v4())].into(),
         };
 
-        let resp = create_api_user_token_inner(
+        let resp = create_api_user_token_inner::<VPermission, VPermissionResponse>(
             &ctx,
             incorrect_permissions,
-            api_user_path,
+            api_user_path.clone(),
             new_token.clone(),
         )
         .await;
@@ -1003,7 +1003,7 @@ mod tests {
             .into(),
         };
 
-        let resp = create_api_user_token_inner(
+        let resp = create_api_user_token_inner::<VPermission, VPermissionResponse>(
             &ctx,
             incorrect_permissions,
             unknown_api_user_path,
@@ -1050,7 +1050,7 @@ mod tests {
             .into(),
         };
 
-        let resp = create_api_user_token_inner(
+        let resp = create_api_user_token_inner::<VPermission, VPermissionResponse>(
             &ctx,
             failure_permissions,
             failure_api_user_path,
@@ -1095,7 +1095,7 @@ mod tests {
         let mut token_store = MockApiKeyStore::new();
         token_store
             .expect_get()
-            .with(eq(api_user_token_path.token_identifier), eq(false))
+            .with(eq(api_user_token_path.token_identifier.clone()), eq(false))
             .returning(move |_, _| Ok(Some(token.clone())));
         token_store
             .expect_get()
@@ -1119,7 +1119,7 @@ mod tests {
             permissions: Permissions::new(),
         };
 
-        let resp = get_api_user_token_inner::<VPermission, VPermissionResponse>(&ctx, no_permissions, api_user_token_path).await;
+        let resp = get_api_user_token_inner::<VPermission, VPermissionResponse>(&ctx, no_permissions, api_user_token_path.clone()).await;
 
         assert!(resp.is_err());
         assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
@@ -1132,7 +1132,7 @@ mod tests {
             permissions: vec![VPermission::GetApiUserToken(Uuid::new_v4())].into(),
         };
 
-        let resp = get_api_user_token_inner::<VPermission, VPermissionResponse>(&ctx, incorrect_permissions, api_user_token_path).await;
+        let resp = get_api_user_token_inner::<VPermission, VPermissionResponse>(&ctx, incorrect_permissions, api_user_token_path.clone()).await;
 
         assert!(resp.is_err());
         assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
@@ -1245,7 +1245,7 @@ mod tests {
             permissions: Permissions::new(),
         };
 
-        let resp = delete_api_user_token_inner::<VPermission, VPermissionResponse>(&ctx, no_permissions, api_user_token_path).await;
+        let resp = delete_api_user_token_inner::<VPermission, VPermissionResponse>(&ctx, no_permissions, api_user_token_path.clone()).await;
 
         assert!(resp.is_err());
         assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
@@ -1259,7 +1259,7 @@ mod tests {
         };
 
         let resp =
-            delete_api_user_token_inner::<VPermission, VPermissionResponse>(&ctx, incorrect_permissions, api_user_token_path).await;
+            delete_api_user_token_inner::<VPermission, VPermissionResponse>(&ctx, incorrect_permissions, api_user_token_path.clone()).await;
 
         assert!(resp.is_err());
         assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
