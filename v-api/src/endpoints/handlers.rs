@@ -258,21 +258,21 @@ mod macros {
                 method = GET,
                 path = "/self",
             }]
-            pub async fn get_self(
+            pub async fn get_self<U>(
                 rqctx: RequestContext<$context_type>,
-            ) -> Result<HttpResponseOk<GetUserResponse>, HttpError> {
+            ) -> Result<HttpResponseOk<GetUserResponse<U>>, HttpError> {
                 get_self_op(rqctx).await
             }
-    
+
             /// Get user information for a given user id
             #[endpoint {
                 method = GET,
                 path = "/api-user/{identifier}",
             }]
-            pub async fn get_api_user(
+            pub async fn get_api_user<U>(
                 rqctx: RequestContext<$context_type>,
                 path: Path<ApiUserPath>,
-            ) -> Result<HttpResponseOk<GetUserResponse>, HttpError> {
+            ) -> Result<HttpResponseOk<GetUserResponse<U>>, HttpError> {
                 get_api_user_op(rqctx, path).await
             }
     
@@ -306,10 +306,10 @@ mod macros {
                 method = GET,
                 path = "/api-user/{identifier}/token",
             }]
-            pub async fn list_api_user_tokens(
+            pub async fn list_api_user_tokens<U>(
                 rqctx: RequestContext<$context_type>,
                 path: Path<ApiUserPath>,
-            ) -> Result<HttpResponseOk<Vec<ApiKeyResponse>>, HttpError> {
+            ) -> Result<HttpResponseOk<Vec<ApiKeyResponse<U>>>, HttpError> {
                 list_api_user_tokens_op(rqctx, path.into_inner()).await
             }
     
@@ -319,11 +319,11 @@ mod macros {
                 method = POST,
                 path = "/api-user/{identifier}/token",
             }]
-            pub async fn create_api_user_token(
+            pub async fn create_api_user_token<U>(
                 rqctx: RequestContext<$context_type>,
                 path: Path<ApiUserPath>,
                 body: TypedBody<ApiKeyCreateParams>,
-            ) -> Result<HttpResponseCreated<InitialApiKeyResponse>, HttpError> {
+            ) -> Result<HttpResponseCreated<InitialApiKeyResponse<U>>, HttpError> {
                 create_api_user_token_op(rqctx, path.into_inner(), body.into_inner()).await
             }
     
@@ -332,10 +332,10 @@ mod macros {
                 method = GET,
                 path = "/api-user/{identifier}/token/{token_identifier}",
             }]
-            pub async fn get_api_user_token(
+            pub async fn get_api_user_token<U>(
                 rqctx: RequestContext<$context_type>,
                 path: Path<ApiUserTokenPath>,
-            ) -> Result<HttpResponseOk<ApiKeyResponse>, HttpError> {
+            ) -> Result<HttpResponseOk<ApiKeyResponse<U>>, HttpError> {
                 get_api_user_token_op(rqctx, path.into_inner()).await
             }
     
@@ -344,10 +344,10 @@ mod macros {
                 method = DELETE,
                 path = "/api-user/{identifier}/token/{token_identifier}",
             }]
-            pub async fn delete_api_user_token(
+            pub async fn delete_api_user_token<U>(
                 rqctx: RequestContext<$context_type>,
                 path: Path<ApiUserTokenPath>,
-            ) -> Result<HttpResponseOk<ApiKeyResponse>, HttpError> {
+            ) -> Result<HttpResponseOk<ApiKeyResponse<U>>, HttpError> {
                 delete_api_user_token_op(rqctx, path.into_inner()).await
             }
     
