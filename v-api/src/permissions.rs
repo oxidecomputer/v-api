@@ -13,6 +13,9 @@ use v_api_permissions::{Permission, Permissions};
 pub trait VAppPermission: Permission + From<VPermission> + AsScope {}
 impl<T> VAppPermission for T where T: Permission + From<VPermission> + AsScope {}
 
+pub trait VAppPermissionResponse: Permission {}
+impl<T> VAppPermissionResponse for T where T: Permission {}
+
 #[derive(Debug, Error)]
 pub enum ApiPermissionError {
     #[error("Scope is invalid: {0}")]

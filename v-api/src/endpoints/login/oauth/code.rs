@@ -700,876 +700,876 @@ async fn fetch_user_info(
     Ok(info)
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use std::{
-//         net::{Ipv4Addr, SocketAddrV4},
-//         ops::Add,
-//         sync::{Arc, Mutex},
-//     };
-
-//     use chrono::{Duration, Utc};
-//     use dropshot::RequestInfo;
-//     use http::{
-//         header::{COOKIE, LOCATION, SET_COOKIE},
-//         HeaderValue, StatusCode,
-//     };
-//     use hyper::Body;
-//     use mockall::predicate::eq;
-//     use oauth2::PkceCodeChallenge;
-//     use secrecy::SecretString;
-//     use uuid::Uuid;
-//     use v_model::{
-//         schema_ext::LoginAttemptState,
-//         storage::{MockLoginAttemptStore, MockOAuthClientStore},
-//         LoginAttempt, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret,
-//     };
-
-//     use crate::{
-//         authn::key::RawApiKey,
-//         context::{
-//             test_mocks::{mock_context, MockStorage},
-//             VContext,
-//         },
-//         endpoints::login::oauth::{
-//             code::{
-//                 authz_code_callback_op_inner, verify_csrf, verify_login_attempt,
-//                 OAuthAuthzCodeReturnQuery, OAuthError, OAuthErrorCode, LOGIN_ATTEMPT_COOKIE,
-//             },
-//             OAuthProviderName,
-//         },
-//         permissions::VPermission,
-//     };
-
-//     use super::{authorize_code_exchange, get_oauth_client, oauth_redirect_response};
-
-//     async fn mock_client() -> (VContext<VPermission>, OAuthClient, SecretString) {
-//         let ctx = mock_context(MockStorage::new()).await;
-//         let client_id = Uuid::new_v4();
-//         let key = RawApiKey::generate::<8>(&Uuid::new_v4())
-//             .sign(&*ctx.signer())
-//             .await
-//             .unwrap();
-//         let secret_signature = key.signature().to_string();
-//         let client_secret = key.key();
-//         let redirect_uri = "callback-destination";
-
-//         (
-//             ctx,
-//             OAuthClient {
-//                 id: client_id,
-//                 secrets: vec![OAuthClientSecret {
-//                     id: Uuid::new_v4(),
-//                     oauth_client_id: client_id,
-//                     secret_signature,
-//                     created_at: Utc::now(),
-//                     deleted_at: None,
-//                 }],
-//                 redirect_uris: vec![OAuthClientRedirectUri {
-//                     id: Uuid::new_v4(),
-//                     oauth_client_id: client_id,
-//                     redirect_uri: redirect_uri.to_string(),
-//                     created_at: Utc::now(),
-//                     deleted_at: None,
-//                 }],
-//                 created_at: Utc::now(),
-//                 deleted_at: None,
-//             },
-//             client_secret,
-//         )
-//     }
-
-//     #[tokio::test]
-//     async fn test_oauth_client_lookup_checks_redirect_uri() {
-//         let client_id = Uuid::new_v4();
-//         let client = OAuthClient {
-//             id: client_id,
-//             secrets: vec![],
-//             redirect_uris: vec![OAuthClientRedirectUri {
-//                 id: Uuid::new_v4(),
-//                 oauth_client_id: client_id,
-//                 redirect_uri: "https://test.oxeng.dev/callback".to_string(),
-//                 created_at: Utc::now(),
-//                 deleted_at: None,
-//             }],
-//             created_at: Utc::now(),
-//             deleted_at: None,
-//         };
-
-//         let mut client_store = MockOAuthClientStore::new();
-//         client_store
-//             .expect_get()
-//             .with(eq(client_id), eq(false))
-//             .returning(move |_, _| Ok(Some(client.clone())));
-
-//         let mut storage = MockStorage::new();
-//         storage.oauth_client_store = Some(Arc::new(client_store));
-//         let ctx = mock_context(storage).await;
-
-//         let failure = get_oauth_client(&ctx, &client_id, "https://not-test.oxeng.dev/callback")
-//             .await
-//             .unwrap_err();
-//         assert_eq!(OAuthErrorCode::InvalidRequest, failure.error);
-//         assert_eq!(
-//             Some("Invalid redirect uri".to_string()),
-//             failure.error_description
-//         );
-
-//         let success = get_oauth_client(&ctx, &client_id, "https://test.oxeng.dev/callback").await;
-//         assert_eq!(client_id, success.unwrap().id);
-//     }
-
-//     #[tokio::test]
-//     async fn test_remote_provider_redirect_url() {
-//         let storage = MockStorage::new();
-//         let mut ctx = mock_context(storage).await;
-//         ctx.with_public_url("https://api.oxeng.dev");
-
-//         let (challenge, _) = PkceCodeChallenge::new_random_sha256();
-//         let attempt = LoginAttempt {
-//             id: Uuid::new_v4(),
-//             attempt_state: LoginAttemptState::New,
-//             client_id: Uuid::new_v4(),
-//             redirect_uri: "https://test.oxeng.dev/callback".to_string(),
-//             state: Some("ox_state".to_string()),
-//             pkce_challenge: Some("ox_challenge".to_string()),
-//             pkce_challenge_method: Some("S256".to_string()),
-//             authz_code: None,
-//             expires_at: None,
-//             error: None,
-//             provider: "google".to_string(),
-//             provider_pkce_verifier: Some("rfd_verifier".to_string()),
-//             provider_authz_code: None,
-//             provider_error: None,
-//             created_at: Utc::now(),
-//             updated_at: Utc::now(),
-//             scope: String::new(),
-//         };
-
-//         let response = oauth_redirect_response(
-//             &ctx.public_url(),
-//             &*ctx
-//                 .get_oauth_provider(&OAuthProviderName::Google)
-//                 .await
-//                 .unwrap(),
-//             &attempt,
-//             Some(challenge.clone()),
-//         )
-//         .unwrap();
-
-//         let expected_location = format!("https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=google_web_client_id&state={}&code_challenge={}&code_challenge_method=S256&redirect_uri=https%3A%2F%2Fapi.oxeng.dev%2Flogin%2Foauth%2Fgoogle%2Fcode%2Fcallback&scope=openid+email", attempt.id, challenge.as_str());
-
-//         assert_eq!(
-//             expected_location,
-//             String::from_utf8(
-//                 response
-//                     .headers()
-//                     .get(LOCATION)
-//                     .unwrap()
-//                     .as_bytes()
-//                     .to_vec()
-//             )
-//             .unwrap()
-//         );
-//         assert_eq!(
-//             attempt.id.to_string().as_str(),
-//             String::from_utf8(
-//                 response
-//                     .headers()
-//                     .get(SET_COOKIE)
-//                     .unwrap()
-//                     .as_bytes()
-//                     .to_vec()
-//             )
-//             .unwrap()
-//             .split_once('=')
-//             .unwrap()
-//             .1
-//         )
-//     }
-
-//     #[tokio::test]
-//     async fn test_csrf_check() {
-//         let id = Uuid::new_v4();
-
-//         let mut rq = hyper::Request::new(Body::empty());
-//         rq.headers_mut().insert(
-//             COOKIE,
-//             HeaderValue::from_str(&format!("{}={}", LOGIN_ATTEMPT_COOKIE, id)).unwrap(),
-//         );
-//         let with_valid_cookie = RequestInfo::new(
-//             &rq,
-//             std::net::SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 8888)),
-//         );
-//         let query = OAuthAuthzCodeReturnQuery {
-//             state: Some(id.to_string()),
-//             code: None,
-//             error: None,
-//         };
-//         assert_eq!(id, verify_csrf(&with_valid_cookie, &query).unwrap());
-
-//         let query = OAuthAuthzCodeReturnQuery {
-//             state: None,
-//             code: None,
-//             error: None,
-//         };
-//         assert_eq!(
-//             StatusCode::UNAUTHORIZED,
-//             verify_csrf(&with_valid_cookie, &query)
-//                 .unwrap_err()
-//                 .status_code
-//         );
-
-//         let mut rq = hyper::Request::new(Body::empty());
-//         rq.headers_mut().insert(
-//             COOKIE,
-//             HeaderValue::from_str(&format!("{}={}", LOGIN_ATTEMPT_COOKIE, Uuid::new_v4())).unwrap(),
-//         );
-//         let with_invalid_cookie = RequestInfo::new(
-//             &rq,
-//             std::net::SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 8888)),
-//         );
-//         let query = OAuthAuthzCodeReturnQuery {
-//             state: Some(id.to_string()),
-//             code: None,
-//             error: None,
-//         };
-//         assert_eq!(
-//             StatusCode::UNAUTHORIZED,
-//             verify_csrf(&with_invalid_cookie, &query)
-//                 .unwrap_err()
-//                 .status_code
-//         );
-
-//         let rq = hyper::Request::new(Body::empty());
-//         let with_missing_cookie = RequestInfo::new(
-//             &rq,
-//             std::net::SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 8888)),
-//         );
-//         let query = OAuthAuthzCodeReturnQuery {
-//             state: Some(id.to_string()),
-//             code: None,
-//             error: None,
-//         };
-//         assert_eq!(
-//             StatusCode::UNAUTHORIZED,
-//             verify_csrf(&with_missing_cookie, &query)
-//                 .unwrap_err()
-//                 .status_code
-//         );
-//     }
-
-//     #[tokio::test]
-//     async fn test_callback_fails_when_not_in_new_state() {
-//         let invalid_states = [
-//             LoginAttemptState::Complete,
-//             LoginAttemptState::Failed,
-//             LoginAttemptState::RemoteAuthenticated,
-//         ];
-
-//         for state in invalid_states {
-//             let attempt_id = Uuid::new_v4();
-//             let attempt = LoginAttempt {
-//                 id: attempt_id,
-//                 attempt_state: state,
-//                 client_id: Uuid::new_v4(),
-//                 redirect_uri: "https://test.oxeng.dev/callback".to_string(),
-//                 state: Some("ox_state".to_string()),
-//                 pkce_challenge: Some("ox_challenge".to_string()),
-//                 pkce_challenge_method: Some("S256".to_string()),
-//                 authz_code: None,
-//                 expires_at: None,
-//                 error: None,
-//                 provider: "google".to_string(),
-//                 provider_pkce_verifier: Some("rfd_verifier".to_string()),
-//                 provider_authz_code: None,
-//                 provider_error: None,
-//                 created_at: Utc::now(),
-//                 updated_at: Utc::now(),
-//                 scope: String::new(),
-//             };
-
-//             let mut storage = MockStorage::new();
-//             let mut attempt_store = MockLoginAttemptStore::new();
-//             attempt_store
-//                 .expect_get()
-//                 .with(eq(attempt.id))
-//                 .returning(move |_| Ok(Some(attempt.clone())));
-//             storage.login_attempt_store = Some(Arc::new(attempt_store));
-
-//             let ctx = mock_context(storage).await;
-//             let err = authz_code_callback_op_inner(
-//                 &ctx,
-//                 &attempt_id,
-//                 Some("remote-code".to_string()),
-//                 None,
-//             )
-//             .await;
-
-//             assert_eq!(StatusCode::UNAUTHORIZED, err.unwrap_err().status_code);
-//         }
-//     }
-
-//     #[tokio::test]
-//     async fn test_callback_fails_when_error_is_passed() {
-//         let attempt_id = Uuid::new_v4();
-//         let attempt = LoginAttempt {
-//             id: attempt_id,
-//             attempt_state: LoginAttemptState::New,
-//             client_id: Uuid::new_v4(),
-//             redirect_uri: "https://test.oxeng.dev/callback".to_string(),
-//             state: Some("ox_state".to_string()),
-//             pkce_challenge: Some("ox_challenge".to_string()),
-//             pkce_challenge_method: Some("S256".to_string()),
-//             authz_code: None,
-//             expires_at: None,
-//             error: None,
-//             provider: "google".to_string(),
-//             provider_pkce_verifier: Some("rfd_verifier".to_string()),
-//             provider_authz_code: None,
-//             provider_error: None,
-//             created_at: Utc::now(),
-//             updated_at: Utc::now(),
-//             scope: String::new(),
-//         };
-
-//         let mut attempt_store = MockLoginAttemptStore::new();
-//         let original_attempt = attempt.clone();
-//         attempt_store
-//             .expect_get()
-//             .with(eq(attempt.id))
-//             .returning(move |_| Ok(Some(original_attempt.clone())));
-
-//         attempt_store
-//             .expect_upsert()
-//             .withf(|attempt| attempt.attempt_state == LoginAttemptState::Failed)
-//             .returning(move |arg| {
-//                 let mut returned = attempt.clone();
-//                 returned.attempt_state = arg.attempt_state;
-//                 returned.authz_code = arg.authz_code;
-//                 returned.error = arg.error;
-//                 Ok(returned)
-//             });
-
-//         let mut storage = MockStorage::new();
-//         storage.login_attempt_store = Some(Arc::new(attempt_store));
-//         let ctx = mock_context(storage).await;
-
-//         let location = authz_code_callback_op_inner(
-//             &ctx,
-//             &attempt_id,
-//             Some("remote-code".to_string()),
-//             Some("not_access_denied".to_string()),
-//         )
-//         .await
-//         .unwrap();
-
-//         assert_eq!(
-//             format!("https://test.oxeng.dev/callback?error=server_error&state=ox_state",),
-//             location
-//         );
-//     }
-
-//     #[tokio::test]
-//     async fn test_callback_forwards_access_denied() {
-//         let attempt_id = Uuid::new_v4();
-//         let attempt = LoginAttempt {
-//             id: attempt_id,
-//             attempt_state: LoginAttemptState::New,
-//             client_id: Uuid::new_v4(),
-//             redirect_uri: "https://test.oxeng.dev/callback".to_string(),
-//             state: Some("ox_state".to_string()),
-//             pkce_challenge: Some("ox_challenge".to_string()),
-//             pkce_challenge_method: Some("S256".to_string()),
-//             authz_code: None,
-//             expires_at: None,
-//             error: None,
-//             provider: "google".to_string(),
-//             provider_pkce_verifier: Some("rfd_verifier".to_string()),
-//             provider_authz_code: None,
-//             provider_error: None,
-//             created_at: Utc::now(),
-//             updated_at: Utc::now(),
-//             scope: String::new(),
-//         };
-
-//         let mut attempt_store = MockLoginAttemptStore::new();
-//         let original_attempt = attempt.clone();
-//         attempt_store
-//             .expect_get()
-//             .with(eq(attempt.id))
-//             .returning(move |_| Ok(Some(original_attempt.clone())));
-
-//         attempt_store
-//             .expect_upsert()
-//             .withf(|attempt| attempt.attempt_state == LoginAttemptState::Failed)
-//             .returning(move |arg| {
-//                 let mut returned = attempt.clone();
-//                 returned.attempt_state = arg.attempt_state;
-//                 returned.authz_code = arg.authz_code;
-//                 returned.error = arg.error;
-//                 Ok(returned)
-//             });
-
-//         let mut storage = MockStorage::new();
-//         storage.login_attempt_store = Some(Arc::new(attempt_store));
-//         let ctx = mock_context(storage).await;
-
-//         let location = authz_code_callback_op_inner(
-//             &ctx,
-//             &attempt_id,
-//             Some("remote-code".to_string()),
-//             Some("access_denied".to_string()),
-//         )
-//         .await
-//         .unwrap();
-
-//         assert_eq!(
-//             format!("https://test.oxeng.dev/callback?error=access_denied&state=ox_state",),
-//             location
-//         );
-//     }
-
-//     #[tokio::test]
-//     async fn test_handles_callback_with_code() {
-//         let attempt_id = Uuid::new_v4();
-//         let attempt = LoginAttempt {
-//             id: attempt_id,
-//             attempt_state: LoginAttemptState::New,
-//             client_id: Uuid::new_v4(),
-//             redirect_uri: "https://test.oxeng.dev/callback".to_string(),
-//             state: Some("ox_state".to_string()),
-//             pkce_challenge: Some("ox_challenge".to_string()),
-//             pkce_challenge_method: Some("S256".to_string()),
-//             authz_code: None,
-//             expires_at: None,
-//             error: None,
-//             provider: "google".to_string(),
-//             provider_pkce_verifier: Some("rfd_verifier".to_string()),
-//             provider_authz_code: None,
-//             provider_error: None,
-//             created_at: Utc::now(),
-//             updated_at: Utc::now(),
-//             scope: String::new(),
-//         };
-
-//         let mut attempt_store = MockLoginAttemptStore::new();
-//         let original_attempt = attempt.clone();
-//         attempt_store
-//             .expect_get()
-//             .with(eq(attempt.id))
-//             .returning(move |_| Ok(Some(original_attempt.clone())));
-
-//         let extracted_code = Arc::new(Mutex::new(None));
-//         let extractor = extracted_code.clone();
-//         attempt_store
-//             .expect_upsert()
-//             .withf(|attempt| attempt.attempt_state == LoginAttemptState::RemoteAuthenticated)
-//             .returning(move |arg| {
-//                 let mut returned = attempt.clone();
-//                 returned.attempt_state = arg.attempt_state;
-//                 returned.authz_code = arg.authz_code;
-//                 *extractor.lock().unwrap() = returned.authz_code.clone();
-//                 Ok(returned)
-//             });
-
-//         let mut storage = MockStorage::new();
-//         storage.login_attempt_store = Some(Arc::new(attempt_store));
-//         let ctx = mock_context(storage).await;
-
-//         let location =
-//             authz_code_callback_op_inner(&ctx, &attempt_id, Some("remote-code".to_string()), None)
-//                 .await
-//                 .unwrap();
-
-//         let lock = extracted_code.lock();
-//         assert_eq!(
-//             format!(
-//                 "https://test.oxeng.dev/callback?code={}&state=ox_state",
-//                 lock.unwrap().as_ref().unwrap()
-//             ),
-//             location
-//         );
-//     }
-
-//     #[tokio::test]
-//     async fn test_fails_callback_with_error() {}
-
-//     #[tokio::test]
-//     async fn test_exchange_checks_client_id_and_redirect() {
-//         let (mut ctx, client, client_secret) = mock_client().await;
-//         let client_id = client.id;
-//         let redirect_uri = client.redirect_uris[0].redirect_uri.clone();
-//         let wrong_client_id = Uuid::new_v4();
-
-//         let mut client_store = MockOAuthClientStore::new();
-//         client_store
-//             .expect_get()
-//             .with(eq(wrong_client_id), eq(false))
-//             .returning(move |_, _| Ok(None));
-//         client_store
-//             .expect_get()
-//             .with(eq(client_id), eq(false))
-//             .returning(move |_, _| Ok(Some(client.clone())));
-
-//         let mut storage = MockStorage::new();
-//         storage.oauth_client_store = Some(Arc::new(client_store));
-
-//         ctx.set_storage(Arc::new(storage));
-
-//         // 1. Verify exchange fails when passing an incorrect client id
-//         assert_eq!(
-//             Some("Unknown client id".to_string()),
-//             authorize_code_exchange(
-//                 &ctx,
-//                 "authorization_code",
-//                 &wrong_client_id,
-//                 &client_secret,
-//                 &redirect_uri,
-//             )
-//             .await
-//             .unwrap_err()
-//             .error_description
-//         );
-
-//         // 2. Verify exchange fails when passing an incorrect redirect uri
-//         assert_eq!(
-//             Some("Invalid redirect uri".to_string()),
-//             authorize_code_exchange(
-//                 &ctx,
-//                 "authorization_code",
-//                 &client_id,
-//                 &client_secret,
-//                 "wrong-callback-destination",
-//             )
-//             .await
-//             .unwrap_err()
-//             .error_description
-//         );
-
-//         // 3. Verify a successful exchange
-//         assert_eq!(
-//             (),
-//             authorize_code_exchange(
-//                 &ctx,
-//                 "authorization_code",
-//                 &client_id,
-//                 &client_secret,
-//                 &redirect_uri,
-//             )
-//             .await
-//             .unwrap()
-//         );
-//     }
-
-//     #[tokio::test]
-//     async fn test_exchange_checks_grant_type() {
-//         let (mut ctx, client, client_secret) = mock_client().await;
-//         let client_id = client.id;
-//         let redirect_uri = client.redirect_uris[0].redirect_uri.clone();
-
-//         let mut client_store = MockOAuthClientStore::new();
-//         client_store
-//             .expect_get()
-//             .with(eq(client_id), eq(false))
-//             .returning(move |_, _| Ok(Some(client.clone())));
-
-//         let mut storage = MockStorage::new();
-//         storage.oauth_client_store = Some(Arc::new(client_store));
-
-//         ctx.set_storage(Arc::new(storage));
-
-//         assert_eq!(
-//             OAuthErrorCode::UnsupportedGrantType,
-//             authorize_code_exchange(
-//                 &ctx,
-//                 "not_authorization_code",
-//                 &client_id,
-//                 &client_secret,
-//                 &redirect_uri
-//             )
-//             .await
-//             .unwrap_err()
-//             .error
-//         );
-
-//         assert_eq!(
-//             (),
-//             authorize_code_exchange(
-//                 &ctx,
-//                 "authorization_code",
-//                 &client_id,
-//                 &client_secret,
-//                 &redirect_uri
-//             )
-//             .await
-//             .unwrap()
-//         );
-//     }
-
-//     #[tokio::test]
-//     async fn test_exchange_checks_for_valid_secret() {
-//         let (mut ctx, client, client_secret) = mock_client().await;
-//         let client_id = client.id;
-//         let redirect_uri = client.redirect_uris[0].redirect_uri.clone();
-
-//         let mut client_store = MockOAuthClientStore::new();
-//         client_store
-//             .expect_get()
-//             .with(eq(client_id), eq(false))
-//             .returning(move |_, _| Ok(Some(client.clone())));
-
-//         let mut storage = MockStorage::new();
-//         storage.oauth_client_store = Some(Arc::new(client_store));
-
-//         ctx.set_storage(Arc::new(storage));
-
-//         let invalid_secret = RawApiKey::generate::<8>(&Uuid::new_v4())
-//             .sign(&*ctx.signer())
-//             .await
-//             .unwrap()
-//             .signature()
-//             .to_string();
-
-//         assert_eq!(
-//             OAuthErrorCode::InvalidRequest,
-//             authorize_code_exchange(
-//                 &ctx,
-//                 "authorization_code",
-//                 &client_id,
-//                 &"too-short".to_string().into(),
-//                 &redirect_uri
-//             )
-//             .await
-//             .unwrap_err()
-//             .error
-//         );
-
-//         assert_eq!(
-//             OAuthErrorCode::InvalidClient,
-//             authorize_code_exchange(
-//                 &ctx,
-//                 "authorization_code",
-//                 &client_id,
-//                 &invalid_secret.into(),
-//                 &redirect_uri
-//             )
-//             .await
-//             .unwrap_err()
-//             .error
-//         );
-
-//         assert_eq!(
-//             (),
-//             authorize_code_exchange(
-//                 &ctx,
-//                 "authorization_code",
-//                 &client_id,
-//                 &client_secret,
-//                 &redirect_uri
-//             )
-//             .await
-//             .unwrap()
-//         );
-//     }
-
-//     #[tokio::test]
-//     async fn test_login_attempt_verification() {
-//         let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
-//         let attempt = LoginAttempt {
-//             id: Uuid::new_v4(),
-//             attempt_state: LoginAttemptState::RemoteAuthenticated,
-//             client_id: Uuid::new_v4(),
-//             redirect_uri: "https://test.oxeng.dev/callback".to_string(),
-//             state: Some("ox_state".to_string()),
-//             pkce_challenge: Some(challenge.as_str().to_string()),
-//             pkce_challenge_method: Some("S256".to_string()),
-//             authz_code: None,
-//             expires_at: Some(Utc::now().add(Duration::seconds(60))),
-//             error: None,
-//             provider: "google".to_string(),
-//             provider_pkce_verifier: Some("rfd_verifier".to_string()),
-//             provider_authz_code: None,
-//             provider_error: None,
-//             created_at: Utc::now(),
-//             updated_at: Utc::now(),
-//             scope: String::new(),
-//         };
-
-//         let bad_client_id = LoginAttempt {
-//             client_id: Uuid::new_v4(),
-//             ..attempt.clone()
-//         };
-
-//         assert_eq!(
-//             OAuthError {
-//                 error: OAuthErrorCode::InvalidGrant,
-//                 error_description: Some("Invalid client id".to_string()),
-//                 error_uri: None,
-//                 state: None,
-//             },
-//             verify_login_attempt(
-//                 &bad_client_id,
-//                 &attempt.client_id,
-//                 &attempt.redirect_uri,
-//                 Some(verifier.secret().as_str()),
-//             )
-//             .unwrap_err()
-//         );
-
-//         let bad_redirect_uri = LoginAttempt {
-//             redirect_uri: "https://bad.oxeng.dev/callback".to_string(),
-//             ..attempt.clone()
-//         };
-
-//         assert_eq!(
-//             OAuthError {
-//                 error: OAuthErrorCode::InvalidGrant,
-//                 error_description: Some("Invalid redirect uri".to_string()),
-//                 error_uri: None,
-//                 state: None,
-//             },
-//             verify_login_attempt(
-//                 &bad_redirect_uri,
-//                 &attempt.client_id,
-//                 &attempt.redirect_uri,
-//                 Some(verifier.secret().as_str()),
-//             )
-//             .unwrap_err()
-//         );
-
-//         let unconfirmed_state = LoginAttempt {
-//             attempt_state: LoginAttemptState::New,
-//             ..attempt.clone()
-//         };
-
-//         assert_eq!(
-//             OAuthError {
-//                 error: OAuthErrorCode::InvalidGrant,
-//                 error_description: Some("Grant is in an invalid state".to_string()),
-//                 error_uri: None,
-//                 state: None,
-//             },
-//             verify_login_attempt(
-//                 &unconfirmed_state,
-//                 &attempt.client_id,
-//                 &attempt.redirect_uri,
-//                 Some(verifier.secret().as_str()),
-//             )
-//             .unwrap_err()
-//         );
-
-//         let already_used_state = LoginAttempt {
-//             attempt_state: LoginAttemptState::Complete,
-//             ..attempt.clone()
-//         };
-
-//         assert_eq!(
-//             OAuthError {
-//                 error: OAuthErrorCode::InvalidGrant,
-//                 error_description: Some("Grant is in an invalid state".to_string()),
-//                 error_uri: None,
-//                 state: None,
-//             },
-//             verify_login_attempt(
-//                 &already_used_state,
-//                 &attempt.client_id,
-//                 &attempt.redirect_uri,
-//                 Some(verifier.secret().as_str()),
-//             )
-//             .unwrap_err()
-//         );
-
-//         let failed_state = LoginAttempt {
-//             attempt_state: LoginAttemptState::Failed,
-//             ..attempt.clone()
-//         };
-
-//         assert_eq!(
-//             OAuthError {
-//                 error: OAuthErrorCode::InvalidGrant,
-//                 error_description: Some("Grant is in an invalid state".to_string()),
-//                 error_uri: None,
-//                 state: None,
-//             },
-//             verify_login_attempt(
-//                 &failed_state,
-//                 &attempt.client_id,
-//                 &attempt.redirect_uri,
-//                 Some(verifier.secret().as_str()),
-//             )
-//             .unwrap_err()
-//         );
-
-//         let expired = LoginAttempt {
-//             expires_at: Some(Utc::now()),
-//             ..attempt.clone()
-//         };
-
-//         assert_eq!(
-//             OAuthError {
-//                 error: OAuthErrorCode::InvalidGrant,
-//                 error_description: Some("Grant has expired".to_string()),
-//                 error_uri: None,
-//                 state: None,
-//             },
-//             verify_login_attempt(
-//                 &expired,
-//                 &attempt.client_id,
-//                 &attempt.redirect_uri,
-//                 Some(verifier.secret().as_str()),
-//             )
-//             .unwrap_err()
-//         );
-
-//         let missing_pkce = LoginAttempt { ..attempt.clone() };
-
-//         assert_eq!(
-//             OAuthError {
-//                 error: OAuthErrorCode::InvalidRequest,
-//                 error_description: Some("Missing pkce verifier".to_string()),
-//                 error_uri: None,
-//                 state: None,
-//             },
-//             verify_login_attempt(
-//                 &missing_pkce,
-//                 &attempt.client_id,
-//                 &attempt.redirect_uri,
-//                 None,
-//             )
-//             .unwrap_err()
-//         );
-
-//         let invalid_pkce = LoginAttempt {
-//             pkce_challenge: Some("no-the-correct-value".to_string()),
-//             ..attempt.clone()
-//         };
-
-//         assert_eq!(
-//             OAuthError {
-//                 error: OAuthErrorCode::InvalidGrant,
-//                 error_description: Some("Invalid pkce verifier".to_string()),
-//                 error_uri: None,
-//                 state: None,
-//             },
-//             verify_login_attempt(
-//                 &invalid_pkce,
-//                 &attempt.client_id,
-//                 &attempt.redirect_uri,
-//                 Some(verifier.secret().as_str()),
-//             )
-//             .unwrap_err()
-//         );
-
-//         assert_eq!(
-//             (),
-//             verify_login_attempt(
-//                 &attempt,
-//                 &attempt.client_id,
-//                 &attempt.redirect_uri,
-//                 Some(verifier.secret().as_str()),
-//             )
-//             .unwrap()
-//         );
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use std::{
+        net::{Ipv4Addr, SocketAddrV4},
+        ops::Add,
+        sync::{Arc, Mutex},
+    };
+
+    use chrono::{Duration, Utc};
+    use dropshot::RequestInfo;
+    use http::{
+        header::{COOKIE, LOCATION, SET_COOKIE},
+        HeaderValue, StatusCode,
+    };
+    use hyper::Body;
+    use mockall::predicate::eq;
+    use oauth2::PkceCodeChallenge;
+    use secrecy::SecretString;
+    use uuid::Uuid;
+    use v_model::{
+        schema_ext::LoginAttemptState,
+        storage::{MockLoginAttemptStore, MockOAuthClientStore},
+        LoginAttempt, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret,
+    };
+
+    use crate::{
+        authn::key::RawApiKey,
+        context::{
+            test_mocks::{mock_context, MockStorage},
+            VContext,
+        },
+        endpoints::login::oauth::{
+            code::{
+                authz_code_callback_op_inner, verify_csrf, verify_login_attempt,
+                OAuthAuthzCodeReturnQuery, OAuthError, OAuthErrorCode, LOGIN_ATTEMPT_COOKIE,
+            },
+            OAuthProviderName,
+        },
+        permissions::VPermission,
+    };
+
+    use super::{authorize_code_exchange, get_oauth_client, oauth_redirect_response};
+
+    async fn mock_client() -> (VContext<VPermission>, OAuthClient, SecretString) {
+        let ctx = mock_context(MockStorage::new()).await;
+        let client_id = Uuid::new_v4();
+        let key = RawApiKey::generate::<8>(&Uuid::new_v4())
+            .sign(&*ctx.signer())
+            .await
+            .unwrap();
+        let secret_signature = key.signature().to_string();
+        let client_secret = key.key();
+        let redirect_uri = "callback-destination";
+
+        (
+            ctx,
+            OAuthClient {
+                id: client_id,
+                secrets: vec![OAuthClientSecret {
+                    id: Uuid::new_v4(),
+                    oauth_client_id: client_id,
+                    secret_signature,
+                    created_at: Utc::now(),
+                    deleted_at: None,
+                }],
+                redirect_uris: vec![OAuthClientRedirectUri {
+                    id: Uuid::new_v4(),
+                    oauth_client_id: client_id,
+                    redirect_uri: redirect_uri.to_string(),
+                    created_at: Utc::now(),
+                    deleted_at: None,
+                }],
+                created_at: Utc::now(),
+                deleted_at: None,
+            },
+            client_secret,
+        )
+    }
+
+    #[tokio::test]
+    async fn test_oauth_client_lookup_checks_redirect_uri() {
+        let client_id = Uuid::new_v4();
+        let client = OAuthClient {
+            id: client_id,
+            secrets: vec![],
+            redirect_uris: vec![OAuthClientRedirectUri {
+                id: Uuid::new_v4(),
+                oauth_client_id: client_id,
+                redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+                created_at: Utc::now(),
+                deleted_at: None,
+            }],
+            created_at: Utc::now(),
+            deleted_at: None,
+        };
+
+        let mut client_store = MockOAuthClientStore::new();
+        client_store
+            .expect_get()
+            .with(eq(client_id), eq(false))
+            .returning(move |_, _| Ok(Some(client.clone())));
+
+        let mut storage = MockStorage::new();
+        storage.oauth_client_store = Some(Arc::new(client_store));
+        let ctx = mock_context(storage).await;
+
+        let failure = get_oauth_client(&ctx, &client_id, "https://not-test.oxeng.dev/callback")
+            .await
+            .unwrap_err();
+        assert_eq!(OAuthErrorCode::InvalidRequest, failure.error);
+        assert_eq!(
+            Some("Invalid redirect uri".to_string()),
+            failure.error_description
+        );
+
+        let success = get_oauth_client(&ctx, &client_id, "https://test.oxeng.dev/callback").await;
+        assert_eq!(client_id, success.unwrap().id);
+    }
+
+    #[tokio::test]
+    async fn test_remote_provider_redirect_url() {
+        let storage = MockStorage::new();
+        let mut ctx = mock_context(storage).await;
+        ctx.with_public_url("https://api.oxeng.dev");
+
+        let (challenge, _) = PkceCodeChallenge::new_random_sha256();
+        let attempt = LoginAttempt {
+            id: Uuid::new_v4(),
+            attempt_state: LoginAttemptState::New,
+            client_id: Uuid::new_v4(),
+            redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+            state: Some("ox_state".to_string()),
+            pkce_challenge: Some("ox_challenge".to_string()),
+            pkce_challenge_method: Some("S256".to_string()),
+            authz_code: None,
+            expires_at: None,
+            error: None,
+            provider: "google".to_string(),
+            provider_pkce_verifier: Some("rfd_verifier".to_string()),
+            provider_authz_code: None,
+            provider_error: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            scope: String::new(),
+        };
+
+        let response = oauth_redirect_response(
+            &ctx.public_url(),
+            &*ctx
+                .get_oauth_provider(&OAuthProviderName::Google)
+                .await
+                .unwrap(),
+            &attempt,
+            Some(challenge.clone()),
+        )
+        .unwrap();
+
+        let expected_location = format!("https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=google_web_client_id&state={}&code_challenge={}&code_challenge_method=S256&redirect_uri=https%3A%2F%2Fapi.oxeng.dev%2Flogin%2Foauth%2Fgoogle%2Fcode%2Fcallback&scope=openid+email", attempt.id, challenge.as_str());
+
+        assert_eq!(
+            expected_location,
+            String::from_utf8(
+                response
+                    .headers()
+                    .get(LOCATION)
+                    .unwrap()
+                    .as_bytes()
+                    .to_vec()
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            attempt.id.to_string().as_str(),
+            String::from_utf8(
+                response
+                    .headers()
+                    .get(SET_COOKIE)
+                    .unwrap()
+                    .as_bytes()
+                    .to_vec()
+            )
+            .unwrap()
+            .split_once('=')
+            .unwrap()
+            .1
+        )
+    }
+
+    #[tokio::test]
+    async fn test_csrf_check() {
+        let id = Uuid::new_v4();
+
+        let mut rq = hyper::Request::new(Body::empty());
+        rq.headers_mut().insert(
+            COOKIE,
+            HeaderValue::from_str(&format!("{}={}", LOGIN_ATTEMPT_COOKIE, id)).unwrap(),
+        );
+        let with_valid_cookie = RequestInfo::new(
+            &rq,
+            std::net::SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 8888)),
+        );
+        let query = OAuthAuthzCodeReturnQuery {
+            state: Some(id.to_string()),
+            code: None,
+            error: None,
+        };
+        assert_eq!(id, verify_csrf(&with_valid_cookie, &query).unwrap());
+
+        let query = OAuthAuthzCodeReturnQuery {
+            state: None,
+            code: None,
+            error: None,
+        };
+        assert_eq!(
+            StatusCode::UNAUTHORIZED,
+            verify_csrf(&with_valid_cookie, &query)
+                .unwrap_err()
+                .status_code
+        );
+
+        let mut rq = hyper::Request::new(Body::empty());
+        rq.headers_mut().insert(
+            COOKIE,
+            HeaderValue::from_str(&format!("{}={}", LOGIN_ATTEMPT_COOKIE, Uuid::new_v4())).unwrap(),
+        );
+        let with_invalid_cookie = RequestInfo::new(
+            &rq,
+            std::net::SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 8888)),
+        );
+        let query = OAuthAuthzCodeReturnQuery {
+            state: Some(id.to_string()),
+            code: None,
+            error: None,
+        };
+        assert_eq!(
+            StatusCode::UNAUTHORIZED,
+            verify_csrf(&with_invalid_cookie, &query)
+                .unwrap_err()
+                .status_code
+        );
+
+        let rq = hyper::Request::new(Body::empty());
+        let with_missing_cookie = RequestInfo::new(
+            &rq,
+            std::net::SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 8888)),
+        );
+        let query = OAuthAuthzCodeReturnQuery {
+            state: Some(id.to_string()),
+            code: None,
+            error: None,
+        };
+        assert_eq!(
+            StatusCode::UNAUTHORIZED,
+            verify_csrf(&with_missing_cookie, &query)
+                .unwrap_err()
+                .status_code
+        );
+    }
+
+    #[tokio::test]
+    async fn test_callback_fails_when_not_in_new_state() {
+        let invalid_states = [
+            LoginAttemptState::Complete,
+            LoginAttemptState::Failed,
+            LoginAttemptState::RemoteAuthenticated,
+        ];
+
+        for state in invalid_states {
+            let attempt_id = Uuid::new_v4();
+            let attempt = LoginAttempt {
+                id: attempt_id,
+                attempt_state: state,
+                client_id: Uuid::new_v4(),
+                redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+                state: Some("ox_state".to_string()),
+                pkce_challenge: Some("ox_challenge".to_string()),
+                pkce_challenge_method: Some("S256".to_string()),
+                authz_code: None,
+                expires_at: None,
+                error: None,
+                provider: "google".to_string(),
+                provider_pkce_verifier: Some("rfd_verifier".to_string()),
+                provider_authz_code: None,
+                provider_error: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                scope: String::new(),
+            };
+
+            let mut storage = MockStorage::new();
+            let mut attempt_store = MockLoginAttemptStore::new();
+            attempt_store
+                .expect_get()
+                .with(eq(attempt.id))
+                .returning(move |_| Ok(Some(attempt.clone())));
+            storage.login_attempt_store = Some(Arc::new(attempt_store));
+
+            let ctx = mock_context(storage).await;
+            let err = authz_code_callback_op_inner(
+                &ctx,
+                &attempt_id,
+                Some("remote-code".to_string()),
+                None,
+            )
+            .await;
+
+            assert_eq!(StatusCode::UNAUTHORIZED, err.unwrap_err().status_code);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_callback_fails_when_error_is_passed() {
+        let attempt_id = Uuid::new_v4();
+        let attempt = LoginAttempt {
+            id: attempt_id,
+            attempt_state: LoginAttemptState::New,
+            client_id: Uuid::new_v4(),
+            redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+            state: Some("ox_state".to_string()),
+            pkce_challenge: Some("ox_challenge".to_string()),
+            pkce_challenge_method: Some("S256".to_string()),
+            authz_code: None,
+            expires_at: None,
+            error: None,
+            provider: "google".to_string(),
+            provider_pkce_verifier: Some("rfd_verifier".to_string()),
+            provider_authz_code: None,
+            provider_error: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            scope: String::new(),
+        };
+
+        let mut attempt_store = MockLoginAttemptStore::new();
+        let original_attempt = attempt.clone();
+        attempt_store
+            .expect_get()
+            .with(eq(attempt.id))
+            .returning(move |_| Ok(Some(original_attempt.clone())));
+
+        attempt_store
+            .expect_upsert()
+            .withf(|attempt| attempt.attempt_state == LoginAttemptState::Failed)
+            .returning(move |arg| {
+                let mut returned = attempt.clone();
+                returned.attempt_state = arg.attempt_state;
+                returned.authz_code = arg.authz_code;
+                returned.error = arg.error;
+                Ok(returned)
+            });
+
+        let mut storage = MockStorage::new();
+        storage.login_attempt_store = Some(Arc::new(attempt_store));
+        let ctx = mock_context(storage).await;
+
+        let location = authz_code_callback_op_inner(
+            &ctx,
+            &attempt_id,
+            Some("remote-code".to_string()),
+            Some("not_access_denied".to_string()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            format!("https://test.oxeng.dev/callback?error=server_error&state=ox_state",),
+            location
+        );
+    }
+
+    #[tokio::test]
+    async fn test_callback_forwards_access_denied() {
+        let attempt_id = Uuid::new_v4();
+        let attempt = LoginAttempt {
+            id: attempt_id,
+            attempt_state: LoginAttemptState::New,
+            client_id: Uuid::new_v4(),
+            redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+            state: Some("ox_state".to_string()),
+            pkce_challenge: Some("ox_challenge".to_string()),
+            pkce_challenge_method: Some("S256".to_string()),
+            authz_code: None,
+            expires_at: None,
+            error: None,
+            provider: "google".to_string(),
+            provider_pkce_verifier: Some("rfd_verifier".to_string()),
+            provider_authz_code: None,
+            provider_error: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            scope: String::new(),
+        };
+
+        let mut attempt_store = MockLoginAttemptStore::new();
+        let original_attempt = attempt.clone();
+        attempt_store
+            .expect_get()
+            .with(eq(attempt.id))
+            .returning(move |_| Ok(Some(original_attempt.clone())));
+
+        attempt_store
+            .expect_upsert()
+            .withf(|attempt| attempt.attempt_state == LoginAttemptState::Failed)
+            .returning(move |arg| {
+                let mut returned = attempt.clone();
+                returned.attempt_state = arg.attempt_state;
+                returned.authz_code = arg.authz_code;
+                returned.error = arg.error;
+                Ok(returned)
+            });
+
+        let mut storage = MockStorage::new();
+        storage.login_attempt_store = Some(Arc::new(attempt_store));
+        let ctx = mock_context(storage).await;
+
+        let location = authz_code_callback_op_inner(
+            &ctx,
+            &attempt_id,
+            Some("remote-code".to_string()),
+            Some("access_denied".to_string()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            format!("https://test.oxeng.dev/callback?error=access_denied&state=ox_state",),
+            location
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handles_callback_with_code() {
+        let attempt_id = Uuid::new_v4();
+        let attempt = LoginAttempt {
+            id: attempt_id,
+            attempt_state: LoginAttemptState::New,
+            client_id: Uuid::new_v4(),
+            redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+            state: Some("ox_state".to_string()),
+            pkce_challenge: Some("ox_challenge".to_string()),
+            pkce_challenge_method: Some("S256".to_string()),
+            authz_code: None,
+            expires_at: None,
+            error: None,
+            provider: "google".to_string(),
+            provider_pkce_verifier: Some("rfd_verifier".to_string()),
+            provider_authz_code: None,
+            provider_error: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            scope: String::new(),
+        };
+
+        let mut attempt_store = MockLoginAttemptStore::new();
+        let original_attempt = attempt.clone();
+        attempt_store
+            .expect_get()
+            .with(eq(attempt.id))
+            .returning(move |_| Ok(Some(original_attempt.clone())));
+
+        let extracted_code = Arc::new(Mutex::new(None));
+        let extractor = extracted_code.clone();
+        attempt_store
+            .expect_upsert()
+            .withf(|attempt| attempt.attempt_state == LoginAttemptState::RemoteAuthenticated)
+            .returning(move |arg| {
+                let mut returned = attempt.clone();
+                returned.attempt_state = arg.attempt_state;
+                returned.authz_code = arg.authz_code;
+                *extractor.lock().unwrap() = returned.authz_code.clone();
+                Ok(returned)
+            });
+
+        let mut storage = MockStorage::new();
+        storage.login_attempt_store = Some(Arc::new(attempt_store));
+        let ctx = mock_context(storage).await;
+
+        let location =
+            authz_code_callback_op_inner(&ctx, &attempt_id, Some("remote-code".to_string()), None)
+                .await
+                .unwrap();
+
+        let lock = extracted_code.lock();
+        assert_eq!(
+            format!(
+                "https://test.oxeng.dev/callback?code={}&state=ox_state",
+                lock.unwrap().as_ref().unwrap()
+            ),
+            location
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fails_callback_with_error() {}
+
+    #[tokio::test]
+    async fn test_exchange_checks_client_id_and_redirect() {
+        let (mut ctx, client, client_secret) = mock_client().await;
+        let client_id = client.id;
+        let redirect_uri = client.redirect_uris[0].redirect_uri.clone();
+        let wrong_client_id = Uuid::new_v4();
+
+        let mut client_store = MockOAuthClientStore::new();
+        client_store
+            .expect_get()
+            .with(eq(wrong_client_id), eq(false))
+            .returning(move |_, _| Ok(None));
+        client_store
+            .expect_get()
+            .with(eq(client_id), eq(false))
+            .returning(move |_, _| Ok(Some(client.clone())));
+
+        let mut storage = MockStorage::new();
+        storage.oauth_client_store = Some(Arc::new(client_store));
+
+        ctx.set_storage(Arc::new(storage));
+
+        // 1. Verify exchange fails when passing an incorrect client id
+        assert_eq!(
+            Some("Unknown client id".to_string()),
+            authorize_code_exchange(
+                &ctx,
+                "authorization_code",
+                &wrong_client_id,
+                &client_secret,
+                &redirect_uri,
+            )
+            .await
+            .unwrap_err()
+            .error_description
+        );
+
+        // 2. Verify exchange fails when passing an incorrect redirect uri
+        assert_eq!(
+            Some("Invalid redirect uri".to_string()),
+            authorize_code_exchange(
+                &ctx,
+                "authorization_code",
+                &client_id,
+                &client_secret,
+                "wrong-callback-destination",
+            )
+            .await
+            .unwrap_err()
+            .error_description
+        );
+
+        // 3. Verify a successful exchange
+        assert_eq!(
+            (),
+            authorize_code_exchange(
+                &ctx,
+                "authorization_code",
+                &client_id,
+                &client_secret,
+                &redirect_uri,
+            )
+            .await
+            .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_exchange_checks_grant_type() {
+        let (mut ctx, client, client_secret) = mock_client().await;
+        let client_id = client.id;
+        let redirect_uri = client.redirect_uris[0].redirect_uri.clone();
+
+        let mut client_store = MockOAuthClientStore::new();
+        client_store
+            .expect_get()
+            .with(eq(client_id), eq(false))
+            .returning(move |_, _| Ok(Some(client.clone())));
+
+        let mut storage = MockStorage::new();
+        storage.oauth_client_store = Some(Arc::new(client_store));
+
+        ctx.set_storage(Arc::new(storage));
+
+        assert_eq!(
+            OAuthErrorCode::UnsupportedGrantType,
+            authorize_code_exchange(
+                &ctx,
+                "not_authorization_code",
+                &client_id,
+                &client_secret,
+                &redirect_uri
+            )
+            .await
+            .unwrap_err()
+            .error
+        );
+
+        assert_eq!(
+            (),
+            authorize_code_exchange(
+                &ctx,
+                "authorization_code",
+                &client_id,
+                &client_secret,
+                &redirect_uri
+            )
+            .await
+            .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_exchange_checks_for_valid_secret() {
+        let (mut ctx, client, client_secret) = mock_client().await;
+        let client_id = client.id;
+        let redirect_uri = client.redirect_uris[0].redirect_uri.clone();
+
+        let mut client_store = MockOAuthClientStore::new();
+        client_store
+            .expect_get()
+            .with(eq(client_id), eq(false))
+            .returning(move |_, _| Ok(Some(client.clone())));
+
+        let mut storage = MockStorage::new();
+        storage.oauth_client_store = Some(Arc::new(client_store));
+
+        ctx.set_storage(Arc::new(storage));
+
+        let invalid_secret = RawApiKey::generate::<8>(&Uuid::new_v4())
+            .sign(&*ctx.signer())
+            .await
+            .unwrap()
+            .signature()
+            .to_string();
+
+        assert_eq!(
+            OAuthErrorCode::InvalidRequest,
+            authorize_code_exchange(
+                &ctx,
+                "authorization_code",
+                &client_id,
+                &"too-short".to_string().into(),
+                &redirect_uri
+            )
+            .await
+            .unwrap_err()
+            .error
+        );
+
+        assert_eq!(
+            OAuthErrorCode::InvalidClient,
+            authorize_code_exchange(
+                &ctx,
+                "authorization_code",
+                &client_id,
+                &invalid_secret.into(),
+                &redirect_uri
+            )
+            .await
+            .unwrap_err()
+            .error
+        );
+
+        assert_eq!(
+            (),
+            authorize_code_exchange(
+                &ctx,
+                "authorization_code",
+                &client_id,
+                &client_secret,
+                &redirect_uri
+            )
+            .await
+            .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_login_attempt_verification() {
+        let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
+        let attempt = LoginAttempt {
+            id: Uuid::new_v4(),
+            attempt_state: LoginAttemptState::RemoteAuthenticated,
+            client_id: Uuid::new_v4(),
+            redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+            state: Some("ox_state".to_string()),
+            pkce_challenge: Some(challenge.as_str().to_string()),
+            pkce_challenge_method: Some("S256".to_string()),
+            authz_code: None,
+            expires_at: Some(Utc::now().add(Duration::seconds(60))),
+            error: None,
+            provider: "google".to_string(),
+            provider_pkce_verifier: Some("rfd_verifier".to_string()),
+            provider_authz_code: None,
+            provider_error: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            scope: String::new(),
+        };
+
+        let bad_client_id = LoginAttempt {
+            client_id: Uuid::new_v4(),
+            ..attempt.clone()
+        };
+
+        assert_eq!(
+            OAuthError {
+                error: OAuthErrorCode::InvalidGrant,
+                error_description: Some("Invalid client id".to_string()),
+                error_uri: None,
+                state: None,
+            },
+            verify_login_attempt(
+                &bad_client_id,
+                &attempt.client_id,
+                &attempt.redirect_uri,
+                Some(verifier.secret().as_str()),
+            )
+            .unwrap_err()
+        );
+
+        let bad_redirect_uri = LoginAttempt {
+            redirect_uri: "https://bad.oxeng.dev/callback".to_string(),
+            ..attempt.clone()
+        };
+
+        assert_eq!(
+            OAuthError {
+                error: OAuthErrorCode::InvalidGrant,
+                error_description: Some("Invalid redirect uri".to_string()),
+                error_uri: None,
+                state: None,
+            },
+            verify_login_attempt(
+                &bad_redirect_uri,
+                &attempt.client_id,
+                &attempt.redirect_uri,
+                Some(verifier.secret().as_str()),
+            )
+            .unwrap_err()
+        );
+
+        let unconfirmed_state = LoginAttempt {
+            attempt_state: LoginAttemptState::New,
+            ..attempt.clone()
+        };
+
+        assert_eq!(
+            OAuthError {
+                error: OAuthErrorCode::InvalidGrant,
+                error_description: Some("Grant is in an invalid state".to_string()),
+                error_uri: None,
+                state: None,
+            },
+            verify_login_attempt(
+                &unconfirmed_state,
+                &attempt.client_id,
+                &attempt.redirect_uri,
+                Some(verifier.secret().as_str()),
+            )
+            .unwrap_err()
+        );
+
+        let already_used_state = LoginAttempt {
+            attempt_state: LoginAttemptState::Complete,
+            ..attempt.clone()
+        };
+
+        assert_eq!(
+            OAuthError {
+                error: OAuthErrorCode::InvalidGrant,
+                error_description: Some("Grant is in an invalid state".to_string()),
+                error_uri: None,
+                state: None,
+            },
+            verify_login_attempt(
+                &already_used_state,
+                &attempt.client_id,
+                &attempt.redirect_uri,
+                Some(verifier.secret().as_str()),
+            )
+            .unwrap_err()
+        );
+
+        let failed_state = LoginAttempt {
+            attempt_state: LoginAttemptState::Failed,
+            ..attempt.clone()
+        };
+
+        assert_eq!(
+            OAuthError {
+                error: OAuthErrorCode::InvalidGrant,
+                error_description: Some("Grant is in an invalid state".to_string()),
+                error_uri: None,
+                state: None,
+            },
+            verify_login_attempt(
+                &failed_state,
+                &attempt.client_id,
+                &attempt.redirect_uri,
+                Some(verifier.secret().as_str()),
+            )
+            .unwrap_err()
+        );
+
+        let expired = LoginAttempt {
+            expires_at: Some(Utc::now()),
+            ..attempt.clone()
+        };
+
+        assert_eq!(
+            OAuthError {
+                error: OAuthErrorCode::InvalidGrant,
+                error_description: Some("Grant has expired".to_string()),
+                error_uri: None,
+                state: None,
+            },
+            verify_login_attempt(
+                &expired,
+                &attempt.client_id,
+                &attempt.redirect_uri,
+                Some(verifier.secret().as_str()),
+            )
+            .unwrap_err()
+        );
+
+        let missing_pkce = LoginAttempt { ..attempt.clone() };
+
+        assert_eq!(
+            OAuthError {
+                error: OAuthErrorCode::InvalidRequest,
+                error_description: Some("Missing pkce verifier".to_string()),
+                error_uri: None,
+                state: None,
+            },
+            verify_login_attempt(
+                &missing_pkce,
+                &attempt.client_id,
+                &attempt.redirect_uri,
+                None,
+            )
+            .unwrap_err()
+        );
+
+        let invalid_pkce = LoginAttempt {
+            pkce_challenge: Some("no-the-correct-value".to_string()),
+            ..attempt.clone()
+        };
+
+        assert_eq!(
+            OAuthError {
+                error: OAuthErrorCode::InvalidGrant,
+                error_description: Some("Invalid pkce verifier".to_string()),
+                error_uri: None,
+                state: None,
+            },
+            verify_login_attempt(
+                &invalid_pkce,
+                &attempt.client_id,
+                &attempt.redirect_uri,
+                Some(verifier.secret().as_str()),
+            )
+            .unwrap_err()
+        );
+
+        assert_eq!(
+            (),
+            verify_login_attempt(
+                &attempt,
+                &attempt.client_id,
+                &attempt.redirect_uri,
+                Some(verifier.secret().as_str()),
+            )
+            .unwrap()
+        );
+    }
+}

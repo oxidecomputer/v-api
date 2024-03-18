@@ -1559,674 +1559,671 @@ where
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use chrono::{Duration, Utc};
-//     use mockall::predicate::eq;
-//     use std::{collections::BTreeSet, ops::Add, sync::Arc};
-//     use uuid::Uuid;
-//     use v_model::{
-//         storage::{AccessGroupFilter, ListPagination, MockAccessGroupStore, MockApiUserStore},
-//         AccessGroup, ApiUser, ApiUserProvider,
-//     };
+#[cfg(test)]
+mod tests {
+    use chrono::{Duration, Utc};
+    use mockall::predicate::eq;
+    use v_api_permissions::Permissions;
+    use std::{collections::BTreeSet, ops::Add, sync::Arc};
+    use uuid::Uuid;
+    use v_model::{
+        storage::{AccessGroupFilter, ListPagination, MockAccessGroupStore, MockApiUserStore},
+        AccessGroup, ApiUser, ApiUserProvider,
+    };
 
-//     use crate::{
-//         authn::{
-//             jwt::{Claims, Jwt},
-//             AuthToken,
-//         },
-//         context::UNLIMITED,
-//         permissions::ApiPermission,
-//     };
+    use crate::{
+        authn::{
+            jwt::{Claims, Jwt},
+            AuthToken,
+        },
+        context::UNLIMITED, permissions::VPermission,
+    };
 
-//     use super::{
-//         test_mocks::{mock_context, MockStorage},
-//         VContext,
-//     };
+    use super::{
+        test_mocks::{mock_context, MockStorage},
+        VContext,
+    };
 
-//     async fn create_token(
-//         ctx: &VContext<ApiPermission>,
-//         user_id: Uuid,
-//         scope: Vec<String>,
-//     ) -> AuthToken {
-//         let user = User {
-//             id: user_id,
-//             permissions: vec![].into(),
-//             groups: BTreeSet::new(),
-//             created_at: Utc::now(),
-//             updated_at: Utc::now(),
-//             deleted_at: None,
-//         };
+    async fn create_token(
+        ctx: &VContext<VPermission>,
+        user_id: Uuid,
+        scope: Vec<String>,
+    ) -> AuthToken {
+        let user = ApiUser {
+            id: user_id,
+            permissions: Permissions::new(),
+            groups: BTreeSet::new(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            deleted_at: None,
+        };
 
-//         let provider = ApiUserProvider {
-//             id: Uuid::new_v4(),
-//             api_user_id: user_id,
-//             provider: "test".to_string(),
-//             provider_id: "test_id".to_string(),
-//             emails: vec![],
-//             display_names: vec![],
-//             created_at: Utc::now(),
-//             updated_at: Utc::now(),
-//             deleted_at: None,
-//         };
+        let provider = ApiUserProvider {
+            id: Uuid::new_v4(),
+            api_user_id: user_id,
+            provider: "test".to_string(),
+            provider_id: "test_id".to_string(),
+            emails: vec![],
+            display_names: vec![],
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            deleted_at: None,
+        };
 
-//         let user_token = ctx.jwt.signers[0]
-//             .sign(&Claims::new(
-//                 ctx,
-//                 &user,
-//                 &provider,
-//                 Some(scope),
-//                 Utc::now().add(Duration::seconds(300)),
-//             ))
-//             .await
-//             .unwrap();
+        let user_token = ctx.jwt.signers[0]
+            .sign(&Claims::new(
+                ctx,
+                &user,
+                &provider,
+                Some(scope),
+                Utc::now().add(Duration::seconds(300)),
+            ))
+            .await
+            .unwrap();
 
-//         let jwt = AuthToken::Jwt(Jwt::new(&ctx, &user_token).await.unwrap());
+        let jwt = AuthToken::Jwt(Jwt::new(&ctx, &user_token).await.unwrap());
 
-//         jwt
-//     }
+        jwt
+    }
 
-//     #[tokio::test]
-//     async fn test_jwt_permissions() {
-//         let mut storage = MockStorage::new();
+    #[tokio::test]
+    async fn test_jwt_permissions() {
+        let mut storage = MockStorage::new();
 
-//         let group_id = Uuid::new_v4();
-//         let group_permissions: ApiPermissions = vec![ApiPermission::CreateGroup].into();
-//         let group = AccessGroup {
-//             id: group_id,
-//             name: "TestGroup".to_string(),
-//             permissions: group_permissions.clone(),
-//             created_at: Utc::now(),
-//             updated_at: Utc::now(),
-//             deleted_at: None,
-//         };
-//         let pagination = ListPagination::default().limit(UNLIMITED);
-//         let mut group_store = MockAccessGroupStore::new();
-//         group_store
-//             .expect_list()
-//             .with(
-//                 eq(AccessGroupFilter {
-//                     id: Some(vec![group_id]),
-//                     ..Default::default()
-//                 }),
-//                 eq(pagination),
-//             )
-//             .returning(move |_, _| Ok(vec![group.clone()]));
+        let group_id = Uuid::new_v4();
+        let group_permissions: Permissions<VPermission> = vec![VPermission::CreateGroup].into();
+        let group = AccessGroup {
+            id: group_id,
+            name: "TestGroup".to_string(),
+            permissions: group_permissions.clone(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            deleted_at: None,
+        };
+        let pagination = ListPagination::default().limit(UNLIMITED);
+        let mut group_store = MockAccessGroupStore::new();
+        group_store
+            .expect_list()
+            .with(
+                eq(AccessGroupFilter {
+                    id: Some(vec![group_id]),
+                    ..Default::default()
+                }),
+                eq(pagination),
+            )
+            .returning(move |_, _| Ok(vec![group.clone()]));
 
-//         let user_id = Uuid::new_v4();
-//         let user_permissions: ApiPermissions = vec![ApiPermission::ListMappers].into();
-//         let mut groups = BTreeSet::new();
-//         groups.insert(group_id);
-//         let user = ApiUser {
-//             id: user_id,
-//             permissions: user_permissions.clone(),
-//             groups,
-//             created_at: Utc::now(),
-//             updated_at: Utc::now(),
-//             deleted_at: None,
-//         };
+        let user_id = Uuid::new_v4();
+        let user_permissions: Permissions<VPermission> = vec![VPermission::ListMappers].into();
+        let mut groups = BTreeSet::new();
+        groups.insert(group_id);
+        let user = ApiUser {
+            id: user_id,
+            permissions: user_permissions.clone(),
+            groups,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            deleted_at: None,
+        };
 
-//         let mut user_store = MockApiUserStore::new();
-//         user_store
-//             .expect_get()
-//             .with(eq(user.id), eq(false))
-//             .returning(move |_, _| Ok(Some(user.clone())));
+        let mut user_store = MockApiUserStore::new();
+        user_store
+            .expect_get()
+            .with(eq(user.id), eq(false))
+            .returning(move |_, _| Ok(Some(user.clone())));
 
-//         storage.access_group_store = Some(Arc::new(group_store));
-//         storage.api_user_store = Some(Arc::new(user_store));
-//         let ctx = mock_context(storage).await;
+        storage.access_group_store = Some(Arc::new(group_store));
+        storage.api_user_store = Some(Arc::new(user_store));
+        let ctx = mock_context(storage).await;
 
-//         let token_with_no_scope = create_token(&ctx, user_id, vec![]).await;
-//         let permissions = ctx.get_caller(Some(&token_with_no_scope)).await.unwrap();
-//         assert_eq!(ApiPermissions::new(), permissions.permissions);
+        let token_with_no_scope = create_token(&ctx, user_id, vec![]).await;
+        let permissions = ctx.get_caller(Some(&token_with_no_scope)).await.unwrap();
+        assert_eq!(Permissions::<VPermission>::new(), permissions.permissions);
 
-//         let token_with_read_user_info = create_token(
-//             &ctx,
-//             user_id,
-//             vec![
-//                 "group:w".to_string(),
-//                 "mapper:r".to_string(),
-//                 "user:info:r".to_string(),
-//             ],
-//         )
-//         .await;
-//         let permissions = ctx
-//             .get_caller(Some(&token_with_read_user_info))
-//             .await
-//             .unwrap();
-//         assert_eq!(
-//             ApiPermissions::from(vec![ApiPermission::CreateGroup, ApiPermission::ListMappers,]),
-//             permissions.permissions
-//         );
-//     }
-// }
+        let token_with_read_user_info = create_token(
+            &ctx,
+            user_id,
+            vec![
+                "group:w".to_string(),
+                "mapper:r".to_string(),
+                "user:info:r".to_string(),
+            ],
+        )
+        .await;
+        let permissions = ctx
+            .get_caller(Some(&token_with_read_user_info))
+            .await
+            .unwrap();
+        assert_eq!(
+            Permissions::<VPermission>::from(vec![VPermission::CreateGroup, VPermission::ListMappers,]),
+            permissions.permissions
+        );
+    }
+}
 
-// #[cfg(test)]
-// pub(crate) mod test_mocks {
-//     use async_trait::async_trait;
-//     use std::sync::Arc;
-//     use v_api_permissions::Caller;
-//     use v_model::{
-//         storage::{
-//             AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserProviderStore, ApiUserStore,
-//             LinkRequestStore, ListPagination, LoginAttemptStore, MapperStore, MockAccessGroupStore,
-//             MockAccessTokenStore, MockApiKeyStore, MockApiUserProviderStore, MockApiUserStore,
-//             MockLinkRequestStore, MockLoginAttemptStore, MockMapperStore,
-//             MockOAuthClientRedirectUriStore, MockOAuthClientSecretStore, MockOAuthClientStore,
-//             OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore,
-//         },
-//         ApiKey, ApiUserProvider, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
-//         NewApiUserProvider, NewLoginAttempt, NewMapper,
-//     };
+#[cfg(test)]
+pub(crate) mod test_mocks {
+    use async_trait::async_trait;
+    use std::sync::Arc;
+    use v_api_permissions::Caller;
+    use v_model::{
+        storage::{
+            AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserProviderStore, ApiUserStore,
+            LinkRequestStore, ListPagination, LoginAttemptStore, MapperStore, MockAccessGroupStore,
+            MockAccessTokenStore, MockApiKeyStore, MockApiUserProviderStore, MockApiUserStore,
+            MockLinkRequestStore, MockLoginAttemptStore, MockMapperStore,
+            MockOAuthClientRedirectUriStore, MockOAuthClientSecretStore, MockOAuthClientStore,
+            OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore,
+        },
+        ApiKey, ApiUserProvider, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
+        NewApiUserProvider, NewLoginAttempt, NewMapper,
+    };
 
-//     use crate::{
-//         config::JwtConfig,
-//         endpoints::login::oauth::{google::GoogleOAuthProvider, OAuthProviderName},
-//         permissions::ApiPermission,
-//         util::tests::mock_key,
-//     };
+    use crate::{
+        config::JwtConfig, endpoints::login::oauth::{google::GoogleOAuthProvider, OAuthProviderName}, permissions::VPermission, util::tests::mock_key
+    };
 
-//     use super::VContext;
+    use super::VContext;
 
-//     // Construct a mock context that can be used in tests
-//     pub async fn mock_context(storage: MockStorage) -> VContext<ApiPermission> {
-//         let mut ctx = VContext::new(
-//             "".to_string(),
-//             Arc::new(storage),
-//             JwtConfig::default(),
-//             vec![
-//                 // We are in the context of a test and do not care about the key leaking
-//                 mock_key(),
-//             ],
-//         )
-//         .await
-//         .unwrap();
+    // Construct a mock context that can be used in tests
+    pub async fn mock_context(storage: MockStorage) -> VContext<VPermission> {
+        let mut ctx = VContext::new(
+            "".to_string(),
+            Arc::new(storage),
+            JwtConfig::default(),
+            vec![
+                // We are in the context of a test and do not care about the key leaking
+                mock_key(),
+            ],
+        )
+        .await
+        .unwrap();
 
-//         ctx.insert_oauth_provider(
-//             OAuthProviderName::Google,
-//             Box::new(move || {
-//                 Box::new(GoogleOAuthProvider::new(
-//                     "google_device_client_id".to_string(),
-//                     "google_device_client_secret".to_string().into(),
-//                     "google_web_client_id".to_string(),
-//                     "google_web_client_secret".to_string().into(),
-//                 ))
-//             }),
-//         );
+        ctx.insert_oauth_provider(
+            OAuthProviderName::Google,
+            Box::new(move || {
+                Box::new(GoogleOAuthProvider::new(
+                    "google_device_client_id".to_string(),
+                    "google_device_client_secret".to_string().into(),
+                    "google_web_client_id".to_string(),
+                    "google_web_client_secret".to_string().into(),
+                ))
+            }),
+        );
 
-//         ctx
-//     }
+        ctx
+    }
 
-//     // Construct a mock storage engine that can be wrapped in an ApiContext for testing
-//     pub struct MockStorage {
-//         pub caller: Option<Caller<ApiPermission>>,
-//         pub api_user_store: Option<Arc<MockApiUserStore<ApiPermission>>>,
-//         pub api_user_token_store: Option<Arc<MockApiKeyStore<ApiPermission>>>,
-//         pub api_user_provider_store: Option<Arc<MockApiUserProviderStore>>,
-//         pub device_token_store: Option<Arc<MockAccessTokenStore>>,
-//         pub login_attempt_store: Option<Arc<MockLoginAttemptStore>>,
-//         pub oauth_client_store: Option<Arc<MockOAuthClientStore>>,
-//         pub oauth_client_secret_store: Option<Arc<MockOAuthClientSecretStore>>,
-//         pub oauth_client_redirect_uri_store: Option<Arc<MockOAuthClientRedirectUriStore>>,
-//         pub access_group_store: Option<Arc<MockAccessGroupStore<ApiPermission>>>,
-//         pub mapper_store: Option<Arc<MockMapperStore>>,
-//         pub link_request_store: Option<Arc<MockLinkRequestStore>>,
-//     }
+    // Construct a mock storage engine that can be wrapped in an ApiContext for testing
+    pub struct MockStorage {
+        pub caller: Option<Caller<VPermission>>,
+        pub api_user_store: Option<Arc<MockApiUserStore<VPermission>>>,
+        pub api_user_token_store: Option<Arc<MockApiKeyStore<VPermission>>>,
+        pub api_user_provider_store: Option<Arc<MockApiUserProviderStore>>,
+        pub device_token_store: Option<Arc<MockAccessTokenStore>>,
+        pub login_attempt_store: Option<Arc<MockLoginAttemptStore>>,
+        pub oauth_client_store: Option<Arc<MockOAuthClientStore>>,
+        pub oauth_client_secret_store: Option<Arc<MockOAuthClientSecretStore>>,
+        pub oauth_client_redirect_uri_store: Option<Arc<MockOAuthClientRedirectUriStore>>,
+        pub access_group_store: Option<Arc<MockAccessGroupStore<VPermission>>>,
+        pub mapper_store: Option<Arc<MockMapperStore>>,
+        pub link_request_store: Option<Arc<MockLinkRequestStore>>,
+    }
 
-//     impl MockStorage {
-//         pub fn new() -> Self {
-//             Self {
-//                 caller: None,
-//                 api_user_store: None,
-//                 api_user_token_store: None,
-//                 api_user_provider_store: None,
-//                 device_token_store: None,
-//                 login_attempt_store: None,
-//                 oauth_client_store: None,
-//                 oauth_client_secret_store: None,
-//                 oauth_client_redirect_uri_store: None,
-//                 access_group_store: None,
-//                 mapper_store: None,
-//                 link_request_store: None,
-//             }
-//         }
-//     }
+    impl MockStorage {
+        pub fn new() -> Self {
+            Self {
+                caller: None,
+                api_user_store: None,
+                api_user_token_store: None,
+                api_user_provider_store: None,
+                device_token_store: None,
+                login_attempt_store: None,
+                oauth_client_store: None,
+                oauth_client_secret_store: None,
+                oauth_client_redirect_uri_store: None,
+                access_group_store: None,
+                mapper_store: None,
+                link_request_store: None,
+            }
+        }
+    }
 
-//     #[async_trait]
-//     impl ApiUserStore<ApiPermission> for MockStorage {
-//         async fn get(
-//             &self,
-//             id: &uuid::Uuid,
-//             deleted: bool,
-//         ) -> Result<Option<v_model::ApiUser<ApiPermission>>, v_model::storage::StoreError> {
-//             self.api_user_store.as_ref().unwrap().get(id, deleted).await
-//         }
+    #[async_trait]
+    impl ApiUserStore<VPermission> for MockStorage {
+        async fn get(
+            &self,
+            id: &uuid::Uuid,
+            deleted: bool,
+        ) -> Result<Option<v_model::ApiUser<VPermission>>, v_model::storage::StoreError> {
+            self.api_user_store.as_ref().unwrap().get(id, deleted).await
+        }
 
-//         async fn list(
-//             &self,
-//             filter: v_model::storage::ApiUserFilter,
-//             pagination: &ListPagination,
-//         ) -> Result<Vec<v_model::ApiUser<ApiPermission>>, v_model::storage::StoreError> {
-//             self.api_user_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .list(filter, pagination)
-//                 .await
-//         }
+        async fn list(
+            &self,
+            filter: v_model::storage::ApiUserFilter,
+            pagination: &ListPagination,
+        ) -> Result<Vec<v_model::ApiUser<VPermission>>, v_model::storage::StoreError> {
+            self.api_user_store
+                .as_ref()
+                .unwrap()
+                .list(filter, pagination)
+                .await
+        }
 
-//         async fn upsert(
-//             &self,
-//             api_user: NewApiUser<ApiPermission>,
-//         ) -> Result<v_model::ApiUser<ApiPermission>, v_model::storage::StoreError> {
-//             self.api_user_store.as_ref().unwrap().upsert(api_user).await
-//         }
+        async fn upsert(
+            &self,
+            api_user: NewApiUser<VPermission>,
+        ) -> Result<v_model::ApiUser<VPermission>, v_model::storage::StoreError> {
+            self.api_user_store.as_ref().unwrap().upsert(api_user).await
+        }
 
-//         async fn delete(
-//             &self,
-//             id: &uuid::Uuid,
-//         ) -> Result<Option<v_model::ApiUser<ApiPermission>>, v_model::storage::StoreError> {
-//             self.api_user_store.as_ref().unwrap().delete(id).await
-//         }
-//     }
+        async fn delete(
+            &self,
+            id: &uuid::Uuid,
+        ) -> Result<Option<v_model::ApiUser<VPermission>>, v_model::storage::StoreError> {
+            self.api_user_store.as_ref().unwrap().delete(id).await
+        }
+    }
 
-//     #[async_trait]
-//     impl ApiKeyStore<ApiPermission> for MockStorage {
-//         async fn get(
-//             &self,
-//             id: &uuid::Uuid,
-//             deleted: bool,
-//         ) -> Result<Option<ApiKey<ApiPermission>>, v_model::storage::StoreError> {
-//             self.api_user_token_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .get(id, deleted)
-//                 .await
-//         }
+    #[async_trait]
+    impl ApiKeyStore<VPermission> for MockStorage {
+        async fn get(
+            &self,
+            id: &uuid::Uuid,
+            deleted: bool,
+        ) -> Result<Option<ApiKey<VPermission>>, v_model::storage::StoreError> {
+            self.api_user_token_store
+                .as_ref()
+                .unwrap()
+                .get(id, deleted)
+                .await
+        }
 
-//         async fn list(
-//             &self,
-//             filter: v_model::storage::ApiKeyFilter,
-//             pagination: &ListPagination,
-//         ) -> Result<Vec<ApiKey<ApiPermission>>, v_model::storage::StoreError> {
-//             self.api_user_token_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .list(filter, pagination)
-//                 .await
-//         }
+        async fn list(
+            &self,
+            filter: v_model::storage::ApiKeyFilter,
+            pagination: &ListPagination,
+        ) -> Result<Vec<ApiKey<VPermission>>, v_model::storage::StoreError> {
+            self.api_user_token_store
+                .as_ref()
+                .unwrap()
+                .list(filter, pagination)
+                .await
+        }
 
-//         async fn upsert(
-//             &self,
-//             token: NewApiKey<ApiPermission>,
-//         ) -> Result<ApiKey<ApiPermission>, v_model::storage::StoreError> {
-//             self.api_user_token_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .upsert(token)
-//                 .await
-//         }
+        async fn upsert(
+            &self,
+            token: NewApiKey<VPermission>,
+        ) -> Result<ApiKey<VPermission>, v_model::storage::StoreError> {
+            self.api_user_token_store
+                .as_ref()
+                .unwrap()
+                .upsert(token)
+                .await
+        }
 
-//         async fn delete(
-//             &self,
-//             id: &uuid::Uuid,
-//         ) -> Result<Option<ApiKey<ApiPermission>>, v_model::storage::StoreError> {
-//             self.api_user_token_store.as_ref().unwrap().delete(id).await
-//         }
-//     }
+        async fn delete(
+            &self,
+            id: &uuid::Uuid,
+        ) -> Result<Option<ApiKey<VPermission>>, v_model::storage::StoreError> {
+            self.api_user_token_store.as_ref().unwrap().delete(id).await
+        }
+    }
 
-//     #[async_trait]
-//     impl ApiUserProviderStore for MockStorage {
-//         async fn get(
-//             &self,
-//             id: &uuid::Uuid,
-//             deleted: bool,
-//         ) -> Result<Option<ApiUserProvider>, v_model::storage::StoreError> {
-//             self.api_user_provider_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .get(id, deleted)
-//                 .await
-//         }
+    #[async_trait]
+    impl ApiUserProviderStore for MockStorage {
+        async fn get(
+            &self,
+            id: &uuid::Uuid,
+            deleted: bool,
+        ) -> Result<Option<ApiUserProvider>, v_model::storage::StoreError> {
+            self.api_user_provider_store
+                .as_ref()
+                .unwrap()
+                .get(id, deleted)
+                .await
+        }
 
-//         async fn list(
-//             &self,
-//             filter: v_model::storage::ApiUserProviderFilter,
-//             pagination: &ListPagination,
-//         ) -> Result<Vec<ApiUserProvider>, v_model::storage::StoreError> {
-//             self.api_user_provider_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .list(filter, pagination)
-//                 .await
-//         }
+        async fn list(
+            &self,
+            filter: v_model::storage::ApiUserProviderFilter,
+            pagination: &ListPagination,
+        ) -> Result<Vec<ApiUserProvider>, v_model::storage::StoreError> {
+            self.api_user_provider_store
+                .as_ref()
+                .unwrap()
+                .list(filter, pagination)
+                .await
+        }
 
-//         async fn upsert(
-//             &self,
-//             provider: NewApiUserProvider,
-//         ) -> Result<ApiUserProvider, v_model::storage::StoreError> {
-//             self.api_user_provider_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .upsert(provider)
-//                 .await
-//         }
+        async fn upsert(
+            &self,
+            provider: NewApiUserProvider,
+        ) -> Result<ApiUserProvider, v_model::storage::StoreError> {
+            self.api_user_provider_store
+                .as_ref()
+                .unwrap()
+                .upsert(provider)
+                .await
+        }
 
-//         async fn transfer(
-//             &self,
-//             provider: NewApiUserProvider,
-//             current_api_user_id: uuid::Uuid,
-//         ) -> Result<ApiUserProvider, v_model::storage::StoreError> {
-//             self.api_user_provider_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .transfer(provider, current_api_user_id)
-//                 .await
-//         }
+        async fn transfer(
+            &self,
+            provider: NewApiUserProvider,
+            current_api_user_id: uuid::Uuid,
+        ) -> Result<ApiUserProvider, v_model::storage::StoreError> {
+            self.api_user_provider_store
+                .as_ref()
+                .unwrap()
+                .transfer(provider, current_api_user_id)
+                .await
+        }
 
-//         async fn delete(
-//             &self,
-//             id: &uuid::Uuid,
-//         ) -> Result<Option<ApiUserProvider>, v_model::storage::StoreError> {
-//             self.api_user_provider_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .delete(id)
-//                 .await
-//         }
-//     }
+        async fn delete(
+            &self,
+            id: &uuid::Uuid,
+        ) -> Result<Option<ApiUserProvider>, v_model::storage::StoreError> {
+            self.api_user_provider_store
+                .as_ref()
+                .unwrap()
+                .delete(id)
+                .await
+        }
+    }
 
-//     #[async_trait]
-//     impl AccessTokenStore for MockStorage {
-//         async fn get(
-//             &self,
-//             id: &uuid::Uuid,
-//             revoked: bool,
-//         ) -> Result<Option<v_model::AccessToken>, v_model::storage::StoreError> {
-//             self.device_token_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .get(id, revoked)
-//                 .await
-//         }
+    #[async_trait]
+    impl AccessTokenStore for MockStorage {
+        async fn get(
+            &self,
+            id: &uuid::Uuid,
+            revoked: bool,
+        ) -> Result<Option<v_model::AccessToken>, v_model::storage::StoreError> {
+            self.device_token_store
+                .as_ref()
+                .unwrap()
+                .get(id, revoked)
+                .await
+        }
 
-//         async fn list(
-//             &self,
-//             filter: v_model::storage::AccessTokenFilter,
-//             pagination: &ListPagination,
-//         ) -> Result<Vec<v_model::AccessToken>, v_model::storage::StoreError> {
-//             self.device_token_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .list(filter, pagination)
-//                 .await
-//         }
+        async fn list(
+            &self,
+            filter: v_model::storage::AccessTokenFilter,
+            pagination: &ListPagination,
+        ) -> Result<Vec<v_model::AccessToken>, v_model::storage::StoreError> {
+            self.device_token_store
+                .as_ref()
+                .unwrap()
+                .list(filter, pagination)
+                .await
+        }
 
-//         async fn upsert(
-//             &self,
-//             token: NewAccessToken,
-//         ) -> Result<v_model::AccessToken, v_model::storage::StoreError> {
-//             self.device_token_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .upsert(token)
-//                 .await
-//         }
-//     }
+        async fn upsert(
+            &self,
+            token: NewAccessToken,
+        ) -> Result<v_model::AccessToken, v_model::storage::StoreError> {
+            self.device_token_store
+                .as_ref()
+                .unwrap()
+                .upsert(token)
+                .await
+        }
+    }
 
-//     #[async_trait]
-//     impl LoginAttemptStore for MockStorage {
-//         async fn get(
-//             &self,
-//             id: &uuid::Uuid,
-//         ) -> Result<Option<v_model::LoginAttempt>, v_model::storage::StoreError> {
-//             self.login_attempt_store.as_ref().unwrap().get(id).await
-//         }
+    #[async_trait]
+    impl LoginAttemptStore for MockStorage {
+        async fn get(
+            &self,
+            id: &uuid::Uuid,
+        ) -> Result<Option<v_model::LoginAttempt>, v_model::storage::StoreError> {
+            self.login_attempt_store.as_ref().unwrap().get(id).await
+        }
 
-//         async fn list(
-//             &self,
-//             filter: v_model::storage::LoginAttemptFilter,
-//             pagination: &ListPagination,
-//         ) -> Result<Vec<v_model::LoginAttempt>, v_model::storage::StoreError> {
-//             self.login_attempt_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .list(filter, pagination)
-//                 .await
-//         }
+        async fn list(
+            &self,
+            filter: v_model::storage::LoginAttemptFilter,
+            pagination: &ListPagination,
+        ) -> Result<Vec<v_model::LoginAttempt>, v_model::storage::StoreError> {
+            self.login_attempt_store
+                .as_ref()
+                .unwrap()
+                .list(filter, pagination)
+                .await
+        }
 
-//         async fn upsert(
-//             &self,
-//             attempt: NewLoginAttempt,
-//         ) -> Result<v_model::LoginAttempt, v_model::storage::StoreError> {
-//             self.login_attempt_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .upsert(attempt)
-//                 .await
-//         }
-//     }
+        async fn upsert(
+            &self,
+            attempt: NewLoginAttempt,
+        ) -> Result<v_model::LoginAttempt, v_model::storage::StoreError> {
+            self.login_attempt_store
+                .as_ref()
+                .unwrap()
+                .upsert(attempt)
+                .await
+        }
+    }
 
-//     #[async_trait]
-//     impl OAuthClientStore for MockStorage {
-//         async fn get(
-//             &self,
-//             id: &uuid::Uuid,
-//             deleted: bool,
-//         ) -> Result<Option<v_model::OAuthClient>, v_model::storage::StoreError> {
-//             self.oauth_client_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .get(id, deleted)
-//                 .await
-//         }
+    #[async_trait]
+    impl OAuthClientStore for MockStorage {
+        async fn get(
+            &self,
+            id: &uuid::Uuid,
+            deleted: bool,
+        ) -> Result<Option<v_model::OAuthClient>, v_model::storage::StoreError> {
+            self.oauth_client_store
+                .as_ref()
+                .unwrap()
+                .get(id, deleted)
+                .await
+        }
 
-//         async fn list(
-//             &self,
-//             filter: v_model::storage::OAuthClientFilter,
-//             pagination: &ListPagination,
-//         ) -> Result<Vec<v_model::OAuthClient>, v_model::storage::StoreError> {
-//             self.oauth_client_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .list(filter, pagination)
-//                 .await
-//         }
+        async fn list(
+            &self,
+            filter: v_model::storage::OAuthClientFilter,
+            pagination: &ListPagination,
+        ) -> Result<Vec<v_model::OAuthClient>, v_model::storage::StoreError> {
+            self.oauth_client_store
+                .as_ref()
+                .unwrap()
+                .list(filter, pagination)
+                .await
+        }
 
-//         async fn upsert(
-//             &self,
-//             client: v_model::NewOAuthClient,
-//         ) -> Result<v_model::OAuthClient, v_model::storage::StoreError> {
-//             self.oauth_client_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .upsert(client)
-//                 .await
-//         }
+        async fn upsert(
+            &self,
+            client: v_model::NewOAuthClient,
+        ) -> Result<v_model::OAuthClient, v_model::storage::StoreError> {
+            self.oauth_client_store
+                .as_ref()
+                .unwrap()
+                .upsert(client)
+                .await
+        }
 
-//         async fn delete(
-//             &self,
-//             id: &uuid::Uuid,
-//         ) -> Result<Option<v_model::OAuthClient>, v_model::storage::StoreError> {
-//             self.oauth_client_store.as_ref().unwrap().delete(id).await
-//         }
-//     }
+        async fn delete(
+            &self,
+            id: &uuid::Uuid,
+        ) -> Result<Option<v_model::OAuthClient>, v_model::storage::StoreError> {
+            self.oauth_client_store.as_ref().unwrap().delete(id).await
+        }
+    }
 
-//     #[async_trait]
-//     impl OAuthClientSecretStore for MockStorage {
-//         async fn upsert(
-//             &self,
-//             secret: v_model::NewOAuthClientSecret,
-//         ) -> Result<v_model::OAuthClientSecret, v_model::storage::StoreError> {
-//             self.oauth_client_secret_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .upsert(secret)
-//                 .await
-//         }
+    #[async_trait]
+    impl OAuthClientSecretStore for MockStorage {
+        async fn upsert(
+            &self,
+            secret: v_model::NewOAuthClientSecret,
+        ) -> Result<v_model::OAuthClientSecret, v_model::storage::StoreError> {
+            self.oauth_client_secret_store
+                .as_ref()
+                .unwrap()
+                .upsert(secret)
+                .await
+        }
 
-//         async fn delete(
-//             &self,
-//             id: &uuid::Uuid,
-//         ) -> Result<Option<v_model::OAuthClientSecret>, v_model::storage::StoreError> {
-//             self.oauth_client_secret_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .delete(id)
-//                 .await
-//         }
-//     }
+        async fn delete(
+            &self,
+            id: &uuid::Uuid,
+        ) -> Result<Option<v_model::OAuthClientSecret>, v_model::storage::StoreError> {
+            self.oauth_client_secret_store
+                .as_ref()
+                .unwrap()
+                .delete(id)
+                .await
+        }
+    }
 
-//     #[async_trait]
-//     impl OAuthClientRedirectUriStore for MockStorage {
-//         async fn upsert(
-//             &self,
-//             redirect_uri: v_model::NewOAuthClientRedirectUri,
-//         ) -> Result<v_model::OAuthClientRedirectUri, v_model::storage::StoreError> {
-//             self.oauth_client_redirect_uri_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .upsert(redirect_uri)
-//                 .await
-//         }
+    #[async_trait]
+    impl OAuthClientRedirectUriStore for MockStorage {
+        async fn upsert(
+            &self,
+            redirect_uri: v_model::NewOAuthClientRedirectUri,
+        ) -> Result<v_model::OAuthClientRedirectUri, v_model::storage::StoreError> {
+            self.oauth_client_redirect_uri_store
+                .as_ref()
+                .unwrap()
+                .upsert(redirect_uri)
+                .await
+        }
 
-//         async fn delete(
-//             &self,
-//             id: &uuid::Uuid,
-//         ) -> Result<Option<v_model::OAuthClientRedirectUri>, v_model::storage::StoreError> {
-//             self.oauth_client_redirect_uri_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .delete(id)
-//                 .await
-//         }
-//     }
+        async fn delete(
+            &self,
+            id: &uuid::Uuid,
+        ) -> Result<Option<v_model::OAuthClientRedirectUri>, v_model::storage::StoreError> {
+            self.oauth_client_redirect_uri_store
+                .as_ref()
+                .unwrap()
+                .delete(id)
+                .await
+        }
+    }
 
-//     #[async_trait]
-//     impl AccessGroupStore<ApiPermission> for MockStorage {
-//         async fn get(
-//             &self,
-//             id: &uuid::Uuid,
-//             deleted: bool,
-//         ) -> Result<Option<v_model::AccessGroup<ApiPermission>>, v_model::storage::StoreError>
-//         {
-//             self.access_group_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .get(id, deleted)
-//                 .await
-//         }
+    #[async_trait]
+    impl AccessGroupStore<VPermission> for MockStorage {
+        async fn get(
+            &self,
+            id: &uuid::Uuid,
+            deleted: bool,
+        ) -> Result<Option<v_model::AccessGroup<VPermission>>, v_model::storage::StoreError>
+        {
+            self.access_group_store
+                .as_ref()
+                .unwrap()
+                .get(id, deleted)
+                .await
+        }
 
-//         async fn list(
-//             &self,
-//             filter: v_model::storage::AccessGroupFilter,
-//             pagination: &ListPagination,
-//         ) -> Result<Vec<v_model::AccessGroup<ApiPermission>>, v_model::storage::StoreError>
-//         {
-//             self.access_group_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .list(filter, pagination)
-//                 .await
-//         }
+        async fn list(
+            &self,
+            filter: v_model::storage::AccessGroupFilter,
+            pagination: &ListPagination,
+        ) -> Result<Vec<v_model::AccessGroup<VPermission>>, v_model::storage::StoreError>
+        {
+            self.access_group_store
+                .as_ref()
+                .unwrap()
+                .list(filter, pagination)
+                .await
+        }
 
-//         async fn upsert(
-//             &self,
-//             group: &NewAccessGroup<ApiPermission>,
-//         ) -> Result<v_model::AccessGroup<ApiPermission>, v_model::storage::StoreError> {
-//             self.access_group_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .upsert(group)
-//                 .await
-//         }
+        async fn upsert(
+            &self,
+            group: &NewAccessGroup<VPermission>,
+        ) -> Result<v_model::AccessGroup<VPermission>, v_model::storage::StoreError> {
+            self.access_group_store
+                .as_ref()
+                .unwrap()
+                .upsert(group)
+                .await
+        }
 
-//         async fn delete(
-//             &self,
-//             id: &uuid::Uuid,
-//         ) -> Result<Option<v_model::AccessGroup<ApiPermission>>, v_model::storage::StoreError>
-//         {
-//             self.access_group_store.as_ref().unwrap().delete(id).await
-//         }
-//     }
+        async fn delete(
+            &self,
+            id: &uuid::Uuid,
+        ) -> Result<Option<v_model::AccessGroup<VPermission>>, v_model::storage::StoreError>
+        {
+            self.access_group_store.as_ref().unwrap().delete(id).await
+        }
+    }
 
-//     #[async_trait]
-//     impl MapperStore for MockStorage {
-//         async fn get(
-//             &self,
-//             id: &uuid::Uuid,
-//             used: bool,
-//             deleted: bool,
-//         ) -> Result<Option<v_model::Mapper>, v_model::storage::StoreError> {
-//             self.mapper_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .get(id, used, deleted)
-//                 .await
-//         }
+    #[async_trait]
+    impl MapperStore for MockStorage {
+        async fn get(
+            &self,
+            id: &uuid::Uuid,
+            used: bool,
+            deleted: bool,
+        ) -> Result<Option<v_model::Mapper>, v_model::storage::StoreError> {
+            self.mapper_store
+                .as_ref()
+                .unwrap()
+                .get(id, used, deleted)
+                .await
+        }
 
-//         async fn list(
-//             &self,
-//             filter: v_model::storage::MapperFilter,
-//             pagination: &ListPagination,
-//         ) -> Result<Vec<v_model::Mapper>, v_model::storage::StoreError> {
-//             self.mapper_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .list(filter, pagination)
-//                 .await
-//         }
+        async fn list(
+            &self,
+            filter: v_model::storage::MapperFilter,
+            pagination: &ListPagination,
+        ) -> Result<Vec<v_model::Mapper>, v_model::storage::StoreError> {
+            self.mapper_store
+                .as_ref()
+                .unwrap()
+                .list(filter, pagination)
+                .await
+        }
 
-//         async fn upsert(
-//             &self,
-//             new_mapper: &NewMapper,
-//         ) -> Result<v_model::Mapper, v_model::storage::StoreError> {
-//             self.mapper_store.as_ref().unwrap().upsert(new_mapper).await
-//         }
+        async fn upsert(
+            &self,
+            new_mapper: &NewMapper,
+        ) -> Result<v_model::Mapper, v_model::storage::StoreError> {
+            self.mapper_store.as_ref().unwrap().upsert(new_mapper).await
+        }
 
-//         async fn delete(
-//             &self,
-//             id: &uuid::Uuid,
-//         ) -> Result<Option<v_model::Mapper>, v_model::storage::StoreError> {
-//             self.mapper_store.as_ref().unwrap().delete(id).await
-//         }
-//     }
+        async fn delete(
+            &self,
+            id: &uuid::Uuid,
+        ) -> Result<Option<v_model::Mapper>, v_model::storage::StoreError> {
+            self.mapper_store.as_ref().unwrap().delete(id).await
+        }
+    }
 
-//     #[async_trait]
-//     impl LinkRequestStore for MockStorage {
-//         async fn get(
-//             &self,
-//             id: &uuid::Uuid,
-//             expired: bool,
-//             completed: bool,
-//         ) -> Result<Option<v_model::LinkRequest>, v_model::storage::StoreError> {
-//             self.link_request_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .get(id, expired, completed)
-//                 .await
-//         }
+    #[async_trait]
+    impl LinkRequestStore for MockStorage {
+        async fn get(
+            &self,
+            id: &uuid::Uuid,
+            expired: bool,
+            completed: bool,
+        ) -> Result<Option<v_model::LinkRequest>, v_model::storage::StoreError> {
+            self.link_request_store
+                .as_ref()
+                .unwrap()
+                .get(id, expired, completed)
+                .await
+        }
 
-//         async fn list(
-//             &self,
-//             filter: v_model::storage::LinkRequestFilter,
-//             pagination: &ListPagination,
-//         ) -> Result<Vec<v_model::LinkRequest>, v_model::storage::StoreError> {
-//             self.link_request_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .list(filter, pagination)
-//                 .await
-//         }
+        async fn list(
+            &self,
+            filter: v_model::storage::LinkRequestFilter,
+            pagination: &ListPagination,
+        ) -> Result<Vec<v_model::LinkRequest>, v_model::storage::StoreError> {
+            self.link_request_store
+                .as_ref()
+                .unwrap()
+                .list(filter, pagination)
+                .await
+        }
 
-//         async fn upsert(
-//             &self,
-//             request: &v_model::NewLinkRequest,
-//         ) -> Result<v_model::LinkRequest, v_model::storage::StoreError> {
-//             self.link_request_store
-//                 .as_ref()
-//                 .unwrap()
-//                 .upsert(request)
-//                 .await
-//         }
-//     }
-// }
+        async fn upsert(
+            &self,
+            request: &v_model::NewLinkRequest,
+        ) -> Result<v_model::LinkRequest, v_model::storage::StoreError> {
+            self.link_request_store
+                .as_ref()
+                .unwrap()
+                .upsert(request)
+                .await
+        }
+    }
+}

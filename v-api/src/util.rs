@@ -219,6 +219,8 @@ pub async fn cloud_kms_client() -> Result<CloudKMS<HttpsConnector<HttpConnector>
 
 #[cfg(test)]
 pub mod tests {
+    use dropshot::{HttpCodedResponse, HttpError};
+    use http::StatusCode;
     use rand_core::RngCore;
     use rsa::{
         pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding},
@@ -226,6 +228,16 @@ pub mod tests {
     };
 
     use crate::config::AsymmetricKey;
+
+    pub fn get_status<T>(res: &Result<T, HttpError>) -> StatusCode
+    where
+        T: HttpCodedResponse,
+    {
+        match res {
+            Ok(_) => T::STATUS_CODE,
+            Err(err) => err.status_code,
+        }
+    }
 
     pub fn mock_key() -> AsymmetricKey {
         let mut rng = rand::thread_rng();

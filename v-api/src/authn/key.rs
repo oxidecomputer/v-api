@@ -121,41 +121,41 @@ impl SignedApiKey {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use secrecy::ExposeSecret;
-//     use uuid::Uuid;
+#[cfg(test)]
+mod tests {
+    use secrecy::ExposeSecret;
+    use uuid::Uuid;
 
-//     use super::RawApiKey;
-//     use crate::util::tests::mock_key;
+    use super::RawApiKey;
+    use crate::util::tests::mock_key;
 
-//     #[tokio::test]
-//     async fn test_verifies_signature() {
-//         let id = Uuid::new_v4();
-//         let signer = mock_key().as_signer().await.unwrap();
+    #[tokio::test]
+    async fn test_verifies_signature() {
+        let id = Uuid::new_v4();
+        let signer = mock_key().as_signer().await.unwrap();
 
-//         let raw = RawApiKey::generate::<8>(&id);
-//         let signed = raw.sign(&*signer).await.unwrap();
+        let raw = RawApiKey::generate::<8>(&id);
+        let signed = raw.sign(&*signer).await.unwrap();
 
-//         let raw2 = RawApiKey::try_from(signed.key.expose_secret().as_str()).unwrap();
+        let raw2 = RawApiKey::try_from(signed.key.expose_secret().as_str()).unwrap();
 
-//         assert_eq!(
-//             (),
-//             raw2.verify(&*signer, signed.signature.as_bytes()).unwrap()
-//         )
-//     }
+        assert_eq!(
+            (),
+            raw2.verify(&*signer, signed.signature.as_bytes()).unwrap()
+        )
+    }
 
-//     #[tokio::test]
-//     async fn test_generates_signatures() {
-//         let id = Uuid::new_v4();
-//         let signer = mock_key().as_signer().await.unwrap();
+    #[tokio::test]
+    async fn test_generates_signatures() {
+        let id = Uuid::new_v4();
+        let signer = mock_key().as_signer().await.unwrap();
 
-//         let raw1 = RawApiKey::generate::<8>(&id);
-//         let signed1 = raw1.sign(&*signer).await.unwrap();
+        let raw1 = RawApiKey::generate::<8>(&id);
+        let signed1 = raw1.sign(&*signer).await.unwrap();
 
-//         let raw2 = RawApiKey::generate::<8>(&id);
-//         let signed2 = raw2.sign(&*signer).await.unwrap();
+        let raw2 = RawApiKey::generate::<8>(&id);
+        let signed2 = raw2.sign(&*signer).await.unwrap();
 
-//         assert_ne!(signed1.signature(), signed2.signature())
-//     }
-// }
+        assert_ne!(signed1.signature(), signed2.signature())
+    }
+}
