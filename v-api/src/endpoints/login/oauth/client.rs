@@ -16,7 +16,8 @@ use crate::{
     context::{ApiContext, VContextWithCaller},
     permissions::{PermissionStorage, VAppPermission, VPermission},
     secrets::OpenApiSecretString,
-    util::response::to_internal_error, VContext,
+    util::response::to_internal_error,
+    VContext,
 };
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -228,17 +229,21 @@ mod tests {
 
     use chrono::Utc;
     use mockall::predicate::eq;
+    use uuid::Uuid;
     use v_api_permissions::Caller;
     use v_model::{
         storage::{MockApiUserStore, MockOAuthClientSecretStore, MockOAuthClientStore},
         ApiUser, OAuthClient, OAuthClientSecret,
     };
-    use uuid::Uuid;
 
     use crate::{
         authn::key::RawApiKey,
         context::test_mocks::{mock_context, MockStorage},
-        endpoints::login::oauth::{client::{create_oauth_client_inner, create_oauth_client_secret_inner}, CheckOAuthClient}, permissions::VPermission,
+        endpoints::login::oauth::{
+            client::{create_oauth_client_inner, create_oauth_client_secret_inner},
+            CheckOAuthClient,
+        },
+        permissions::VPermission,
     };
 
     fn mock_user() -> ApiUser<VPermission> {
@@ -320,7 +325,10 @@ mod tests {
 
         let ctx = mock_context(storage).await;
 
-        let mut client = create_oauth_client_inner(&ctx, caller.clone()).await.unwrap().0;
+        let mut client = create_oauth_client_inner(&ctx, caller.clone())
+            .await
+            .unwrap()
+            .0;
         caller
             .permissions
             .insert(VPermission::UpdateOAuthClient(client.id));

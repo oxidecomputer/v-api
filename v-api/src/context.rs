@@ -1563,9 +1563,9 @@ where
 mod tests {
     use chrono::{Duration, Utc};
     use mockall::predicate::eq;
-    use v_api_permissions::Permissions;
     use std::{collections::BTreeSet, ops::Add, sync::Arc};
     use uuid::Uuid;
+    use v_api_permissions::Permissions;
     use v_model::{
         storage::{AccessGroupFilter, ListPagination, MockAccessGroupStore, MockApiUserStore},
         AccessGroup, ApiUser, ApiUserProvider,
@@ -1576,7 +1576,8 @@ mod tests {
             jwt::{Claims, Jwt},
             AuthToken,
         },
-        context::UNLIMITED, permissions::VPermission,
+        context::UNLIMITED,
+        permissions::VPermission,
     };
 
     use super::{
@@ -1695,7 +1696,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            Permissions::<VPermission>::from(vec![VPermission::CreateGroup, VPermission::ListMappers,]),
+            Permissions::<VPermission>::from(vec![
+                VPermission::CreateGroup,
+                VPermission::ListMappers,
+            ]),
             permissions.permissions
         );
     }
@@ -1720,7 +1724,10 @@ pub(crate) mod test_mocks {
     };
 
     use crate::{
-        config::JwtConfig, endpoints::login::oauth::{google::GoogleOAuthProvider, OAuthProviderName}, permissions::VPermission, util::tests::mock_key
+        config::JwtConfig,
+        endpoints::login::oauth::{google::GoogleOAuthProvider, OAuthProviderName},
+        permissions::VPermission,
+        util::tests::mock_key,
     };
 
     use super::VContext;
@@ -2117,8 +2124,7 @@ pub(crate) mod test_mocks {
             &self,
             filter: v_model::storage::AccessGroupFilter,
             pagination: &ListPagination,
-        ) -> Result<Vec<v_model::AccessGroup<VPermission>>, v_model::storage::StoreError>
-        {
+        ) -> Result<Vec<v_model::AccessGroup<VPermission>>, v_model::storage::StoreError> {
             self.access_group_store
                 .as_ref()
                 .unwrap()
