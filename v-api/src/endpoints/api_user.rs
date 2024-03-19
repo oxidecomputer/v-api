@@ -75,8 +75,7 @@ pub async fn get_self_op<T, U>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
 ) -> Result<HttpResponseOk<GetUserResponse<U>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let ctx = rqctx.v_ctx();
@@ -100,8 +99,7 @@ pub async fn get_api_user_op<T, U>(
     path: Path<ApiUserPath>,
 ) -> Result<HttpResponseOk<GetUserResponse<U>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let ctx = rqctx.v_ctx();
@@ -132,8 +130,7 @@ pub async fn create_api_user_op<T, U>(
     body: TypedBody<ApiUserUpdateParams<T>>,
 ) -> Result<HttpResponseCreated<ApiUser<U>>, HttpError>
 where
-    T: VAppPermission + JsonSchema,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + JsonSchema + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let ctx = rqctx.v_ctx();
@@ -150,8 +147,7 @@ pub async fn create_api_user_inner<T, U>(
     body: ApiUserUpdateParams<T>,
 ) -> Result<HttpResponseCreated<ApiUser<U>>, HttpError>
 where
-    T: VAppPermission + JsonSchema,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + JsonSchema + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let user = ctx
@@ -173,8 +169,7 @@ pub async fn update_api_user_op<T, U>(
     body: ApiUserUpdateParams<T>,
 ) -> Result<HttpResponseOk<ApiUser<U>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let ctx = rqctx.v_ctx();
@@ -190,8 +185,7 @@ pub async fn update_api_user_inner<T, U>(
     body: ApiUserUpdateParams<T>,
 ) -> Result<HttpResponseOk<ApiUser<U>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let user = ctx
@@ -214,8 +208,7 @@ pub async fn list_api_user_tokens_op<T, U>(
     path: ApiUserPath,
 ) -> Result<HttpResponseOk<Vec<ApiKeyResponse<U>>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let ctx = rqctx.v_ctx();
@@ -230,8 +223,7 @@ pub async fn list_api_user_tokens_inner<T, U>(
     path: ApiUserPath,
 ) -> Result<HttpResponseOk<Vec<ApiKeyResponse<U>>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     tracing::info!("Fetch token list");
@@ -277,8 +269,7 @@ pub async fn create_api_user_token_op<T, U>(
     body: ApiKeyCreateParams<T>,
 ) -> Result<HttpResponseCreated<InitialApiKeyResponse<U>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let ctx = rqctx.v_ctx();
@@ -294,8 +285,7 @@ pub async fn create_api_user_token_inner<T, U>(
     body: ApiKeyCreateParams<T>,
 ) -> Result<HttpResponseCreated<InitialApiKeyResponse<U>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let api_user = ctx.get_api_user(&caller, &path.identifier).await?;
@@ -344,8 +334,7 @@ pub async fn get_api_user_token_op<T, U>(
     path: ApiUserTokenPath,
 ) -> Result<HttpResponseOk<ApiKeyResponse<U>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let ctx = rqctx.v_ctx();
@@ -360,8 +349,7 @@ pub async fn get_api_user_token_inner<T, U>(
     path: ApiUserTokenPath,
 ) -> Result<HttpResponseOk<ApiKeyResponse<U>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let token = ctx
@@ -381,8 +369,7 @@ pub async fn delete_api_user_token_op<T, U>(
     path: ApiUserTokenPath,
 ) -> Result<HttpResponseOk<ApiKeyResponse<U>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let ctx = rqctx.v_ctx();
@@ -397,8 +384,7 @@ pub async fn delete_api_user_token_inner<T, U>(
     path: ApiUserTokenPath,
 ) -> Result<HttpResponseOk<ApiKeyResponse<U>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let token = ctx
@@ -424,8 +410,7 @@ pub async fn add_api_user_to_group_op<T, U>(
     body: AddGroupBody,
 ) -> Result<HttpResponseOk<ApiUser<U>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let ctx = rqctx.v_ctx();
@@ -451,8 +436,7 @@ pub async fn remove_api_user_from_group_op<T, U>(
     path: ApiUserRemoveGroupPath,
 ) -> Result<HttpResponseOk<ApiUser<U>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let ctx = rqctx.v_ctx();
@@ -474,14 +458,13 @@ pub struct ApiUserProviderLinkPayload {
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn link_provider_op<T, U>(
+pub async fn link_provider_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: ApiUserPath,
     body: ApiUserProviderLinkPayload,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
 {
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;

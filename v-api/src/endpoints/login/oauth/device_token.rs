@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tap::TapFallible;
 use tracing::instrument;
-use v_api_permissions::Permissions;
 
 use super::{
     ClientType, OAuthProvider, OAuthProviderInfo, OAuthProviderNameParam, UserInfoProvider,
@@ -33,8 +32,7 @@ pub async fn get_device_provider_op<T>(
     path: Path<OAuthProviderNameParam>,
 ) -> Result<HttpResponseOk<OAuthProviderInfo>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
 {
     let path = path.into_inner();
 
@@ -119,8 +117,7 @@ pub async fn exchange_device_token_op<T>(
     body: TypedBody<AccessTokenExchangeRequest>,
 ) -> Result<Response<Body>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
 {
     let ctx = rqctx.v_ctx();
     let path = path.into_inner();

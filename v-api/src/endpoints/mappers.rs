@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use uuid::Uuid;
-use v_api_permissions::{Permission, Permissions};
+use v_api_permissions::Permission;
 use v_model::{Mapper, NewMapper};
 
 use crate::{
@@ -28,13 +28,12 @@ pub struct ListMappersQuery {
 
 #[instrument(skip(rqctx), err(Debug))]
 pub async fn get_mappers_op<T>(
-    rqctx: RequestContext<T>,
+    rqctx: &RequestContext<T>,
     query: ListMappersQuery,
 ) -> Result<HttpResponseOk<Vec<Mapper>>, HttpError>
 where
     T: ApiContext,
-    T::AppPermissions: Permission + From<VPermission> + AsScope,
-    Permissions<T::AppPermissions>: PermissionStorage,
+    T::AppPermissions: Permission + From<VPermission> + AsScope + PermissionStorage,
 {
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
@@ -55,13 +54,12 @@ pub struct CreateMapper<T> {
 
 #[instrument(skip(rqctx, body), err(Debug))]
 pub async fn create_mapper_op<T, U>(
-    rqctx: RequestContext<T>,
+    rqctx: &RequestContext<T>,
     body: CreateMapper<U>,
 ) -> Result<HttpResponseCreated<Mapper>, HttpError>
 where
     T: ApiContext<AppPermissions = U>,
-    T::AppPermissions: Permission + From<VPermission> + AsScope,
-    Permissions<T::AppPermissions>: PermissionStorage,
+    T::AppPermissions: Permission + From<VPermission> + AsScope + PermissionStorage,
 {
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
@@ -99,13 +97,12 @@ pub struct MapperPath {
 
 #[instrument(skip(rqctx), err(Debug))]
 pub async fn delete_mapper_op<T>(
-    rqctx: RequestContext<T>,
+    rqctx: &RequestContext<T>,
     path: MapperPath,
 ) -> Result<HttpResponseOk<Mapper>, HttpError>
 where
     T: ApiContext,
-    T::AppPermissions: Permission + From<VPermission> + AsScope,
-    Permissions<T::AppPermissions>: PermissionStorage,
+    T::AppPermissions: Permission + From<VPermission> + AsScope + PermissionStorage,
 {
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;

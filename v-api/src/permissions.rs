@@ -105,7 +105,9 @@ pub enum VPermission {
 
 pub trait AsScope: Sized {
     fn as_scope(&self) -> &str;
-    fn from_scope_arg(scope_arg: &str) -> Result<Permissions<Self>, ApiPermissionError>;
+    fn from_scope_arg(scope_arg: &str) -> Result<Permissions<Self>, ApiPermissionError> {
+        Self::from_scope(scope_arg.split(' '))
+    }
     fn from_scope<S>(
         scope: impl Iterator<Item = S>,
     ) -> Result<Permissions<Self>, ApiPermissionError>
@@ -185,10 +187,6 @@ impl AsScope for VPermission {
         }
     }
 
-    fn from_scope_arg(scope_arg: &str) -> Result<Permissions<VPermission>, ApiPermissionError> {
-        Self::from_scope(scope_arg.split(' '))
-    }
-
     fn from_scope<S>(
         scope: impl Iterator<Item = S>,
     ) -> Result<Permissions<VPermission>, ApiPermissionError>
@@ -264,13 +262,228 @@ impl AsScope for VPermission {
     }
 }
 
+// pub trait PermissionStorage {
+//     fn contract(&self, owner: &Uuid) -> Self;
+//     fn expand(&self, owner: &Uuid, owner_permissions: Option<&Self>) -> Self;
+// }
+
 pub trait PermissionStorage {
-    fn contract(&self, owner: &Uuid) -> Self;
-    fn expand(&self, owner: &Uuid, owner_permissions: Option<&Self>) -> Self;
+    fn contract(collection: &Permissions<Self>, owner: &Uuid) -> Permissions<Self>
+    where
+        Self: Sized;
+    fn expand(
+        collection: &Permissions<Self>,
+        owner: &Uuid,
+        owner_permissions: Option<&Permissions<Self>>,
+    ) -> Permissions<Self>
+    where
+        Self: Sized;
 }
 
-impl PermissionStorage for Permissions<VPermission> {
-    fn contract(&self, owner: &Uuid) -> Self {
+// impl PermissionStorage for Permissions<VPermission> {
+//     fn contract(&self, owner: &Uuid) -> Self {
+//         let mut contracted = Vec::new();
+
+//         let mut manage_group_memberships = BTreeSet::<Uuid>::new();
+//         let mut manage_groups = BTreeSet::<Uuid>::new();
+//         let mut read_oauth_clients = BTreeSet::<Uuid>::new();
+//         let mut update_oauth_clients = BTreeSet::<Uuid>::new();
+//         let mut delete_oauth_clients = BTreeSet::<Uuid>::new();
+
+//         for p in self.iter() {
+//             match p {
+//                 VPermission::GetApiUser(id) => contracted.push(if id == owner {
+//                     VPermission::GetApiUserSelf
+//                 } else {
+//                     VPermission::GetApiUser(*id)
+//                 }),
+//                 VPermission::CreateApiUserToken(id) => contracted.push(if id == owner {
+//                     VPermission::CreateApiUserTokenSelf
+//                 } else {
+//                     VPermission::CreateApiUserToken(*id)
+//                 }),
+//                 VPermission::GetApiUserToken(id) => contracted.push(if id == owner {
+//                     VPermission::GetApiUserTokenSelf
+//                 } else {
+//                     VPermission::GetApiUserToken(*id)
+//                 }),
+//                 VPermission::DeleteApiUserToken(id) => contracted.push(if id == owner {
+//                     VPermission::DeleteApiUserTokenSelf
+//                 } else {
+//                     VPermission::DeleteApiUserToken(*id)
+//                 }),
+//                 VPermission::UpdateApiUser(id) => contracted.push(if id == owner {
+//                     VPermission::UpdateApiUserSelf
+//                 } else {
+//                     VPermission::UpdateApiUser(*id)
+//                 }),
+
+//                 VPermission::ManageGroupMembership(id) => {
+//                     manage_group_memberships.insert(*id);
+//                 }
+//                 VPermission::ManageGroup(id) => {
+//                     manage_groups.insert(*id);
+//                 }
+
+//                 VPermission::GetOAuthClient(id) => {
+//                     read_oauth_clients.insert(*id);
+//                 }
+//                 VPermission::UpdateOAuthClient(id) => {
+//                     update_oauth_clients.insert(*id);
+//                 }
+//                 VPermission::DeleteOAuthClient(id) => {
+//                     delete_oauth_clients.insert(*id);
+//                 }
+
+//                 other => contracted.push(other.clone()),
+//             }
+//         }
+
+//         contracted.push(VPermission::ManageGroupMemberships(
+//             manage_group_memberships,
+//         ));
+//         contracted.push(VPermission::ManageGroups(manage_groups));
+//         contracted.push(VPermission::GetOAuthClients(read_oauth_clients));
+//         contracted.push(VPermission::UpdateOAuthClients(update_oauth_clients));
+//         contracted.push(VPermission::DeleteOAuthClients(delete_oauth_clients));
+
+//         contracted.into()
+//     }
+
+//     fn expand(&self, owner: &Uuid, owner_permissions: Option<&Permissions<VPermission>>) -> Self {
+//         let mut expanded = Vec::new();
+
+//         for p in self.iter() {
+//             match p {
+//                 VPermission::GetApiUserSelf => {
+//                     expanded.push(p.clone());
+//                     expanded.push(VPermission::GetApiUser(*owner))
+//                 }
+//                 VPermission::CreateApiUserTokenSelf => {
+//                     expanded.push(p.clone());
+//                     expanded.push(VPermission::CreateApiUserToken(*owner))
+//                 }
+//                 VPermission::GetApiUserTokenSelf => {
+//                     expanded.push(p.clone());
+//                     expanded.push(VPermission::GetApiUserToken(*owner))
+//                 }
+//                 VPermission::DeleteApiUserTokenSelf => {
+//                     expanded.push(p.clone());
+//                     expanded.push(VPermission::DeleteApiUserToken(*owner))
+//                 }
+//                 VPermission::UpdateApiUserSelf => {
+//                     expanded.push(p.clone());
+//                     expanded.push(VPermission::UpdateApiUser(*owner))
+//                 }
+
+//                 VPermission::ManageGroupMemberships(ids) => {
+//                     for id in ids {
+//                         expanded.push(VPermission::ManageGroupMembership(*id))
+//                     }
+//                 }
+//                 VPermission::ManageGroups(ids) => {
+//                     for id in ids {
+//                         expanded.push(VPermission::ManageGroup(*id))
+//                     }
+//                 }
+
+//                 VPermission::GetOAuthClients(ids) => {
+//                     for id in ids {
+//                         expanded.push(VPermission::GetOAuthClient(*id))
+//                     }
+//                 }
+//                 VPermission::UpdateOAuthClients(ids) => {
+//                     for id in ids {
+//                         expanded.push(VPermission::UpdateOAuthClient(*id))
+//                     }
+//                 }
+//                 VPermission::DeleteOAuthClients(ids) => {
+//                     for id in ids {
+//                         expanded.push(VPermission::DeleteOAuthClient(*id))
+//                     }
+//                 }
+
+//                 VPermission::ManageGroupMembershipAssigned => {
+//                     expanded.push(p.clone());
+
+//                     if let Some(owner_permissions) = owner_permissions {
+//                         for p in owner_permissions.iter() {
+//                             match p {
+//                                 VPermission::ManageGroupMembership(id) => {
+//                                     expanded.push(VPermission::ManageGroupMembership(*id))
+//                                 }
+//                                 _ => (),
+//                             }
+//                         }
+//                     }
+//                 }
+//                 VPermission::ManageGroupsAssigned => {
+//                     expanded.push(p.clone());
+
+//                     if let Some(owner_permissions) = owner_permissions {
+//                         for p in owner_permissions.iter() {
+//                             match p {
+//                                 VPermission::ManageGroup(id) => {
+//                                     expanded.push(VPermission::ManageGroup(*id))
+//                                 }
+//                                 _ => (),
+//                             }
+//                         }
+//                     }
+//                 }
+//                 VPermission::GetOAuthClientsAssigned => {
+//                     expanded.push(p.clone());
+
+//                     if let Some(owner_permissions) = owner_permissions {
+//                         for p in owner_permissions.iter() {
+//                             match p {
+//                                 VPermission::GetOAuthClient(id) => {
+//                                     expanded.push(VPermission::GetOAuthClient(*id))
+//                                 }
+//                                 _ => (),
+//                             }
+//                         }
+//                     }
+//                 }
+//                 VPermission::UpdateOAuthClientsAssigned => {
+//                     expanded.push(p.clone());
+
+//                     if let Some(owner_permissions) = owner_permissions {
+//                         for p in owner_permissions.iter() {
+//                             match p {
+//                                 VPermission::UpdateOAuthClient(id) => {
+//                                     expanded.push(VPermission::UpdateOAuthClient(*id))
+//                                 }
+//                                 _ => (),
+//                             }
+//                         }
+//                     }
+//                 }
+//                 VPermission::DeleteOAuthClientsAssigned => {
+//                     expanded.push(p.clone());
+
+//                     if let Some(owner_permissions) = owner_permissions {
+//                         for p in owner_permissions.iter() {
+//                             match p {
+//                                 VPermission::DeleteOAuthClient(id) => {
+//                                     expanded.push(VPermission::DeleteOAuthClient(*id))
+//                                 }
+//                                 _ => (),
+//                             }
+//                         }
+//                     }
+//                 }
+
+//                 other => expanded.push(other.clone()),
+//             }
+//         }
+
+//         expanded.into()
+//     }
+// }
+
+impl PermissionStorage for VPermission {
+    fn contract(collection: &Permissions<Self>, owner: &Uuid) -> Permissions<Self> {
         let mut contracted = Vec::new();
 
         let mut manage_group_memberships = BTreeSet::<Uuid>::new();
@@ -279,7 +492,7 @@ impl PermissionStorage for Permissions<VPermission> {
         let mut update_oauth_clients = BTreeSet::<Uuid>::new();
         let mut delete_oauth_clients = BTreeSet::<Uuid>::new();
 
-        for p in self.iter() {
+        for p in collection.iter() {
             match p {
                 VPermission::GetApiUser(id) => contracted.push(if id == owner {
                     VPermission::GetApiUserSelf
@@ -339,10 +552,14 @@ impl PermissionStorage for Permissions<VPermission> {
         contracted.into()
     }
 
-    fn expand(&self, owner: &Uuid, owner_permissions: Option<&Permissions<VPermission>>) -> Self {
+    fn expand(
+        collection: &Permissions<Self>,
+        owner: &Uuid,
+        owner_permissions: Option<&Permissions<Self>>,
+    ) -> Permissions<Self> {
         let mut expanded = Vec::new();
 
-        for p in self.iter() {
+        for p in collection.iter() {
             match p {
                 VPermission::GetApiUserSelf => {
                     expanded.push(p.clone());

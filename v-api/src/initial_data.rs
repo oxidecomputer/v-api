@@ -52,8 +52,7 @@ pub enum InitError {
 
 impl<T> InitialData<T>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
 {
     pub fn new(config_sources: Option<Vec<String>>) -> Result<Self, InitError> {
         let mut config =

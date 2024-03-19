@@ -31,8 +31,7 @@ pub struct EmailDomainMapper<T> {
 #[async_trait]
 impl<T> MapperRule<T> for EmailDomainMapper<T>
 where
-    T: Permission + From<VPermission> + AsScope,
-    Permissions<T>: PermissionStorage,
+    T: Permission + From<VPermission> + AsScope + PermissionStorage,
 {
     async fn permissions_for(
         &self,

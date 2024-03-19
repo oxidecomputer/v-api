@@ -25,7 +25,6 @@ use std::{fmt::Debug, ops::Add};
 use tap::TapFallible;
 use tracing::instrument;
 use uuid::Uuid;
-use v_api_permissions::Permissions;
 use v_model::{schema_ext::LoginAttemptState, LoginAttempt, NewLoginAttempt, OAuthClient};
 
 use super::{OAuthProvider, OAuthProviderNameParam, UserInfoProvider};
@@ -114,8 +113,7 @@ async fn get_oauth_client<T>(
     redirect_uri: &str,
 ) -> Result<OAuthClient, OAuthError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
 {
     let client = ctx
         .get_oauth_client(&ctx.builtin_registration_user(), &client_id)
@@ -160,8 +158,7 @@ pub async fn authz_code_redirect_op<T>(
     query: Query<OAuthAuthzCodeQuery>,
 ) -> Result<Response<Body>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
 {
     let ctx = rqctx.v_ctx();
     let path = path.into_inner();
@@ -345,8 +342,7 @@ pub async fn authz_code_callback_op<T>(
     query: Query<OAuthAuthzCodeReturnQuery>,
 ) -> Result<HttpResponseTemporaryRedirect, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
 {
     let ctx = rqctx.v_ctx();
     let path = path.into_inner();
@@ -373,8 +369,7 @@ pub async fn authz_code_callback_op_inner<T>(
     error: Option<String>,
 ) -> Result<String, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
 {
     // We have now verified the attempt id and can use it to look up the rest of the login attempt
     // material to try and complete the flow
@@ -455,8 +450,7 @@ pub async fn authz_code_exchange_op<T>(
     body: TypedBody<OAuthAuthzCodeExchangeBody>,
 ) -> Result<HttpResponseOk<OAuthAuthzCodeExchangeResponse>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
 {
     let ctx = rqctx.v_ctx();
     let path = path.into_inner();
@@ -545,8 +539,7 @@ async fn authorize_code_exchange<T>(
     redirect_uri: &str,
 ) -> Result<(), OAuthError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
 {
     let client = get_oauth_client(ctx, &client_id, &redirect_uri).await?;
 

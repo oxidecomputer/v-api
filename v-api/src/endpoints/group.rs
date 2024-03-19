@@ -41,8 +41,7 @@ pub async fn get_groups_op<T, U>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
 ) -> Result<HttpResponseOk<Vec<AccessGroup<U>>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: From<T> + Permission + JsonSchema,
 {
     let ctx = rqctx.v_ctx();
@@ -70,8 +69,7 @@ pub async fn create_group_op<T, U>(
     body: AccessGroupUpdateParams<T>,
 ) -> Result<HttpResponseCreated<AccessGroup<U>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: From<T> + Permission + JsonSchema,
 {
     let ctx = rqctx.v_ctx();
@@ -104,8 +102,7 @@ pub async fn update_group_op<T, U>(
     body: AccessGroupUpdateParams<T>,
 ) -> Result<HttpResponseOk<AccessGroup<U>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: From<T> + Permission + JsonSchema,
 {
     let ctx = rqctx.v_ctx();
@@ -132,8 +129,7 @@ pub async fn delete_group_op<T, U>(
     path: AccessGroupPath,
 ) -> Result<HttpResponseOk<AccessGroup<U>>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
     U: From<T> + Permission + JsonSchema,
 {
     let ctx = rqctx.v_ctx();

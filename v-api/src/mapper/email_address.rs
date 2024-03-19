@@ -31,8 +31,7 @@ pub struct EmailAddressMapper<T> {
 #[async_trait]
 impl<T> MapperRule<T> for EmailAddressMapper<T>
 where
-    T: Permission + From<VPermission> + AsScope,
-    Permissions<T>: PermissionStorage,
+    T: Permission + From<VPermission> + AsScope + PermissionStorage,
 {
     async fn permissions_for(
         &self,

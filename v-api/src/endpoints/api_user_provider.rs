@@ -7,7 +7,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use uuid::Uuid;
-use v_api_permissions::Permissions;
 
 use crate::{
     context::ApiContext,
@@ -39,8 +38,7 @@ pub async fn create_link_token_op<T>(
     body: TypedBody<ApiUserLinkRequestPayload>,
 ) -> Result<HttpResponseOk<ApiUserLinkRequestResponse>, HttpError>
 where
-    T: VAppPermission,
-    Permissions<T>: PermissionStorage,
+    T: VAppPermission + PermissionStorage,
 {
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;

@@ -21,7 +21,6 @@ use sha2::{Digest, Sha256};
 use std::{fmt::Debug, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
-use v_api_permissions::Permissions;
 
 use crate::{
     authn::key::RawApiKey,
@@ -65,8 +64,7 @@ impl AuthToken {
         rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     ) -> Result<AuthToken, AuthError>
     where
-        T: VAppPermission,
-        Permissions<T>: PermissionStorage,
+        T: VAppPermission + PermissionStorage,
     {
         // Ensure there is a bearer, without it there is nothing else to do
         let bearer = BearerAuth::from_request(rqctx).await.map_err(|err| {

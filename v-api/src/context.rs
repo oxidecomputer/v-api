@@ -155,8 +155,7 @@ impl From<VContextCallerError> for HttpError {
 
 impl<T, U> VContextWithCaller<T> for RequestContext<U>
 where
-    T: Permission + From<VPermission> + AsScope,
-    Permissions<T>: PermissionStorage,
+    T: Permission + From<VPermission> + AsScope + PermissionStorage,
     U: ApiContext<AppPermissions = T>,
 {
     async fn as_ctx(&self) -> Result<(&VContext<T>, Caller<T>), VContextCallerError> {
@@ -228,8 +227,7 @@ enum BasePermissions<T: Permission> {
 
 impl<T> VContext<T>
 where
-    T: Permission + From<VPermission> + AsScope,
-    Permissions<T>: PermissionStorage,
+    T: Permission + From<VPermission> + AsScope + PermissionStorage,
 {
     pub async fn new(
         public_url: String,
@@ -351,8 +349,7 @@ where
                             BasePermissions::Full => user_permissions.clone(),
                             BasePermissions::Restricted(permissions) => {
                                 let token_permissions =
-                                    permissions.expand(&user.id, Some(&user_permissions));
-
+                                    T::expand(permissions, &user.id, Some(&user_permissions));
                                 token_permissions.intersect(&user_permissions)
                             }
                         };
@@ -509,7 +506,7 @@ where
         let permissions = groups
             .into_iter()
             .fold(Permissions::new(), |mut aggregate, group| {
-                let mut expanded = group.permissions.expand(&user.id, Some(&user.permissions));
+                let mut expanded = T::expand(&group.permissions, &user.id, Some(&user.permissions));
 
                 tracing::trace!(group_id = ?group.id, group_name = ?group.name, permissions = ?expanded, "Transformed group into permission set");
                 aggregate.append(&mut expanded);
@@ -810,7 +807,7 @@ where
                 .await
                 .map(|opt| {
                     opt.map(|mut user| {
-                        user.permissions = user.permissions.expand(&user.id, None);
+                        user.permissions = T::expand(&user.permissions, &user.id, None);
                         user
                     })
                 })
@@ -853,7 +850,7 @@ where
                 permissions: permissions,
                 groups: groups,
             };
-            new_user.permissions = new_user.permissions.contract(&new_user.id);
+            new_user.permissions = T::contract(&new_user.permissions, &new_user.id);
             ApiUserStore::upsert(&*self.storage, new_user)
                 .await
                 .to_resource_result()
@@ -872,7 +869,7 @@ where
             &VPermission::UpdateApiUser(api_user.id).into(),
             &VPermission::UpdateApiUserAll.into(),
         ]) {
-            api_user.permissions = api_user.permissions.contract(&api_user.id);
+            api_user.permissions = T::contract(&api_user.permissions, &api_user.id);
             ApiUserStore::upsert(&*self.storage, api_user)
                 .await
                 .to_resource_result()
