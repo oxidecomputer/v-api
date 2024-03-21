@@ -32,9 +32,9 @@ impl BasicAuth {
     }
 }
 
-/// Extracting a basic token should never fail, it should always return either `Ok(Some(BasicAuth))`
-/// or `Ok(None)`. `None` will be returned in any of the cases that a valid string can not be extracted.
-/// This extractor is not responsible for checking the value of the token.
+/// Extracting a basic token should never fail, it should always return `Ok(BasicAuth)`. A BasicAuth
+/// struct will only contain a username and password if both values can be constructed from the
+/// header values. This extractor is not responsible for checking the value of the token.
 #[async_trait]
 impl SharedExtractor for BasicAuth {
     async fn from_request<Context: ServerContext>(
