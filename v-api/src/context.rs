@@ -769,7 +769,8 @@ where
         api_user_provider: &ApiUserProvider,
         scope: Option<Vec<String>>,
     ) -> Result<RegisteredAccessToken, ApiError> {
-        let expires_at = Utc::now() + TimeDelta::try_seconds(self.default_jwt_expiration()).unwrap();
+        let expires_at =
+            Utc::now() + TimeDelta::try_seconds(self.default_jwt_expiration()).unwrap();
 
         let claims = Claims::new(self, &api_user, &api_user_provider, scope, expires_at);
         let token = self
