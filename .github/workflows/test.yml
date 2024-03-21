@@ -32,4 +32,4 @@ jobs:
         env:
           TEST_DATABASE: postgres://test:test@localhost
           RUSTFLAGS: "--cfg tracing_unstable"
-          RUST_LOG: rfd=trace
+          RUST_LOG: v=trace

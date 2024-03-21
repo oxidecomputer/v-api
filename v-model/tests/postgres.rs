@@ -53,7 +53,7 @@ impl TestDb {
     pub fn new(test_name: &str) -> Self {
         let db_base = std::env::var("TEST_DATABASE").unwrap();
         let db_name = format!(
-            "rfd_api_{}_{}",
+            "v_api_{}_{}",
             test_name,
             Uuid::new_v4().to_string().replace("-", "_")
         );

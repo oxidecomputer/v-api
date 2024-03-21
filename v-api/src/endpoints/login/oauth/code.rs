@@ -44,7 +44,7 @@ use crate::{
     },
 };
 
-static LOGIN_ATTEMPT_COOKIE: &str = "__rfd_login";
+static LOGIN_ATTEMPT_COOKIE: &str = "__v_login";
 static DEFAULT_SCOPE: &str = "user:info:r";
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq)]
@@ -831,7 +831,7 @@ mod tests {
             expires_at: None,
             error: None,
             provider: "google".to_string(),
-            provider_pkce_verifier: Some("rfd_verifier".to_string()),
+            provider_pkce_verifier: Some("v_verifier".to_string()),
             provider_authz_code: None,
             provider_error: None,
             created_at: Utc::now(),
@@ -974,7 +974,7 @@ mod tests {
                 expires_at: None,
                 error: None,
                 provider: "google".to_string(),
-                provider_pkce_verifier: Some("rfd_verifier".to_string()),
+                provider_pkce_verifier: Some("v_verifier".to_string()),
                 provider_authz_code: None,
                 provider_error: None,
                 created_at: Utc::now(),
@@ -1018,7 +1018,7 @@ mod tests {
             expires_at: None,
             error: None,
             provider: "google".to_string(),
-            provider_pkce_verifier: Some("rfd_verifier".to_string()),
+            provider_pkce_verifier: Some("v_verifier".to_string()),
             provider_authz_code: None,
             provider_error: None,
             created_at: Utc::now(),
@@ -1078,7 +1078,7 @@ mod tests {
             expires_at: None,
             error: None,
             provider: "google".to_string(),
-            provider_pkce_verifier: Some("rfd_verifier".to_string()),
+            provider_pkce_verifier: Some("v_verifier".to_string()),
             provider_authz_code: None,
             provider_error: None,
             created_at: Utc::now(),
@@ -1138,7 +1138,7 @@ mod tests {
             expires_at: None,
             error: None,
             provider: "google".to_string(),
-            provider_pkce_verifier: Some("rfd_verifier".to_string()),
+            provider_pkce_verifier: Some("v_verifier".to_string()),
             provider_authz_code: None,
             provider_error: None,
             created_at: Utc::now(),
@@ -1381,7 +1381,7 @@ mod tests {
             expires_at: Some(Utc::now().add(TimeDelta::try_seconds(60).unwrap())),
             error: None,
             provider: "google".to_string(),
-            provider_pkce_verifier: Some("rfd_verifier".to_string()),
+            provider_pkce_verifier: Some("v_verifier".to_string()),
             provider_authz_code: None,
             provider_error: None,
             created_at: Utc::now(),

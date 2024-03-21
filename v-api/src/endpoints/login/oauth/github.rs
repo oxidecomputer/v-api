@@ -41,7 +41,7 @@ impl GitHubOAuthProvider {
         web_client_secret: SecretString,
     ) -> Self {
         let mut headers = HeaderMap::new();
-        headers.insert(USER_AGENT, HeaderValue::from_static("rfd-api"));
+        headers.insert(USER_AGENT, HeaderValue::from_static("v-api"));
         let client = Client::builder().default_headers(headers).build().unwrap();
 
         Self {

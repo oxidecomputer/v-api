@@ -109,7 +109,7 @@ pub struct ProxyTokenError {
 // Complete a device exchange request against the specified provider. This effectively proxies the
 // requests that would go to the provider, captures the returned access tokens, and registers a
 // new internal user as needed. The user is then returned an token that is valid for interacting
-// with the RFD API
+// with the API
 #[instrument(skip(rqctx, body), err(Debug))]
 pub async fn exchange_device_token_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
