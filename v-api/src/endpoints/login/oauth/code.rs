@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
-use chrono::{Duration, Utc};
+use chrono::{TimeDelta, Utc};
 use dropshot::{
     http_response_temporary_redirect, HttpError, HttpResponseOk, HttpResponseTemporaryRedirect,
     Path, Query, RequestContext, RequestInfo, TypedBody,
@@ -197,7 +197,7 @@ where
 
     // Set a default expiration for the login attempt
     // TODO: Make this configurable
-    attempt.expires_at = Some(Utc::now().add(Duration::minutes(5)));
+    attempt.expires_at = Some(Utc::now().add(TimeDelta::try_minutes(5).unwrap()));
 
     // Assign any scope errors that arose
     attempt.error = scope_error;
@@ -701,7 +701,7 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use chrono::{Duration, Utc};
+    use chrono::{TimeDelta, Utc};
     use dropshot::RequestInfo;
     use http::{
         header::{COOKIE, LOCATION, SET_COOKIE},
@@ -1378,7 +1378,7 @@ mod tests {
             pkce_challenge: Some(challenge.as_str().to_string()),
             pkce_challenge_method: Some("S256".to_string()),
             authz_code: None,
-            expires_at: Some(Utc::now().add(Duration::seconds(60))),
+            expires_at: Some(Utc::now().add(TimeDelta::try_seconds(60).unwrap())),
             error: None,
             provider: "google".to_string(),
             provider_pkce_verifier: Some("rfd_verifier".to_string()),

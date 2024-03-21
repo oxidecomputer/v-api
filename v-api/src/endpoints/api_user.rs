@@ -546,7 +546,7 @@ where
 mod tests {
     use std::{collections::BTreeSet, sync::Arc};
 
-    use chrono::{Duration, Utc};
+    use chrono::{TimeDelta, Utc};
     use http::StatusCode;
     use mockall::predicate::eq;
     use uuid::Uuid;
@@ -921,7 +921,7 @@ mod tests {
 
         let new_token = ApiKeyCreateParams {
             permissions: None,
-            expires_at: Utc::now() + Duration::seconds(5 * 60),
+            expires_at: Utc::now() + TimeDelta::try_seconds(5 * 60).unwrap(),
         };
 
         let mut api_user_store = MockApiUserStore::new();
@@ -1079,7 +1079,7 @@ mod tests {
             api_user_id: api_user_id,
             key_signature: "encrypted_key".to_string(),
             permissions: None,
-            expires_at: Utc::now() + Duration::seconds(5 * 60),
+            expires_at: Utc::now() + TimeDelta::try_seconds(5 * 60).unwrap(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
             deleted_at: None,
@@ -1228,7 +1228,7 @@ mod tests {
             api_user_id: api_user_id,
             key_signature: "encrypted_key".to_string(),
             permissions: None,
-            expires_at: Utc::now() + Duration::seconds(5 * 60),
+            expires_at: Utc::now() + TimeDelta::try_seconds(5 * 60).unwrap(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
             deleted_at: None,

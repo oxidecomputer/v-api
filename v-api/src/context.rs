@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use dropshot::{HttpError, RequestContext, ServerContext};
 use http::StatusCode;
 use jsonwebtoken::jwk::JwkSet;
@@ -769,7 +769,7 @@ where
         api_user_provider: &ApiUserProvider,
         scope: Option<Vec<String>>,
     ) -> Result<RegisteredAccessToken, ApiError> {
-        let expires_at = Utc::now() + Duration::seconds(self.default_jwt_expiration());
+        let expires_at = Utc::now() + TimeDelta::try_seconds(self.default_jwt_expiration()).unwrap();
 
         let claims = Claims::new(self, &api_user, &api_user_provider, scope, expires_at);
         let token = self
@@ -1513,7 +1513,7 @@ where
                     source_api_user_id: *source_user,
                     target_api_user_id: *target,
                     secret_signature: signed.signature().to_string(),
-                    expires_at: Utc::now().add(Duration::minutes(15)),
+                    expires_at: Utc::now().add(TimeDelta::try_minutes(15).unwrap()),
                     completed_at: None,
                 },
             )
@@ -1558,7 +1558,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Duration, Utc};
+    use chrono::{TimeDelta, Utc};
     use mockall::predicate::eq;
     use std::{collections::BTreeSet, ops::Add, sync::Arc};
     use uuid::Uuid;
@@ -1614,7 +1614,7 @@ mod tests {
                 &user,
                 &provider,
                 Some(scope),
-                Utc::now().add(Duration::seconds(300)),
+                Utc::now().add(TimeDelta::try_seconds(300).unwrap()),
             ))
             .await
             .unwrap();
