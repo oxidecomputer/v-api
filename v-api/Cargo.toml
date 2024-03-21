@@ -20,7 +20,7 @@ google-cloudkms1 = { workspace = true }
 hex = { workspace = true }
 http = { workspace = true }
 hyper = { workspace = true }
-hyper-rustls = { workspace = true }
+hyper-rustls = { workspace = true, features = ["http2"] }
 jsonwebtoken = { workspace = true }
 oauth2 = { workspace = true }
 partial-struct = { workspace = true }

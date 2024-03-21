@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 
-use chrono::{Duration, Utc};
+use chrono::{TimeDelta, Utc};
 use diesel::{
     migration::{Migration, MigrationSource},
     pg::Pg,
@@ -192,7 +192,7 @@ async fn test_api_user() {
             api_user_id: api_user.id,
             key_signature: format!("key-{}", Uuid::new_v4()),
             permissions: Some(vec![TestPermission::GetApiKey(api_user_id).into()].into()),
-            expires_at: Utc::now() + Duration::seconds(5 * 60),
+            expires_at: Utc::now() + TimeDelta::try_seconds(5 * 60).unwrap(),
         },
     )
     .await
@@ -212,7 +212,7 @@ async fn test_api_user() {
                 ]
                 .into(),
             ),
-            expires_at: Utc::now() + Duration::seconds(5 * 60),
+            expires_at: Utc::now() + TimeDelta::try_seconds(5 * 60).unwrap(),
         },
     )
     .await
@@ -238,7 +238,7 @@ async fn test_api_user() {
                 ]
                 .into(),
             ),
-            expires_at: Utc::now() - Duration::seconds(5 * 60),
+            expires_at: Utc::now() - TimeDelta::try_seconds(5 * 60).unwrap(),
         },
     )
     .await
