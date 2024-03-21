@@ -60,4 +60,42 @@ let mut api = ApiDescription::new().tag_config(/** ... **/);
 inject_endpoints!(api);
 ```
 
-### Usage
+### Endpoints
+
+The following endpoints are injected by the `inject_endpoints` macro:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /oauth/client | Vliew all OAuth clients |
+| POST | /oauth/client | Create a new OAuth client |
+| GET | /oauth/client/{client_id} | View an individual OAuth client |
+| POST | /oauth/client/{client_id}/secret | Create a new secret for an OAuth client |
+| DELETE | /oauth/client/{client_id}/secret/{secret_id} | Delete an existing secret from an OAuth client |
+| POST | /oauth/client/{client_id}/redirect_uri | Add a redirect URI to an OAuth cleint |
+| DELETE | /oauth/client/{client_id}/redirect_uri/{redirect_uri_id} | Delete an existing redirect URI from an OAuth client |
+| GET | /login/oauth/{provider}/code/authorize | Start an OAuth authorization_code flow |
+| GET | /login/oauth/{provider}/code/callback | Internal url for handling return calls from external OAuth providers |
+| POST | /login/oauth/{provider}/code/token | Complete an authorization_code flow by exchanging an authorization code for an access token |
+| GET | /login/oauth/{provider}/device | Start an OAuth device_code flow |
+| POST | /login/oauth/{provider}/device/exchange | Complete a device_code flow by exchanging a request for an access token |
+| GET | /.well-known/openid-configuration | Retrive OpenID configuartion information. Specifically the jwks url |
+| GET | /.well-known/jwks.json | Retrieve JWKS for verifying access tokens |
+| GET | /self | View information about the calling user |
+| GET | /api-user/{identifier} | View information about a specific user |
+| POST | /api-user | Create a new user |
+| POST | /api-user/{identifier} | Update information on an existing user |
+| GET | /api-user/{identifier}/token | View all API tokens for an existing user |
+| POST | /api-user/{identifier}/token | Create a new API token for an existing user |
+| GET | /api-user/{identifier}/token/{token_identifier} | View an existing API token |
+| DELETE | /api-user/{identifier}/token/{token_identifier} | Delete an existing API token |
+| POST | /api-user/{identifier}/group | Add an existing user to a group |
+| DELETE | /api-user/{identifier}/group/{group_id} | Remove an existing user from a group |
+| POST | /api-user/{identifier}/link | TBD |
+| POST | /api-user-provider/{identifier}/link-token | TBD |
+| GET | /group | View all groups |
+| POST | /group | Create a new group |
+| PUT | /group/{group_id} | Update an existing group |
+| DELETE | /group/{group_id} | Delete an existing group |
+| GET | /mapper | View all mappers |
+| POST | /mapper | Create a new mapper |
+| DELETE | /mapper/{identifier} | Delete and existing mapper |
