@@ -8,4 +8,3 @@ edition = "2021"
 [dependencies]
 diesel = { workspace = true, features = ["postgres"] }
 diesel_migrations = { workspace = true, features = ["postgres"] }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
