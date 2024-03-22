@@ -12,5 +12,5 @@ name = "v-api-installer"
 path = "src/main.rs"
 
 [dependencies]
-diesel = { workspace = true, features = ["postgres"] }
+diesel = { workspace = true, features = ["postgres", "r2d2"] }
 diesel_migrations = { workspace = true, features = ["postgres"] }
