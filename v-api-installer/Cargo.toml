@@ -3,7 +3,13 @@ name = "v-api-installer"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "v_api_installer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "v-api-installer"
+path = "src/main.rs"
 
 [dependencies]
 diesel = { workspace = true, features = ["postgres"] }
