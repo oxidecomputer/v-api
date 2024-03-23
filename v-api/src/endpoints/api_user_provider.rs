@@ -3,26 +3,26 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use dropshot::{HttpError, HttpResponseOk, Path, RequestContext, TypedBody};
+use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
-use uuid::Uuid;
+use v_model::{UserId, UserProviderId};
 
 use crate::{
     context::ApiContext,
     permissions::{PermissionStorage, VAppPermission},
     secrets::OpenApiSecretString,
-    util::response::forbidden,
 };
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ApiUserProviderPath {
-    identifier: Uuid,
+    provider_id: TypedUuid<UserProviderId>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ApiUserLinkRequestPayload {
-    user_identifier: Uuid,
+    user_id: TypedUuid<UserId>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -46,20 +46,15 @@ where
     let path = path.into_inner();
     let body = body.into_inner();
 
-    let provider = ctx.get_api_user_provider(&caller, &path.identifier).await?;
+    let provider = ctx
+        .get_api_user_provider(&caller, &caller.id, &path.provider_id)
+        .await?;
 
-    // TODO: This permission check indicates that the permission modeling for this functionality
-    // is not correct. Need to rethink it
-    if provider.api_user_id == caller.id {
-        let token = ctx
-            .create_link_request_token(&caller, &path.identifier, &caller.id, &body.user_identifier)
-            .await?;
+    let token = ctx
+        .create_link_request_token(&caller, &provider.id, &caller.id, &body.user_id)
+        .await?;
 
-        Ok(HttpResponseOk(ApiUserLinkRequestResponse {
-            token: token.key().into(),
-        }))
-    } else {
-        tracing::info!(caller = ?caller.id, provider = ?provider.id, provider_user = ?provider.api_user_id, "User does not have permission to modify this provider");
-        Err(forbidden())
-    }
+    Ok(HttpResponseOk(ApiUserLinkRequestResponse {
+        token: token.key().into(),
+    }))
 }

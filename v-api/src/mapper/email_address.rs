@@ -5,11 +5,14 @@
 use std::collections::BTreeSet;
 
 use async_trait::async_trait;
+use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use v_api_permissions::{Permission, Permissions};
-use v_model::storage::StoreError;
+use v_model::{
+    permissions::{Permission, Permissions},
+    storage::StoreError,
+    AccessGroupId,
+};
 
 use crate::{
     context::VContext,
@@ -53,7 +56,7 @@ where
         &self,
         ctx: &VContext<T>,
         user: &UserInfo,
-    ) -> ResourceResult<BTreeSet<Uuid>, StoreError> {
+    ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError> {
         let found_email = user
             .verified_emails
             .iter()

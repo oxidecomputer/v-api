@@ -12,6 +12,7 @@ use diesel::{
     sql_query, PgConnection, RunQueryDsl,
 };
 use diesel_migrations::{embed_migrations, EmbeddedMigrations};
+use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -20,7 +21,7 @@ use v_model::{
         postgres::PostgresStore, ApiKeyFilter, ApiKeyStore, ApiUserFilter, ApiUserStore,
         ListPagination,
     },
-    NewApiKey, NewApiUser,
+    NewApiKey, NewApiUser, UserId,
 };
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
@@ -35,9 +36,9 @@ fn leakable_dbs() -> Vec<String> {
 )]
 enum TestPermission {
     CreateApiUser,
-    CreateApiKey(Uuid),
-    GetApiKey(Uuid),
-    DeleteApiKey(Uuid),
+    CreateApiKey(TypedUuid<UserId>),
+    GetApiKey(TypedUuid<UserId>),
+    DeleteApiKey(TypedUuid<UserId>),
 }
 
 // A fresh test database that will be created and migrated for use in a test. At the end of the
@@ -124,7 +125,7 @@ async fn test_api_user() {
     let db = TestDb::new("test_api_user");
     let store = PostgresStore::new(&db.url()).await.unwrap();
 
-    let api_user_id = Uuid::new_v4();
+    let api_user_id = TypedUuid::new_v4();
 
     // 1. Create an API user
     let api_user = ApiUserStore::<TestPermission>::upsert(
@@ -188,8 +189,8 @@ async fn test_api_user() {
     let token = ApiKeyStore::<TestPermission>::upsert(
         &store,
         NewApiKey {
-            id: Uuid::new_v4(),
-            api_user_id: api_user.id,
+            id: TypedUuid::new_v4(),
+            user_id: api_user.id,
             key_signature: format!("key-{}", Uuid::new_v4()),
             permissions: Some(vec![TestPermission::GetApiKey(api_user_id).into()].into()),
             expires_at: Utc::now() + TimeDelta::try_seconds(5 * 60).unwrap(),
@@ -202,8 +203,8 @@ async fn test_api_user() {
     let excess_token = ApiKeyStore::upsert(
         &store,
         NewApiKey {
-            id: Uuid::new_v4(),
-            api_user_id: api_user.id,
+            id: TypedUuid::new_v4(),
+            user_id: api_user.id,
             key_signature: format!("key-{}", Uuid::new_v4()),
             permissions: Some(
                 vec![
@@ -228,8 +229,8 @@ async fn test_api_user() {
     let expired_token = ApiKeyStore::<TestPermission>::upsert(
         &store,
         NewApiKey {
-            id: Uuid::new_v4(),
-            api_user_id: api_user.id,
+            id: TypedUuid::new_v4(),
+            user_id: api_user.id,
             key_signature: format!("key-{}", Uuid::new_v4()),
             permissions: Some(
                 vec![

@@ -4,12 +4,11 @@
 
 use config::{Config, ConfigError, Environment, File};
 use diesel::result::{DatabaseErrorKind, Error as DieselError};
+use newtype_uuid::TypedUuid;
 use serde::Deserialize;
 use thiserror::Error;
 use tracing::Instrument;
-use uuid::Uuid;
-use v_api_permissions::Permissions;
-use v_model::{storage::StoreError, NewAccessGroup, NewMapper};
+use v_model::{permissions::Permissions, storage::StoreError, NewAccessGroup, NewMapper};
 
 use crate::{
     context::VContext,
@@ -79,7 +78,7 @@ where
                     .iter()
                     .find(|g| g.name == group.name)
                     .map(|g| g.id)
-                    .unwrap_or(Uuid::new_v4());
+                    .unwrap_or(TypedUuid::new_v4());
 
                 ctx.create_group(
                     &ctx.builtin_registration_user(),
@@ -101,7 +100,7 @@ where
             let span = tracing::info_span!("Initializing mapper", mapper = ?mapper);
             async {
                 let new_mapper = NewMapper {
-                    id: Uuid::new_v4(),
+                    id: TypedUuid::new_v4(),
                     name: mapper.name,
                     rule: serde_json::to_value(&mapper.rule)?,
                     activations: None,

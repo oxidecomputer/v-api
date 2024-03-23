@@ -5,12 +5,14 @@
 use std::fmt::Debug;
 
 use dropshot::{HttpError, HttpResponseCreated, HttpResponseOk, RequestContext};
+use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tracing::instrument;
-use uuid::Uuid;
-use v_api_permissions::{Permission, Permissions};
-use v_model::{AccessGroup, NewAccessGroup};
+use v_model::{
+    permissions::{Permission, Permissions},
+    AccessGroup, AccessGroupId, NewAccessGroup,
+};
 
 use crate::{
     context::ApiContext,
@@ -80,7 +82,7 @@ where
         ctx.create_group(
             &caller,
             NewAccessGroup {
-                id: Uuid::new_v4(),
+                id: TypedUuid::new_v4(),
                 name: body.name,
                 permissions: body.permissions,
             },
@@ -92,7 +94,7 @@ where
 
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 pub struct AccessGroupPath {
-    group_id: Uuid,
+    group_id: TypedUuid<AccessGroupId>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]

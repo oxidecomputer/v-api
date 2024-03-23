@@ -13,6 +13,7 @@ use http::{
     HeaderValue, StatusCode,
 };
 use hyper::{Body, Response};
+use newtype_uuid::TypedUuid;
 use oauth2::{
     reqwest::async_http_client, AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier,
     Scope, TokenResponse,
@@ -24,8 +25,10 @@ use sha2::{Digest, Sha256};
 use std::{fmt::Debug, ops::Add};
 use tap::TapFallible;
 use tracing::instrument;
-use uuid::Uuid;
-use v_model::{schema_ext::LoginAttemptState, LoginAttempt, NewLoginAttempt, OAuthClient};
+use v_model::{
+    schema_ext::LoginAttemptState, LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient,
+    OAuthClientId,
+};
 
 use super::{OAuthProvider, OAuthProviderNameParam, UserInfoProvider};
 use crate::{
@@ -91,7 +94,7 @@ impl From<OAuthError> for HttpError {
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct OAuthAuthzCodeQuery {
-    pub client_id: Uuid,
+    pub client_id: TypedUuid<OAuthClientId>,
     pub redirect_uri: String,
     pub response_type: String,
     pub state: String,
@@ -109,7 +112,7 @@ pub struct OAuthAuthzCodeRedirectHeaders {
 // is a valid for this client. If either of these fail we return an unauthorized response
 async fn get_oauth_client<T>(
     ctx: &VContext<T>,
-    client_id: &Uuid,
+    client_id: &TypedUuid<OAuthClientId>,
     redirect_uri: &str,
 ) -> Result<OAuthClient, OAuthError>
 where
@@ -281,7 +284,7 @@ fn oauth_redirect_response(
 fn verify_csrf(
     request: &RequestInfo,
     query: &OAuthAuthzCodeReturnQuery,
-) -> Result<Uuid, HttpError> {
+) -> Result<TypedUuid<LoginAttemptId>, HttpError> {
     // If we are missing the expected state parameter then we can not proceed at all with verifying
     // this callback request. We also do not have a redirect uri to send the user to so we instead
     // report unauthorized
@@ -301,7 +304,7 @@ fn verify_csrf(
     // The client must present the attempt cookie at a minimum. Without it we are unable to lookup a
     // login attempt to match against. Without the cookie to verify the state parameter we can not
     // determine a redirect uri so we instead report unauthorized
-    let attempt_cookie: Uuid = request
+    let attempt_cookie = request
         .cookie(LOGIN_ATTEMPT_COOKIE)
         .ok_or_else(|| {
             tracing::warn!("OAuth callback is missing a login state cookie");
@@ -364,7 +367,7 @@ where
 
 pub async fn authz_code_callback_op_inner<T>(
     ctx: &VContext<T>,
-    attempt_id: &Uuid,
+    attempt_id: &TypedUuid<LoginAttemptId>,
     code: Option<String>,
     error: Option<String>,
 ) -> Result<String, HttpError>
@@ -428,7 +431,7 @@ where
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct OAuthAuthzCodeExchangeBody {
-    pub client_id: Uuid,
+    pub client_id: TypedUuid<OAuthClientId>,
     pub client_secret: OpenApiSecretString,
     pub redirect_uri: String,
     pub grant_type: String,
@@ -534,7 +537,7 @@ where
 async fn authorize_code_exchange<T>(
     ctx: &VContext<T>,
     grant_type: &str,
-    client_id: &Uuid,
+    client_id: &TypedUuid<OAuthClientId>,
     client_secret: &SecretString,
     redirect_uri: &str,
 ) -> Result<(), OAuthError>
@@ -578,7 +581,7 @@ where
 
 fn verify_login_attempt(
     attempt: &LoginAttempt,
-    client_id: &Uuid,
+    client_id: &TypedUuid<OAuthClientId>,
     redirect_uri: &str,
     pkce_verifier: Option<&str>,
 ) -> Result<(), OAuthError> {
@@ -709,6 +712,7 @@ mod tests {
     };
     use hyper::Body;
     use mockall::predicate::eq;
+    use newtype_uuid::TypedUuid;
     use oauth2::PkceCodeChallenge;
     use secrecy::SecretString;
     use uuid::Uuid;
@@ -738,7 +742,7 @@ mod tests {
 
     async fn mock_client() -> (VContext<VPermission>, OAuthClient, SecretString) {
         let ctx = mock_context(MockStorage::new()).await;
-        let client_id = Uuid::new_v4();
+        let client_id = TypedUuid::new_v4();
         let key = RawApiKey::generate::<8>(&Uuid::new_v4())
             .sign(&*ctx.signer())
             .await
@@ -752,14 +756,14 @@ mod tests {
             OAuthClient {
                 id: client_id,
                 secrets: vec![OAuthClientSecret {
-                    id: Uuid::new_v4(),
+                    id: TypedUuid::new_v4(),
                     oauth_client_id: client_id,
                     secret_signature,
                     created_at: Utc::now(),
                     deleted_at: None,
                 }],
                 redirect_uris: vec![OAuthClientRedirectUri {
-                    id: Uuid::new_v4(),
+                    id: TypedUuid::new_v4(),
                     oauth_client_id: client_id,
                     redirect_uri: redirect_uri.to_string(),
                     created_at: Utc::now(),
@@ -774,12 +778,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_oauth_client_lookup_checks_redirect_uri() {
-        let client_id = Uuid::new_v4();
+        let client_id = TypedUuid::new_v4();
         let client = OAuthClient {
             id: client_id,
             secrets: vec![],
             redirect_uris: vec![OAuthClientRedirectUri {
-                id: Uuid::new_v4(),
+                id: TypedUuid::new_v4(),
                 oauth_client_id: client_id,
                 redirect_uri: "https://test.oxeng.dev/callback".to_string(),
                 created_at: Utc::now(),
@@ -820,9 +824,9 @@ mod tests {
 
         let (challenge, _) = PkceCodeChallenge::new_random_sha256();
         let attempt = LoginAttempt {
-            id: Uuid::new_v4(),
+            id: TypedUuid::new_v4(),
             attempt_state: LoginAttemptState::New,
-            client_id: Uuid::new_v4(),
+            client_id: TypedUuid::new_v4(),
             redirect_uri: "https://test.oxeng.dev/callback".to_string(),
             state: Some("ox_state".to_string()),
             pkce_challenge: Some("ox_challenge".to_string()),
@@ -883,7 +887,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_csrf_check() {
-        let id = Uuid::new_v4();
+        let id = TypedUuid::new_v4();
 
         let mut rq = hyper::Request::new(Body::empty());
         rq.headers_mut().insert(
@@ -961,11 +965,11 @@ mod tests {
         ];
 
         for state in invalid_states {
-            let attempt_id = Uuid::new_v4();
+            let attempt_id = TypedUuid::new_v4();
             let attempt = LoginAttempt {
                 id: attempt_id,
                 attempt_state: state,
-                client_id: Uuid::new_v4(),
+                client_id: TypedUuid::new_v4(),
                 redirect_uri: "https://test.oxeng.dev/callback".to_string(),
                 state: Some("ox_state".to_string()),
                 pkce_challenge: Some("ox_challenge".to_string()),
@@ -1005,11 +1009,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_callback_fails_when_error_is_passed() {
-        let attempt_id = Uuid::new_v4();
+        let attempt_id = TypedUuid::new_v4();
         let attempt = LoginAttempt {
             id: attempt_id,
             attempt_state: LoginAttemptState::New,
-            client_id: Uuid::new_v4(),
+            client_id: TypedUuid::new_v4(),
             redirect_uri: "https://test.oxeng.dev/callback".to_string(),
             state: Some("ox_state".to_string()),
             pkce_challenge: Some("ox_challenge".to_string()),
@@ -1065,11 +1069,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_callback_forwards_access_denied() {
-        let attempt_id = Uuid::new_v4();
+        let attempt_id = TypedUuid::new_v4();
         let attempt = LoginAttempt {
             id: attempt_id,
             attempt_state: LoginAttemptState::New,
-            client_id: Uuid::new_v4(),
+            client_id: TypedUuid::new_v4(),
             redirect_uri: "https://test.oxeng.dev/callback".to_string(),
             state: Some("ox_state".to_string()),
             pkce_challenge: Some("ox_challenge".to_string()),
@@ -1125,11 +1129,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_handles_callback_with_code() {
-        let attempt_id = Uuid::new_v4();
+        let attempt_id = TypedUuid::new_v4();
         let attempt = LoginAttempt {
             id: attempt_id,
             attempt_state: LoginAttemptState::New,
-            client_id: Uuid::new_v4(),
+            client_id: TypedUuid::new_v4(),
             redirect_uri: "https://test.oxeng.dev/callback".to_string(),
             state: Some("ox_state".to_string()),
             pkce_challenge: Some("ox_challenge".to_string()),
@@ -1193,7 +1197,7 @@ mod tests {
         let (mut ctx, client, client_secret) = mock_client().await;
         let client_id = client.id;
         let redirect_uri = client.redirect_uris[0].redirect_uri.clone();
-        let wrong_client_id = Uuid::new_v4();
+        let wrong_client_id = TypedUuid::new_v4();
 
         let mut client_store = MockOAuthClientStore::new();
         client_store
@@ -1370,9 +1374,9 @@ mod tests {
     async fn test_login_attempt_verification() {
         let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
         let attempt = LoginAttempt {
-            id: Uuid::new_v4(),
+            id: TypedUuid::new_v4(),
             attempt_state: LoginAttemptState::RemoteAuthenticated,
-            client_id: Uuid::new_v4(),
+            client_id: TypedUuid::new_v4(),
             redirect_uri: "https://test.oxeng.dev/callback".to_string(),
             state: Some("ox_state".to_string()),
             pkce_challenge: Some(challenge.as_str().to_string()),
@@ -1390,7 +1394,7 @@ mod tests {
         };
 
         let bad_client_id = LoginAttempt {
-            client_id: Uuid::new_v4(),
+            client_id: TypedUuid::new_v4(),
             ..attempt.clone()
         };
 

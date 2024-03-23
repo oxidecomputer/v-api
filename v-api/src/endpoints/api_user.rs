@@ -9,16 +9,17 @@ use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
     RequestContext, TypedBody,
 };
+use newtype_uuid::{GenericUuid, TypedUuid};
 use partial_struct::partial;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tap::TapFallible;
 use tracing::instrument;
 use uuid::Uuid;
-use v_api_permissions::{Caller, Permission, Permissions};
 use v_model::{
+    permissions::{Caller, Permission, Permissions},
     storage::{ApiUserProviderFilter, ListPagination},
-    ApiUser, ApiUserProvider, NewApiKey, NewApiUser,
+    AccessGroupId, ApiKeyId, ApiUser, ApiUserProvider, NewApiKey, NewApiUser, UserId,
 };
 
 use crate::{
@@ -106,7 +107,7 @@ where
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
     let path = path.into_inner();
-    let user = ctx.get_api_user(&caller, &path.identifier).await?;
+    let user = ctx.get_api_user(&caller, &path.user_id).await?;
 
     let mut filter = ApiUserProviderFilter::default();
     filter.api_user_id = Some(vec![user.id]);
@@ -121,7 +122,7 @@ where
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 pub struct ApiUserUpdateParams<T> {
     permissions: Permissions<T>,
-    groups: BTreeSet<Uuid>,
+    group_ids: BTreeSet<TypedUuid<AccessGroupId>>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -151,7 +152,7 @@ where
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let user = ctx
-        .create_api_user(&caller, body.permissions, body.groups)
+        .create_api_user(&caller, body.permissions, body.group_ids)
         .await?;
 
     Ok(HttpResponseCreated(into_user_response(user)))
@@ -159,7 +160,7 @@ where
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct ApiUserPath {
-    identifier: Uuid,
+    user_id: TypedUuid<UserId>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -192,9 +193,9 @@ where
         .update_api_user(
             &caller,
             NewApiUser {
-                id: path.identifier,
+                id: path.user_id,
                 permissions: body.permissions,
-                groups: body.groups,
+                groups: body.group_ids,
             },
         )
         .await?;
@@ -229,7 +230,7 @@ where
     tracing::info!("Fetch token list");
 
     let tokens = ctx
-        .get_api_user_tokens(&caller, &path.identifier, &ListPagination::default())
+        .get_api_user_tokens(&caller, &path.user_id, &ListPagination::default())
         .await?;
 
     tracing::info!(count = ?tokens.len(), "Retrieved token list");
@@ -255,7 +256,7 @@ pub struct ApiKeyCreateParams<T> {
 #[partial(ApiKeyResponse)]
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InitialApiKeyResponse<T> {
-    pub id: Uuid,
+    pub id: TypedUuid<ApiKeyId>,
     #[partial(ApiKeyResponse(skip))]
     pub key: OpenApiSecretString,
     pub permissions: Option<Permissions<T>>,
@@ -288,10 +289,10 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let api_user = ctx.get_api_user(&caller, &path.identifier).await?;
+    let api_user = ctx.get_api_user(&caller, &path.user_id).await?;
 
-    let key_id = Uuid::new_v4();
-    let key = RawApiKey::generate::<24>(&key_id)
+    let key_id = TypedUuid::new_v4();
+    let key = RawApiKey::generate::<24>(key_id.as_untyped_uuid())
         .sign(ctx.signer())
         .await
         .map_err(to_internal_error)?;
@@ -301,7 +302,7 @@ where
             &caller,
             NewApiKey {
                 id: key_id,
-                api_user_id: path.identifier,
+                user_id: path.user_id,
                 key_signature: key.signature().to_string(),
                 permissions: into_permissions(body.permissions),
                 expires_at: body.expires_at,
@@ -324,8 +325,8 @@ where
 #[allow(dead_code)]
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct ApiUserTokenPath {
-    identifier: Uuid,
-    token_identifier: Uuid,
+    user_id: TypedUuid<UserId>,
+    api_key_id: TypedUuid<ApiKeyId>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -352,9 +353,7 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let token = ctx
-        .get_api_user_token(&caller, &path.token_identifier)
-        .await?;
+    let token = ctx.get_api_user_token(&caller, &path.api_key_id).await?;
 
     Ok(HttpResponseOk(ApiKeyResponse {
         id: token.id,
@@ -387,9 +386,7 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let token = ctx
-        .delete_api_user_token(&caller, &path.token_identifier)
-        .await?;
+    let token = ctx.delete_api_user_token(&caller, &path.api_key_id).await?;
 
     Ok(HttpResponseOk(ApiKeyResponse {
         id: token.id,
@@ -400,7 +397,7 @@ where
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct AddGroupBody {
-    group_id: Uuid,
+    group_id: TypedUuid<AccessGroupId>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -418,7 +415,7 @@ where
     let caller = ctx.get_caller(auth.as_ref()).await?;
 
     let user = ctx
-        .add_api_user_to_group(&caller, &path.identifier, &body.group_id)
+        .add_api_user_to_group(&caller, &path.user_id, &body.group_id)
         .await?;
 
     Ok(HttpResponseOk(into_user_response(user)))
@@ -426,8 +423,8 @@ where
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ApiUserRemoveGroupPath {
-    identifier: Uuid,
-    group_id: Uuid,
+    user_id: TypedUuid<UserId>,
+    group_id: TypedUuid<AccessGroupId>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -444,7 +441,7 @@ where
     let caller = ctx.get_caller(auth.as_ref()).await?;
 
     let user = ctx
-        .remove_api_user_from_group(&caller, &path.identifier, &path.group_id)
+        .remove_api_user_from_group(&caller, &path.user_id, &path.group_id)
         .await?;
 
     Ok(HttpResponseOk(into_user_response(user)))
@@ -475,15 +472,16 @@ where
     //
     // This endpoint can only be called by the user themselves, it can not be performed on behalf
     // of a user
-    if path.identifier == caller.id {
+    if path.user_id == caller.id {
         let secret = RawApiKey::try_from(body.token.as_str()).map_err(|err| {
             tracing::debug!(?err, "Invalid link request token");
             bad_request("Malformed link request token")
         })?;
-        let link_request_id = Uuid::from_slice(secret.id()).map_err(|err| {
-            tracing::debug!(?err, "Failed to parse link request id from token");
-            bad_request("Invalid link request token")
-        })?;
+        let link_request_id =
+            TypedUuid::from_untyped_uuid(Uuid::from_slice(secret.id()).map_err(|err| {
+                tracing::debug!(?err, "Failed to parse link request id from token");
+                bad_request("Invalid link request token")
+            })?);
 
         // TODO: We need an actual permission for reading a LinkRequest
         let link_request = ctx
@@ -496,7 +494,7 @@ where
 
         // Verify that the found link request is assigned to the user calling the endpoint and that
         // the token provided matches the stored signature
-        if link_request.target_api_user_id == caller.id
+        if link_request.target_user_id == caller.id
             && secret
                 .verify(ctx.signer(), link_request.secret_signature.as_bytes())
                 .is_ok()
@@ -549,9 +547,9 @@ mod tests {
     use chrono::{TimeDelta, Utc};
     use http::StatusCode;
     use mockall::predicate::eq;
-    use uuid::Uuid;
-    use v_api_permissions::{Caller, Permissions};
+    use newtype_uuid::TypedUuid;
     use v_model::{
+        permissions::{Caller, Permissions},
         storage::{ApiKeyFilter, ListPagination, MockApiKeyStore, MockApiUserStore, StoreError},
         ApiKey, ApiUser, NewApiUser,
     };
@@ -571,7 +569,7 @@ mod tests {
 
     fn mock_user() -> ApiUser<VPermission> {
         ApiUser {
-            id: Uuid::new_v4(),
+            id: TypedUuid::new_v4(),
             permissions: Permissions::new(),
             groups: BTreeSet::new(),
             created_at: Utc::now(),
@@ -584,12 +582,12 @@ mod tests {
     async fn test_create_api_user_permissions() {
         let successful_update = ApiUserUpdateParams {
             permissions: vec![VPermission::CreateApiUser].into(),
-            groups: BTreeSet::new(),
+            group_ids: BTreeSet::new(),
         };
 
         let failure_update = ApiUserUpdateParams {
-            permissions: vec![VPermission::GetApiUserAll].into(),
-            groups: BTreeSet::new(),
+            permissions: vec![VPermission::GetApiUsersAll].into(),
+            group_ids: BTreeSet::new(),
         };
 
         let mut store = MockApiUserStore::new();
@@ -611,7 +609,7 @@ mod tests {
         store
             .expect_upsert()
             .withf(|x: &NewApiUser<VPermission>| {
-                x.permissions.can(&VPermission::GetApiUserAll.into())
+                x.permissions.can(&VPermission::GetApiUsersAll.into())
             })
             .returning(|_| Err(StoreError::Unknown));
 
@@ -670,16 +668,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_api_user_permissions() {
-        let success_id = Uuid::new_v4();
+        let success_id = TypedUuid::new_v4();
         let successful_update = ApiUserUpdateParams {
             permissions: Permissions::new(),
-            groups: BTreeSet::new(),
+            group_ids: BTreeSet::new(),
         };
 
-        let failure_id = Uuid::new_v4();
+        let failure_id = TypedUuid::new_v4();
         let failure_update = ApiUserUpdateParams {
             permissions: Permissions::new(),
-            groups: BTreeSet::new(),
+            group_ids: BTreeSet::new(),
         };
 
         let mut store = MockApiUserStore::new();
@@ -707,10 +705,10 @@ mod tests {
         let ctx = mock_context(storage).await;
 
         let success_path = ApiUserPath {
-            identifier: success_id,
+            user_id: success_id,
         };
         let failure_path = ApiUserPath {
-            identifier: failure_id,
+            user_id: failure_id,
         };
 
         let user1 = mock_user();
@@ -737,7 +735,7 @@ mod tests {
         // 2. Succeed in updating api user with direct permission
         let with_specific_permissions = Caller {
             id: user2.id,
-            permissions: vec![VPermission::UpdateApiUser(success_path.identifier)].into(),
+            permissions: vec![VPermission::ManageApiUser(success_path.user_id)].into(),
         };
 
         let resp = update_api_user_inner::<VPermission, VPermissionResponse>(
@@ -756,7 +754,7 @@ mod tests {
         // 3. Succeed in updating api user with general permission
         let with_general_permissions = Caller {
             id: user3.id,
-            permissions: vec![VPermission::UpdateApiUserAll].into(),
+            permissions: vec![VPermission::ManageApiUsersAll].into(),
         };
 
         let resp = update_api_user_inner::<VPermission, VPermissionResponse>(
@@ -785,8 +783,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_api_user_token_permissions() {
-        let success_id = Uuid::new_v4();
-        let failure_id = Uuid::new_v4();
+        let success_id = TypedUuid::new_v4();
+        let failure_id = TypedUuid::new_v4();
 
         let mut store = MockApiKeyStore::new();
         store
@@ -825,7 +823,7 @@ mod tests {
             &ctx,
             no_permissions,
             ApiUserPath {
-                identifier: success_id,
+                user_id: success_id,
             },
         )
         .await;
@@ -838,14 +836,14 @@ mod tests {
         // 2. Fail to list due to incorrect permissions
         let incorrect_permissions = Caller {
             id: user2.id,
-            permissions: vec![VPermission::GetApiUserToken(Uuid::new_v4())].into(),
+            permissions: vec![VPermission::GetApiKey(TypedUuid::new_v4())].into(),
         };
 
         let resp = list_api_user_tokens_inner::<VPermission, VPermissionResponse>(
             &ctx,
             incorrect_permissions,
             ApiUserPath {
-                identifier: success_id,
+                user_id: success_id,
             },
         )
         .await;
@@ -858,14 +856,14 @@ mod tests {
         // 3. Succeed in list tokens
         let success_permissions = Caller {
             id: user3.id,
-            permissions: vec![VPermission::GetApiUserToken(success_id)].into(),
+            permissions: vec![VPermission::GetApiKey(TypedUuid::new_v4())].into(),
         };
 
         let resp = list_api_user_tokens_inner::<VPermission, VPermissionResponse>(
             &ctx,
             success_permissions,
             ApiUserPath {
-                identifier: success_id,
+                user_id: success_id,
             },
         )
         .await;
@@ -878,14 +876,14 @@ mod tests {
         // 4. Handle storage failure and return error
         let failure_permissions = Caller {
             id: user4.id,
-            permissions: vec![VPermission::GetApiUserToken(failure_id)].into(),
+            permissions: vec![VPermission::GetApiKey(TypedUuid::new_v4())].into(),
         };
 
         let resp = list_api_user_tokens_inner::<VPermission, VPermissionResponse>(
             &ctx,
             failure_permissions,
             ApiUserPath {
-                identifier: failure_id,
+                user_id: failure_id,
             },
         )
         .await;
@@ -896,11 +894,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_api_user_token_permissions() {
-        let api_user_id = Uuid::new_v4();
+        let api_user_id = TypedUuid::new_v4();
+        let api_key_id = TypedUuid::new_v4();
 
         let api_user = ApiUser {
             id: api_user_id,
-            permissions: vec![VPermission::GetApiUserToken(api_user_id)].into(),
+            permissions: vec![VPermission::GetApiKey(api_key_id)].into(),
             groups: BTreeSet::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -908,15 +907,15 @@ mod tests {
         };
 
         let api_user_path = ApiUserPath {
-            identifier: api_user.id,
+            user_id: api_user.id,
         };
 
         let failure_api_user_path = ApiUserPath {
-            identifier: Uuid::new_v4(),
+            user_id: TypedUuid::new_v4(),
         };
 
         let unknown_api_user_path = ApiUserPath {
-            identifier: Uuid::new_v4(),
+            user_id: TypedUuid::new_v4(),
         };
 
         let new_token = ApiKeyCreateParams {
@@ -927,15 +926,15 @@ mod tests {
         let mut api_user_store = MockApiUserStore::new();
         api_user_store
             .expect_get()
-            .with(eq(api_user_path.identifier), eq(false))
+            .with(eq(api_user_path.user_id), eq(false))
             .returning(move |_, _| Ok(Some(api_user.clone())));
         api_user_store
             .expect_get()
-            .with(eq(failure_api_user_path.identifier), eq(false))
+            .with(eq(failure_api_user_path.user_id), eq(false))
             .returning(|_, _| Err(StoreError::Unknown));
         api_user_store
             .expect_get()
-            .with(eq(unknown_api_user_path.identifier), eq(false))
+            .with(eq(unknown_api_user_path.user_id), eq(false))
             .returning(move |_, _| Ok(None));
 
         let mut token_store = MockApiKeyStore::new();
@@ -944,8 +943,8 @@ mod tests {
             // .withf(move |_, user| user.id == api_user_id)
             .returning(move |key| {
                 Ok(ApiKey {
-                    id: Uuid::new_v4(),
-                    api_user_id: api_user_id,
+                    id: TypedUuid::new_v4(),
+                    user_id: api_user_id,
                     key_signature: key.key_signature,
                     permissions: key.permissions,
                     expires_at: key.expires_at,
@@ -985,7 +984,7 @@ mod tests {
         // 2. Fail to create due to incorrect permissions
         let incorrect_permissions = Caller {
             id: user2.id,
-            permissions: vec![VPermission::CreateApiUserToken(Uuid::new_v4())].into(),
+            permissions: vec![VPermission::CreateApiKey(TypedUuid::new_v4())].into(),
         };
 
         let resp = create_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1005,8 +1004,8 @@ mod tests {
         let incorrect_permissions = Caller {
             id: user3.id,
             permissions: vec![
-                VPermission::GetApiUser(unknown_api_user_path.identifier),
-                VPermission::CreateApiUserToken(unknown_api_user_path.identifier),
+                VPermission::GetApiUser(unknown_api_user_path.user_id),
+                VPermission::CreateApiKey(unknown_api_user_path.user_id),
             ]
             .into(),
         };
@@ -1028,8 +1027,8 @@ mod tests {
         let success_permissions = Caller {
             id: user4.id,
             permissions: vec![
-                VPermission::GetApiUser(api_user_path.identifier),
-                VPermission::CreateApiUserToken(api_user_path.identifier),
+                VPermission::GetApiUser(api_user_path.user_id),
+                VPermission::CreateApiKey(api_user_path.user_id),
             ]
             .into(),
         };
@@ -1052,8 +1051,8 @@ mod tests {
         let failure_permissions = Caller {
             id: user5.id,
             permissions: vec![
-                VPermission::GetApiUser(failure_api_user_path.identifier),
-                VPermission::CreateApiUserToken(failure_api_user_path.identifier),
+                VPermission::GetApiUser(failure_api_user_path.user_id),
+                VPermission::CreateApiKey(failure_api_user_path.user_id),
             ]
             .into(),
         };
@@ -1072,11 +1071,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_api_user_token_permissions() {
-        let api_user_id = Uuid::new_v4();
+        let api_user_id = TypedUuid::new_v4();
 
         let token = ApiKey {
-            id: Uuid::new_v4(),
-            api_user_id: api_user_id,
+            id: TypedUuid::new_v4(),
+            user_id: api_user_id,
             key_signature: "encrypted_key".to_string(),
             permissions: None,
             expires_at: Utc::now() + TimeDelta::try_seconds(5 * 60).unwrap(),
@@ -1086,32 +1085,32 @@ mod tests {
         };
 
         let api_user_token_path = ApiUserTokenPath {
-            identifier: api_user_id,
-            token_identifier: token.id,
+            user_id: api_user_id,
+            api_key_id: token.id,
         };
 
         let failure_api_user_token_path = ApiUserTokenPath {
-            identifier: api_user_id,
-            token_identifier: Uuid::new_v4(),
+            user_id: api_user_id,
+            api_key_id: TypedUuid::new_v4(),
         };
 
         let unknown_api_user_token_path = ApiUserTokenPath {
-            identifier: api_user_id,
-            token_identifier: Uuid::new_v4(),
+            user_id: api_user_id,
+            api_key_id: TypedUuid::new_v4(),
         };
 
         let mut token_store = MockApiKeyStore::new();
         token_store
             .expect_get()
-            .with(eq(api_user_token_path.token_identifier.clone()), eq(false))
+            .with(eq(api_user_token_path.api_key_id.clone()), eq(false))
             .returning(move |_, _| Ok(Some(token.clone())));
         token_store
             .expect_get()
-            .with(eq(failure_api_user_token_path.token_identifier), eq(false))
+            .with(eq(failure_api_user_token_path.api_key_id), eq(false))
             .returning(move |_, _| Err(StoreError::Unknown));
         token_store
             .expect_get()
-            .with(eq(unknown_api_user_token_path.token_identifier), eq(false))
+            .with(eq(unknown_api_user_token_path.api_key_id), eq(false))
             .returning(move |_, _| Ok(None));
 
         let mut storage = MockStorage::new();
@@ -1142,7 +1141,7 @@ mod tests {
         // 2. Fail to get due to incorrect permissions
         let incorrect_permissions = Caller {
             id: user2.id,
-            permissions: vec![VPermission::GetApiUserToken(Uuid::new_v4())].into(),
+            permissions: vec![VPermission::GetApiKey(TypedUuid::new_v4())].into(),
         };
 
         let resp = get_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1160,8 +1159,8 @@ mod tests {
         // 3. Fail to get due to unknown token id
         let incorrect_permissions = Caller {
             id: user3.id,
-            permissions: vec![VPermission::GetApiUserToken(
-                unknown_api_user_token_path.token_identifier,
+            permissions: vec![VPermission::GetApiKey(
+                unknown_api_user_token_path.api_key_id,
             )]
             .into(),
         };
@@ -1181,10 +1180,7 @@ mod tests {
         // 4. Succeed in getting token
         let success_permissions = Caller {
             id: user4.id,
-            permissions: vec![VPermission::GetApiUserToken(
-                api_user_token_path.token_identifier,
-            )]
-            .into(),
+            permissions: vec![VPermission::GetApiKey(api_user_token_path.api_key_id)].into(),
         };
 
         let resp = get_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1202,8 +1198,8 @@ mod tests {
         // 5. Handle storage failure and return error
         let failure_permissions = Caller {
             id: user5.id,
-            permissions: vec![VPermission::GetApiUserToken(
-                failure_api_user_token_path.token_identifier,
+            permissions: vec![VPermission::GetApiKey(
+                failure_api_user_token_path.api_key_id,
             )]
             .into(),
         };
@@ -1221,11 +1217,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_api_user_token_permissions() {
-        let api_user_id = Uuid::new_v4();
+        let api_user_id = TypedUuid::new_v4();
 
         let token = ApiKey {
-            id: Uuid::new_v4(),
-            api_user_id: api_user_id,
+            id: TypedUuid::new_v4(),
+            user_id: api_user_id,
             key_signature: "encrypted_key".to_string(),
             permissions: None,
             expires_at: Utc::now() + TimeDelta::try_seconds(5 * 60).unwrap(),
@@ -1235,32 +1231,32 @@ mod tests {
         };
 
         let api_user_token_path = ApiUserTokenPath {
-            identifier: api_user_id,
-            token_identifier: token.id,
+            user_id: api_user_id,
+            api_key_id: token.id,
         };
 
         let failure_api_user_token_path = ApiUserTokenPath {
-            identifier: api_user_id,
-            token_identifier: Uuid::new_v4(),
+            user_id: api_user_id,
+            api_key_id: TypedUuid::new_v4(),
         };
 
         let unknown_api_user_token_path = ApiUserTokenPath {
-            identifier: api_user_id,
-            token_identifier: Uuid::new_v4(),
+            user_id: api_user_id,
+            api_key_id: TypedUuid::new_v4(),
         };
 
         let mut token_store = MockApiKeyStore::new();
         token_store
             .expect_delete()
-            .with(eq(api_user_token_path.token_identifier))
+            .with(eq(api_user_token_path.api_key_id))
             .returning(move |_| Ok(Some(token.clone())));
         token_store
             .expect_delete()
-            .with(eq(failure_api_user_token_path.token_identifier))
+            .with(eq(failure_api_user_token_path.api_key_id))
             .returning(move |_| Err(StoreError::Unknown));
         token_store
             .expect_delete()
-            .with(eq(unknown_api_user_token_path.token_identifier))
+            .with(eq(unknown_api_user_token_path.api_key_id))
             .returning(move |_| Ok(None));
 
         let mut storage = MockStorage::new();
@@ -1291,7 +1287,7 @@ mod tests {
         // 2. Fail to get due to incorrect permissions
         let incorrect_permissions = Caller {
             id: user2.id,
-            permissions: vec![VPermission::DeleteApiUserToken(Uuid::new_v4())].into(),
+            permissions: vec![VPermission::ManageApiKey(TypedUuid::new_v4())].into(),
         };
 
         let resp = delete_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1309,8 +1305,8 @@ mod tests {
         // 3. Fail to get due to unknown token id
         let incorrect_permissions = Caller {
             id: user3.id,
-            permissions: vec![VPermission::DeleteApiUserToken(
-                unknown_api_user_token_path.token_identifier,
+            permissions: vec![VPermission::ManageApiKey(
+                unknown_api_user_token_path.api_key_id,
             )]
             .into(),
         };
@@ -1330,10 +1326,7 @@ mod tests {
         // 4. Succeed in getting token
         let success_permissions = Caller {
             id: user4.id,
-            permissions: vec![VPermission::DeleteApiUserToken(
-                api_user_token_path.token_identifier,
-            )]
-            .into(),
+            permissions: vec![VPermission::ManageApiKey(api_user_token_path.api_key_id)].into(),
         };
 
         let resp = delete_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1351,8 +1344,8 @@ mod tests {
         // 5. Handle storage failure and return error
         let failure_permissions = Caller {
             id: user5.id,
-            permissions: vec![VPermission::DeleteApiUserToken(
-                failure_api_user_token_path.token_identifier,
+            permissions: vec![VPermission::ManageApiKey(
+                failure_api_user_token_path.api_key_id,
             )]
             .into(),
         };

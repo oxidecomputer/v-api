@@ -3,12 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use dropshot::{HttpError, HttpResponseCreated, HttpResponseOk, RequestContext};
+use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
-use uuid::Uuid;
-use v_api_permissions::Permission;
-use v_model::{Mapper, NewMapper};
+use v_model::{permissions::Permission, Mapper, MapperId, NewMapper};
 
 use crate::{
     context::ApiContext,
@@ -69,7 +68,7 @@ where
         .add_mapper(
             &caller,
             &NewMapper {
-                id: Uuid::new_v4(),
+                id: TypedUuid::new_v4(),
                 name: body.name,
                 // This was just unserialized from json, so it can be serialized back to a value
                 rule: serde_json::to_value(body.rule).unwrap(),
@@ -92,7 +91,7 @@ where
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MapperPath {
-    identifier: Uuid,
+    identifier: TypedUuid<MapperId>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]

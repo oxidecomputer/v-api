@@ -3,12 +3,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use async_trait::async_trait;
+use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use uuid::Uuid;
-use v_api_permissions::{Permission, Permissions};
-use v_model::storage::StoreError;
+use v_model::{
+    permissions::{Permission, Permissions},
+    storage::StoreError,
+    AccessGroupId,
+};
 
 use crate::{
     context::VContext,
@@ -43,7 +46,7 @@ where
         &self,
         ctx: &VContext<T>,
         _user: &UserInfo,
-    ) -> ResourceResult<BTreeSet<Uuid>, StoreError> {
+    ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError> {
         let groups = ctx
             .get_groups(&ctx.builtin_registration_user())
             .await?

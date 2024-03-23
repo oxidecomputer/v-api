@@ -12,9 +12,11 @@ use diesel::{
     sql_types::Jsonb,
     AsExpression, FromSqlRow,
 };
+use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use uuid::Uuid;
+
+use crate::UserId;
 
 pub trait Permission:
     Clone + Debug + Serialize + DeserializeOwned + PartialEq + Send + Sync + 'static
@@ -27,7 +29,7 @@ impl<T> Permission for T where
 
 #[derive(Debug, Clone)]
 pub struct Caller<T> {
-    pub id: Uuid,
+    pub id: TypedUuid<UserId>,
     pub permissions: Permissions<T>,
 }
 
@@ -35,7 +37,7 @@ impl<T> Caller<T>
 where
     T: Permission,
 {
-    pub fn is(&self, id: &Uuid) -> bool {
+    pub fn is(&self, id: &TypedUuid<UserId>) -> bool {
         &self.id == id
     }
 

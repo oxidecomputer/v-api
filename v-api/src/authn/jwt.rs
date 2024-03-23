@@ -14,13 +14,14 @@ use jsonwebtoken::{
     },
     Algorithm, DecodingKey, Header, Validation,
 };
+use newtype_uuid::TypedUuid;
 use rsa::traits::PublicKeyParts;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::instrument;
-use uuid::Uuid;
-use v_api_permissions::Permission;
-use v_model::{ApiUser, ApiUserProvider};
+use v_model::{
+    permissions::Permission, AccessTokenId, ApiUser, ApiUserProvider, UserId, UserProviderId,
+};
 
 use crate::{
     config::AsymmetricKey,
@@ -55,12 +56,12 @@ pub struct Jwt {
 pub struct Claims {
     pub iss: String,
     pub aud: String,
-    pub sub: Uuid,
-    pub prv: Uuid,
+    pub sub: TypedUuid<UserId>,
+    pub prv: TypedUuid<UserProviderId>,
     pub scp: Option<Vec<String>>,
     pub exp: i64,
     pub nbf: i64,
-    pub jti: Uuid,
+    pub jti: TypedUuid<AccessTokenId>,
 }
 
 impl Claims {
@@ -82,7 +83,7 @@ impl Claims {
             scp: scope,
             exp: expires_at.timestamp(),
             nbf: Utc::now().timestamp(),
-            jti: Uuid::new_v4(),
+            jti: TypedUuid::new_v4(),
         }
     }
 }

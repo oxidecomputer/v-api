@@ -10,10 +10,9 @@ use diesel::{
     insert_into, pg::PgConnection, query_dsl::QueryDsl, update, upsert::excluded,
     ExpressionMethods, OptionalExtension as OptionalExtension2, PgArrayExpressionMethods,
 };
+use newtype_uuid::{GenericUuid, TypedUuid};
 use std::{collections::BTreeMap, time::Duration};
 use tracing::instrument;
-use uuid::Uuid;
-use v_api_permissions::Permission;
 
 use crate::{
     db::{
@@ -21,15 +20,18 @@ use crate::{
         LinkRequestModel, LoginAttemptModel, MapperModel, OAuthClientModel,
         OAuthClientRedirectUriModel, OAuthClientSecretModel,
     },
+    permissions::Permission,
     schema::{
         access_groups, api_key, api_user, api_user_access_token, api_user_provider, link_request,
         login_attempt, mapper, oauth_client, oauth_client_redirect_uri, oauth_client_secret,
     },
     storage::{LinkRequestFilter, LinkRequestStore, StoreError},
-    AccessGroup, AccessToken, ApiKey, ApiUser, ApiUserProvider, LinkRequest, LoginAttempt, Mapper,
+    AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUser,
+    ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt, LoginAttemptId, Mapper, MapperId,
     NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, NewLinkRequest,
     NewLoginAttempt, NewMapper, NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret,
-    OAuthClient, OAuthClientRedirectUri, OAuthClientSecret,
+    OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId,
+    OAuthSecretId, UserId, UserProviderId,
 };
 
 use super::{
@@ -74,7 +76,11 @@ impl<T> ApiUserStore<T> for PostgresStore
 where
     T: Permission,
 {
-    async fn get(&self, id: &Uuid, deleted: bool) -> Result<Option<ApiUser<T>>, StoreError> {
+    async fn get(
+        &self,
+        id: &TypedUuid<UserId>,
+        deleted: bool,
+    ) -> Result<Option<ApiUser<T>>, StoreError> {
         let user = ApiUserStore::list(
             self,
             ApiUserFilter {
@@ -106,7 +112,8 @@ where
         } = filter;
 
         if let Some(id) = id {
-            query = query.filter(api_user::id.eq_any(id));
+            query =
+                query.filter(api_user::id.eq_any(id.into_iter().map(|id| id.into_untyped_uuid())));
         }
 
         if let Some(email) = email {
@@ -114,7 +121,14 @@ where
         }
 
         if let Some(groups) = groups {
-            query = query.filter(api_user::groups.overlaps_with(groups));
+            query = query.filter(
+                api_user::groups.overlaps_with(
+                    groups
+                        .into_iter()
+                        .map(|id| id.into_untyped_uuid())
+                        .collect::<Vec<_>>(),
+                ),
+            );
         }
 
         if !deleted {
@@ -130,17 +144,7 @@ where
             )
             .await?;
 
-        Ok(results
-            .into_iter()
-            .map(|(user, _)| ApiUser {
-                id: user.id,
-                permissions: user.permissions,
-                groups: user.groups.into_iter().filter_map(|g| g).collect(),
-                created_at: user.created_at,
-                updated_at: user.updated_at,
-                deleted_at: user.deleted_at,
-            })
-            .collect())
+        Ok(results.into_iter().map(|(user, _)| user.into()).collect())
     }
 
     #[instrument(skip(self), fields(id = ?user.id, permissions = ?user.permissions, groups = ?user.groups))]
@@ -149,9 +153,13 @@ where
 
         let user_m: ApiUserModel<T> = insert_into(api_user::dsl::api_user)
             .values((
-                api_user::id.eq(user.id),
+                api_user::id.eq(user.id.into_untyped_uuid()),
                 api_user::permissions.eq(user.permissions.clone()),
-                api_user::groups.eq(user.groups.into_iter().collect::<Vec<_>>()),
+                api_user::groups.eq(user
+                    .groups
+                    .into_iter()
+                    .map(|g| g.into_untyped_uuid())
+                    .collect::<Vec<_>>()),
             ))
             .on_conflict(api_user::id)
             .do_update()
@@ -163,19 +171,12 @@ where
             .get_result_async(&*self.pool.get().await?)
             .await?;
 
-        Ok(ApiUser {
-            id: user_m.id,
-            permissions: user_m.permissions,
-            groups: user_m.groups.into_iter().filter_map(|g| g).collect(),
-            created_at: user_m.created_at,
-            updated_at: user_m.updated_at,
-            deleted_at: user_m.deleted_at,
-        })
+        Ok(user_m.into())
     }
 
-    async fn delete(&self, id: &Uuid) -> Result<Option<ApiUser<T>>, StoreError> {
+    async fn delete(&self, id: &TypedUuid<UserId>) -> Result<Option<ApiUser<T>>, StoreError> {
         let _ = update(api_user::dsl::api_user)
-            .filter(api_user::id.eq(*id))
+            .filter(api_user::id.eq(id.into_untyped_uuid()))
             .set(api_user::deleted_at.eq(Utc::now()))
             .execute_async(&*self.pool.get().await?)
             .await?;
@@ -189,10 +190,14 @@ impl<T> ApiKeyStore<T> for PostgresStore
 where
     T: Permission,
 {
-    async fn get(&self, id: &Uuid, deleted: bool) -> Result<Option<ApiKey<T>>, StoreError> {
+    async fn get(
+        &self,
+        id: &TypedUuid<ApiKeyId>,
+        deleted: bool,
+    ) -> Result<Option<ApiKey<T>>, StoreError> {
         let mut query = api_key::dsl::api_key
             .into_boxed()
-            .filter(api_key::id.eq(*id));
+            .filter(api_key::id.eq(id.into_untyped_uuid()));
 
         if !deleted {
             query = query.filter(api_key::deleted_at.is_null());
@@ -203,16 +208,7 @@ where
             .await
             .optional()?;
 
-        Ok(result.map(|key| ApiKey {
-            id: key.id,
-            api_user_id: key.api_user_id,
-            key_signature: key.key_signature,
-            permissions: key.permissions,
-            expires_at: key.expires_at,
-            created_at: key.created_at,
-            updated_at: key.updated_at,
-            deleted_at: key.deleted_at,
-        }))
+        Ok(result.map(|key| key.into()))
     }
 
     async fn list(
@@ -231,11 +227,15 @@ where
         } = filter;
 
         if let Some(id) = id {
-            query = query.filter(api_key::id.eq_any(id));
+            query =
+                query.filter(api_key::id.eq_any(id.into_iter().map(|key| key.into_untyped_uuid())));
         }
 
         if let Some(api_user_id) = api_user_id {
-            query = query.filter(api_key::api_user_id.eq_any(api_user_id));
+            query = query.filter(
+                api_key::api_user_id
+                    .eq_any(api_user_id.into_iter().map(|user| user.into_untyped_uuid())),
+            );
         }
 
         if let Some(key_signature) = key_signature {
@@ -257,26 +257,14 @@ where
             .get_results_async::<ApiKeyModel<T>>(&*self.pool.get().await?)
             .await?;
 
-        Ok(results
-            .into_iter()
-            .map(|token| ApiKey {
-                id: token.id,
-                api_user_id: token.api_user_id,
-                key_signature: token.key_signature,
-                permissions: token.permissions,
-                expires_at: token.expires_at,
-                created_at: token.created_at,
-                updated_at: token.updated_at,
-                deleted_at: token.deleted_at,
-            })
-            .collect())
+        Ok(results.into_iter().map(|token| token.into()).collect())
     }
 
     async fn upsert(&self, key: NewApiKey<T>) -> Result<ApiKey<T>, StoreError> {
         let key_m: ApiKeyModel<T> = insert_into(api_key::dsl::api_key)
             .values((
-                api_key::id.eq(key.id),
-                api_key::api_user_id.eq(key.api_user_id),
+                api_key::id.eq(key.id.into_untyped_uuid()),
+                api_key::api_user_id.eq(key.user_id.into_untyped_uuid()),
                 api_key::key_signature.eq(key.key_signature.clone()),
                 api_key::expires_at.eq(key.expires_at),
                 api_key::permissions.eq(key.permissions),
@@ -284,21 +272,12 @@ where
             .get_result_async(&*self.pool.get().await?)
             .await?;
 
-        Ok(ApiKey {
-            id: key_m.id,
-            api_user_id: key_m.api_user_id,
-            key_signature: key_m.key_signature,
-            permissions: key_m.permissions,
-            expires_at: key_m.expires_at,
-            created_at: key_m.created_at,
-            updated_at: key_m.updated_at,
-            deleted_at: key_m.deleted_at,
-        })
+        Ok(key_m.into())
     }
 
-    async fn delete(&self, id: &Uuid) -> Result<Option<ApiKey<T>>, StoreError> {
+    async fn delete(&self, id: &TypedUuid<ApiKeyId>) -> Result<Option<ApiKey<T>>, StoreError> {
         let _ = update(api_key::dsl::api_key)
-            .filter(api_key::id.eq(*id))
+            .filter(api_key::id.eq(id.into_untyped_uuid()))
             .set(api_key::deleted_at.eq(Utc::now()))
             .execute_async(&*self.pool.get().await?)
             .await?;
@@ -309,7 +288,11 @@ where
 
 #[async_trait]
 impl ApiUserProviderStore for PostgresStore {
-    async fn get(&self, id: &Uuid, deleted: bool) -> Result<Option<ApiUserProvider>, StoreError> {
+    async fn get(
+        &self,
+        id: &TypedUuid<UserProviderId>,
+        deleted: bool,
+    ) -> Result<Option<ApiUserProvider>, StoreError> {
         let user = ApiUserProviderStore::list(
             self,
             ApiUserProviderFilter {
@@ -343,11 +326,17 @@ impl ApiUserProviderStore for PostgresStore {
         } = filter;
 
         if let Some(id) = id {
-            query = query.filter(api_user_provider::id.eq_any(id));
+            query = query.filter(
+                api_user_provider::id
+                    .eq_any(id.into_iter().map(|provider| provider.into_untyped_uuid())),
+            );
         }
 
         if let Some(api_user_id) = api_user_id {
-            query = query.filter(api_user_provider::api_user_id.eq_any(api_user_id));
+            query = query.filter(
+                api_user_provider::api_user_id
+                    .eq_any(api_user_id.into_iter().map(|user| user.into_untyped_uuid())),
+            );
         }
 
         if let Some(provider) = provider {
@@ -375,32 +364,18 @@ impl ApiUserProviderStore for PostgresStore {
 
         Ok(results
             .into_iter()
-            .map(|provider| ApiUserProvider {
-                id: provider.id,
-                api_user_id: provider.api_user_id,
-                provider: provider.provider,
-                provider_id: provider.provider_id,
-                emails: provider.emails.into_iter().filter_map(|e| e).collect(),
-                display_names: provider
-                    .display_names
-                    .into_iter()
-                    .filter_map(|d| d)
-                    .collect(),
-                created_at: provider.created_at,
-                updated_at: provider.updated_at,
-                deleted_at: provider.deleted_at,
-            })
+            .map(|provider| provider.into())
             .collect())
     }
 
     async fn upsert(&self, provider: NewApiUserProvider) -> Result<ApiUserProvider, StoreError> {
-        tracing::trace!(id = ?provider.id, api_user_id = ?provider.api_user_id, provider = ?provider, "Inserting user provider");
+        tracing::trace!(id = ?provider.id, api_user_id = ?provider.user_id, provider = ?provider, "Inserting user provider");
 
         let provider_m: ApiUserProviderModel =
             insert_into(api_user_provider::dsl::api_user_provider)
                 .values((
-                    api_user_provider::id.eq(provider.id),
-                    api_user_provider::api_user_id.eq(provider.api_user_id),
+                    api_user_provider::id.eq(provider.id.into_untyped_uuid()),
+                    api_user_provider::api_user_id.eq(provider.user_id.into_untyped_uuid()),
                     api_user_provider::provider.eq(provider.provider),
                     api_user_provider::provider_id.eq(provider.provider_id),
                     api_user_provider::emails.eq(provider.emails),
@@ -416,60 +391,35 @@ impl ApiUserProviderStore for PostgresStore {
                 .get_result_async(&*self.pool.get().await?)
                 .await?;
 
-        Ok(ApiUserProvider {
-            id: provider_m.id,
-            api_user_id: provider_m.api_user_id,
-            provider: provider_m.provider,
-            provider_id: provider_m.provider_id,
-            emails: provider_m.emails.into_iter().filter_map(|e| e).collect(),
-            display_names: provider_m
-                .display_names
-                .into_iter()
-                .filter_map(|d| d)
-                .collect(),
-            created_at: provider_m.created_at,
-            updated_at: provider_m.updated_at,
-            deleted_at: provider_m.deleted_at,
-        })
+        Ok(provider_m.into())
     }
 
     async fn transfer(
         &self,
         provider: NewApiUserProvider,
-        current_api_user_id: Uuid,
+        current_api_user_id: TypedUuid<UserId>,
     ) -> Result<ApiUserProvider, StoreError> {
-        tracing::trace!(id = ?provider.id, api_user_id = ?provider.api_user_id, provider = ?provider, "Updating user provider");
+        tracing::trace!(id = ?provider.id, api_user_id = ?provider.user_id, provider = ?provider, "Updating user provider");
 
         let provider_m: ApiUserProviderModel = update(api_user_provider::dsl::api_user_provider)
             .set((
-                api_user_provider::api_user_id.eq(provider.api_user_id),
+                api_user_provider::api_user_id.eq(provider.user_id.into_untyped_uuid()),
                 api_user_provider::updated_at.eq(Utc::now()),
             ))
-            .filter(api_user_provider::id.eq(provider.id))
-            .filter(api_user_provider::api_user_id.eq(current_api_user_id))
+            .filter(api_user_provider::id.eq(provider.id.into_untyped_uuid()))
+            .filter(api_user_provider::api_user_id.eq(current_api_user_id.into_untyped_uuid()))
             .get_result_async(&*self.pool.get().await?)
             .await?;
 
-        Ok(ApiUserProvider {
-            id: provider_m.id,
-            api_user_id: provider_m.api_user_id,
-            provider: provider_m.provider,
-            provider_id: provider_m.provider_id,
-            emails: provider_m.emails.into_iter().filter_map(|e| e).collect(),
-            display_names: provider_m
-                .display_names
-                .into_iter()
-                .filter_map(|d| d)
-                .collect(),
-            created_at: provider_m.created_at,
-            updated_at: provider_m.updated_at,
-            deleted_at: provider_m.deleted_at,
-        })
+        Ok(provider_m.into())
     }
 
-    async fn delete(&self, id: &Uuid) -> Result<Option<ApiUserProvider>, StoreError> {
+    async fn delete(
+        &self,
+        id: &TypedUuid<UserProviderId>,
+    ) -> Result<Option<ApiUserProvider>, StoreError> {
         let _ = update(api_user::dsl::api_user)
-            .filter(api_user::id.eq(*id))
+            .filter(api_user::id.eq(id.into_untyped_uuid()))
             .set(api_user::deleted_at.eq(Utc::now()))
             .execute_async(&*self.pool.get().await?)
             .await?;
@@ -480,10 +430,14 @@ impl ApiUserProviderStore for PostgresStore {
 
 #[async_trait]
 impl AccessTokenStore for PostgresStore {
-    async fn get(&self, id: &Uuid, revoked: bool) -> Result<Option<AccessToken>, StoreError> {
+    async fn get(
+        &self,
+        id: &TypedUuid<AccessTokenId>,
+        revoked: bool,
+    ) -> Result<Option<AccessToken>, StoreError> {
         let mut query = api_user_access_token::dsl::api_user_access_token
             .into_boxed()
-            .filter(api_user_access_token::id.eq(*id));
+            .filter(api_user_access_token::id.eq(id.into_untyped_uuid()));
 
         if !revoked {
             query = query.filter(api_user_access_token::revoked_at.is_null());
@@ -494,13 +448,7 @@ impl AccessTokenStore for PostgresStore {
             .await
             .optional()?;
 
-        Ok(result.map(|token| AccessToken {
-            id: token.id,
-            api_user_id: token.api_user_id,
-            revoked_at: token.revoked_at,
-            created_at: token.created_at,
-            updated_at: token.updated_at,
-        }))
+        Ok(result.map(|token| token.into()))
     }
 
     async fn list(
@@ -517,11 +465,17 @@ impl AccessTokenStore for PostgresStore {
         } = filter;
 
         if let Some(id) = id {
-            query = query.filter(api_user_access_token::id.eq_any(id));
+            query = query.filter(
+                api_user_access_token::id
+                    .eq_any(id.into_iter().map(|token| token.into_untyped_uuid())),
+            );
         }
 
         if let Some(api_user_id) = api_user_id {
-            query = query.filter(api_user_access_token::api_user_id.eq_any(api_user_id));
+            query = query.filter(
+                api_user_access_token::api_user_id
+                    .eq_any(api_user_id.into_iter().map(|user| user.into_untyped_uuid())),
+            );
         }
 
         if !revoked {
@@ -535,24 +489,15 @@ impl AccessTokenStore for PostgresStore {
             .get_results_async::<ApiUserAccessTokenModel>(&*self.pool.get().await?)
             .await?;
 
-        Ok(results
-            .into_iter()
-            .map(|token| AccessToken {
-                id: token.id,
-                api_user_id: token.api_user_id,
-                revoked_at: token.revoked_at,
-                created_at: token.created_at,
-                updated_at: token.updated_at,
-            })
-            .collect())
+        Ok(results.into_iter().map(|token| token.into()).collect())
     }
 
     async fn upsert(&self, token: NewAccessToken) -> Result<AccessToken, StoreError> {
         let token_m: ApiUserAccessTokenModel =
             insert_into(api_user_access_token::dsl::api_user_access_token)
                 .values((
-                    api_user_access_token::id.eq(token.id),
-                    api_user_access_token::api_user_id.eq(token.api_user_id),
+                    api_user_access_token::id.eq(token.id.into_untyped_uuid()),
+                    api_user_access_token::api_user_id.eq(token.user_id.into_untyped_uuid()),
                     api_user_access_token::revoked_at.eq(token.revoked_at),
                 ))
                 .on_conflict(api_user_access_token::id)
@@ -562,22 +507,19 @@ impl AccessTokenStore for PostgresStore {
                 .get_result_async(&*self.pool.get().await?)
                 .await?;
 
-        Ok(AccessToken {
-            id: token_m.id,
-            api_user_id: token_m.api_user_id,
-            revoked_at: token_m.revoked_at,
-            created_at: token_m.created_at,
-            updated_at: token_m.updated_at,
-        })
+        Ok(token_m.into())
     }
 }
 
 #[async_trait]
 impl LoginAttemptStore for PostgresStore {
-    async fn get(&self, id: &Uuid) -> Result<Option<LoginAttempt>, StoreError> {
+    async fn get(
+        &self,
+        id: &TypedUuid<LoginAttemptId>,
+    ) -> Result<Option<LoginAttempt>, StoreError> {
         let query = login_attempt::dsl::login_attempt
             .into_boxed()
-            .filter(login_attempt::id.eq(*id));
+            .filter(login_attempt::id.eq(id.into_untyped_uuid()));
 
         let result = query
             .get_result_async::<LoginAttemptModel>(&*self.pool.get().await?)
@@ -602,11 +544,19 @@ impl LoginAttemptStore for PostgresStore {
         } = filter;
 
         if let Some(id) = id {
-            query = query.filter(login_attempt::id.eq_any(id));
+            query = query.filter(
+                login_attempt::id.eq_any(id.into_iter().map(|attempt| attempt.into_untyped_uuid())),
+            );
         }
 
         if let Some(client_id) = client_id {
-            query = query.filter(login_attempt::client_id.eq_any(client_id));
+            query = query.filter(
+                login_attempt::client_id.eq_any(
+                    client_id
+                        .into_iter()
+                        .map(|client| client.into_untyped_uuid()),
+                ),
+            );
         }
 
         if let Some(attempt_state) = attempt_state {
@@ -630,9 +580,9 @@ impl LoginAttemptStore for PostgresStore {
     async fn upsert(&self, attempt: NewLoginAttempt) -> Result<LoginAttempt, StoreError> {
         let attempt_m: LoginAttemptModel = insert_into(login_attempt::dsl::login_attempt)
             .values((
-                login_attempt::id.eq(attempt.id),
+                login_attempt::id.eq(attempt.id.into_untyped_uuid()),
                 login_attempt::attempt_state.eq(attempt.attempt_state),
-                login_attempt::client_id.eq(attempt.client_id),
+                login_attempt::client_id.eq(attempt.client_id.into_untyped_uuid()),
                 login_attempt::redirect_uri.eq(attempt.redirect_uri),
                 login_attempt::state.eq(attempt.state),
                 login_attempt::pkce_challenge.eq(attempt.pkce_challenge),
@@ -666,7 +616,11 @@ impl LoginAttemptStore for PostgresStore {
 
 #[async_trait]
 impl OAuthClientStore for PostgresStore {
-    async fn get(&self, id: &Uuid, deleted: bool) -> Result<Option<OAuthClient>, StoreError> {
+    async fn get(
+        &self,
+        id: &TypedUuid<OAuthClientId>,
+        deleted: bool,
+    ) -> Result<Option<OAuthClient>, StoreError> {
         let client = OAuthClientStore::list(
             self,
             OAuthClientFilter {
@@ -693,7 +647,9 @@ impl OAuthClientStore for PostgresStore {
         let OAuthClientFilter { id, deleted } = filter;
 
         if let Some(id) = id {
-            query = query.filter(oauth_client::id.eq_any(id));
+            query = query.filter(
+                oauth_client::id.eq_any(id.into_iter().map(|client| client.into_untyped_uuid())),
+            );
         }
 
         if !deleted {
@@ -730,12 +686,8 @@ impl OAuthClientStore for PostgresStore {
                 },
             )
             .into_iter()
-            .map(|(_, (client, secrets, redirect_uris))| OAuthClient {
-                id: client.id,
-                secrets: secrets.into_iter().collect::<Vec<_>>(),
-                redirect_uris: redirect_uris.into_iter().collect::<Vec<_>>(),
-                created_at: client.created_at,
-                deleted_at: client.deleted_at,
+            .map(|(_, (client, secrets, redirect_uris))| {
+                OAuthClient::new(client, secrets, redirect_uris)
             })
             .skip(pagination.offset as usize)
             .take(pagination.limit as usize)
@@ -746,22 +698,19 @@ impl OAuthClientStore for PostgresStore {
 
     async fn upsert(&self, client: NewOAuthClient) -> Result<OAuthClient, StoreError> {
         let client_m: OAuthClientModel = insert_into(oauth_client::dsl::oauth_client)
-            .values(oauth_client::id.eq(client.id))
+            .values(oauth_client::id.eq(client.id.into_untyped_uuid()))
             .get_result_async(&*self.pool.get().await?)
             .await?;
 
-        Ok(OAuthClient {
-            id: client_m.id,
-            secrets: vec![],
-            redirect_uris: vec![],
-            created_at: client_m.created_at,
-            deleted_at: client_m.deleted_at,
-        })
+        Ok(client_m.into())
     }
 
-    async fn delete(&self, id: &Uuid) -> Result<Option<OAuthClient>, StoreError> {
+    async fn delete(
+        &self,
+        id: &TypedUuid<OAuthClientId>,
+    ) -> Result<Option<OAuthClient>, StoreError> {
         let _ = update(oauth_client::dsl::oauth_client)
-            .filter(oauth_client::id.eq(*id))
+            .filter(oauth_client::id.eq(id.into_untyped_uuid()))
             .set(oauth_client::deleted_at.eq(Utc::now()))
             .execute_async(&*self.pool.get().await?)
             .await?;
@@ -776,32 +725,30 @@ impl OAuthClientSecretStore for PostgresStore {
         let secret_m: OAuthClientSecretModel =
             insert_into(oauth_client_secret::dsl::oauth_client_secret)
                 .values((
-                    oauth_client_secret::id.eq(secret.id),
-                    oauth_client_secret::oauth_client_id.eq(secret.oauth_client_id),
+                    oauth_client_secret::id.eq(secret.id.into_untyped_uuid()),
+                    oauth_client_secret::oauth_client_id
+                        .eq(secret.oauth_client_id.into_untyped_uuid()),
                     oauth_client_secret::secret_signature.eq(secret.secret_signature),
                 ))
                 .get_result_async(&*self.pool.get().await?)
                 .await?;
 
-        Ok(OAuthClientSecret {
-            id: secret_m.id,
-            oauth_client_id: secret_m.oauth_client_id,
-            secret_signature: secret_m.secret_signature,
-            created_at: secret_m.created_at,
-            deleted_at: secret_m.deleted_at,
-        })
+        Ok(secret_m.into())
     }
 
-    async fn delete(&self, id: &Uuid) -> Result<Option<OAuthClientSecret>, StoreError> {
+    async fn delete(
+        &self,
+        id: &TypedUuid<OAuthSecretId>,
+    ) -> Result<Option<OAuthClientSecret>, StoreError> {
         let _ = update(oauth_client_secret::dsl::oauth_client_secret)
-            .filter(oauth_client_secret::id.eq(*id))
+            .filter(oauth_client_secret::id.eq(id.into_untyped_uuid()))
             .set(oauth_client_secret::deleted_at.eq(Utc::now()))
             .execute_async(&*self.pool.get().await?)
             .await?;
 
         let query = oauth_client_secret::dsl::oauth_client_secret
             .into_boxed()
-            .filter(oauth_client_secret::id.eq(*id));
+            .filter(oauth_client_secret::id.eq(id.into_untyped_uuid()));
 
         let result = query
             .get_result_async::<OAuthClientSecretModel>(&*self.pool.get().await?)
@@ -821,32 +768,30 @@ impl OAuthClientRedirectUriStore for PostgresStore {
         let redirect_uri_m: OAuthClientRedirectUriModel =
             insert_into(oauth_client_redirect_uri::dsl::oauth_client_redirect_uri)
                 .values((
-                    oauth_client_redirect_uri::id.eq(redirect_uri.id),
-                    oauth_client_redirect_uri::oauth_client_id.eq(redirect_uri.oauth_client_id),
+                    oauth_client_redirect_uri::id.eq(redirect_uri.id.into_untyped_uuid()),
+                    oauth_client_redirect_uri::oauth_client_id
+                        .eq(redirect_uri.oauth_client_id.into_untyped_uuid()),
                     oauth_client_redirect_uri::redirect_uri.eq(redirect_uri.redirect_uri),
                 ))
                 .get_result_async(&*self.pool.get().await?)
                 .await?;
 
-        Ok(OAuthClientRedirectUri {
-            id: redirect_uri_m.id,
-            oauth_client_id: redirect_uri_m.oauth_client_id,
-            redirect_uri: redirect_uri_m.redirect_uri,
-            created_at: redirect_uri_m.created_at,
-            deleted_at: redirect_uri_m.deleted_at,
-        })
+        Ok(redirect_uri_m.into())
     }
 
-    async fn delete(&self, id: &Uuid) -> Result<Option<OAuthClientRedirectUri>, StoreError> {
+    async fn delete(
+        &self,
+        id: &TypedUuid<OAuthRedirectUriId>,
+    ) -> Result<Option<OAuthClientRedirectUri>, StoreError> {
         let _ = update(oauth_client_redirect_uri::dsl::oauth_client_redirect_uri)
-            .filter(oauth_client_redirect_uri::id.eq(*id))
+            .filter(oauth_client_redirect_uri::id.eq(id.into_untyped_uuid()))
             .set(oauth_client_redirect_uri::deleted_at.eq(Utc::now()))
             .execute_async(&*self.pool.get().await?)
             .await?;
 
         let query = oauth_client_redirect_uri::dsl::oauth_client_redirect_uri
             .into_boxed()
-            .filter(oauth_client_redirect_uri::id.eq(*id));
+            .filter(oauth_client_redirect_uri::id.eq(id.into_untyped_uuid()));
 
         let result = query
             .get_result_async::<OAuthClientRedirectUriModel>(&*self.pool.get().await?)
@@ -862,7 +807,11 @@ impl<T> AccessGroupStore<T> for PostgresStore
 where
     T: Permission,
 {
-    async fn get(&self, id: &Uuid, deleted: bool) -> Result<Option<AccessGroup<T>>, StoreError> {
+    async fn get(
+        &self,
+        id: &TypedUuid<AccessGroupId>,
+        deleted: bool,
+    ) -> Result<Option<AccessGroup<T>>, StoreError> {
         let client = AccessGroupStore::list(
             self,
             AccessGroupFilter {
@@ -887,7 +836,9 @@ where
         let AccessGroupFilter { id, name, deleted } = filter;
 
         if let Some(id) = id {
-            query = query.filter(access_groups::id.eq_any(id));
+            query = query.filter(
+                access_groups::id.eq_any(id.into_iter().map(|group| group.into_untyped_uuid())),
+            );
         }
 
         if let Some(name) = name {
@@ -911,7 +862,7 @@ where
     async fn upsert(&self, group: &NewAccessGroup<T>) -> Result<AccessGroup<T>, StoreError> {
         let group_m: AccessGroupModel<T> = insert_into(access_groups::dsl::access_groups)
             .values((
-                access_groups::id.eq(group.id),
+                access_groups::id.eq(group.id.into_untyped_uuid()),
                 access_groups::name.eq(group.name.clone()),
                 access_groups::permissions.eq(group.permissions.clone()),
             ))
@@ -928,9 +879,12 @@ where
         Ok(group_m.into())
     }
 
-    async fn delete(&self, id: &Uuid) -> Result<Option<AccessGroup<T>>, StoreError> {
+    async fn delete(
+        &self,
+        id: &TypedUuid<AccessGroupId>,
+    ) -> Result<Option<AccessGroup<T>>, StoreError> {
         let _ = update(access_groups::dsl::access_groups)
-            .filter(access_groups::id.eq(*id))
+            .filter(access_groups::id.eq(id.into_untyped_uuid()))
             .set(access_groups::deleted_at.eq(Utc::now()))
             .execute_async(&*self.pool.get().await?)
             .await?;
@@ -944,7 +898,7 @@ impl MapperStore for PostgresStore {
     #[instrument(skip(self), err(Debug))]
     async fn get(
         &self,
-        id: &Uuid,
+        id: &TypedUuid<MapperId>,
         depleted: bool,
         deleted: bool,
     ) -> Result<Option<Mapper>, StoreError> {
@@ -983,7 +937,8 @@ impl MapperStore for PostgresStore {
         } = filter;
 
         if let Some(id) = id {
-            query = query.filter(mapper::id.eq_any(id));
+            query = query
+                .filter(mapper::id.eq_any(id.into_iter().map(|mapper| mapper.into_untyped_uuid())));
         }
 
         if let Some(name) = name {
@@ -1019,7 +974,7 @@ impl MapperStore for PostgresStore {
 
         let mapper_m: MapperModel = insert_into(mapper::dsl::mapper)
             .values((
-                mapper::id.eq(new_mapper.id),
+                mapper::id.eq(new_mapper.id.into_untyped_uuid()),
                 mapper::name.eq(new_mapper.name.clone()),
                 mapper::rule.eq(new_mapper.rule.clone()),
                 mapper::activations.eq(new_mapper.activations),
@@ -1039,11 +994,11 @@ impl MapperStore for PostgresStore {
     }
 
     #[instrument(skip(self), err(Debug))]
-    async fn delete(&self, id: &Uuid) -> Result<Option<Mapper>, StoreError> {
+    async fn delete(&self, id: &TypedUuid<MapperId>) -> Result<Option<Mapper>, StoreError> {
         tracing::trace!("Deleting mapper");
 
         let _ = update(mapper::dsl::mapper)
-            .filter(mapper::id.eq(*id))
+            .filter(mapper::id.eq(id.into_untyped_uuid()))
             .set(mapper::deleted_at.eq(Utc::now()))
             .execute_async(&*self.pool.get().await?)
             .await?;
@@ -1057,7 +1012,7 @@ impl LinkRequestStore for PostgresStore {
     #[instrument(skip(self), err(Debug))]
     async fn get(
         &self,
-        id: &Uuid,
+        id: &TypedUuid<LinkRequestId>,
         expired: bool,
         completed: bool,
     ) -> Result<Option<LinkRequest>, StoreError> {
@@ -1098,11 +1053,19 @@ impl LinkRequestStore for PostgresStore {
         } = filter;
 
         if let Some(id) = id {
-            query = query.filter(link_request::id.eq_any(id));
+            query = query.filter(
+                link_request::id.eq_any(id.into_iter().map(|link| link.into_untyped_uuid())),
+            );
         }
 
         if let Some(provider_id) = provider_id {
-            query = query.filter(link_request::source_provider_id.eq_any(provider_id));
+            query = query.filter(
+                link_request::source_provider_id.eq_any(
+                    provider_id
+                        .into_iter()
+                        .map(|provider| provider.into_untyped_uuid()),
+                ),
+            );
         }
 
         if let Some(user_id) = user_id {
@@ -1133,10 +1096,10 @@ impl LinkRequestStore for PostgresStore {
 
         let link_request_m: LinkRequestModel = insert_into(link_request::dsl::link_request)
             .values((
-                link_request::id.eq(request.id),
-                link_request::source_provider_id.eq(request.source_provider_id),
-                link_request::source_api_user_id.eq(request.source_api_user_id),
-                link_request::target_api_user_id.eq(request.target_api_user_id),
+                link_request::id.eq(request.id.into_untyped_uuid()),
+                link_request::source_provider_id.eq(request.source_provider_id.into_untyped_uuid()),
+                link_request::source_api_user_id.eq(request.source_user_id.into_untyped_uuid()),
+                link_request::target_api_user_id.eq(request.target_user_id.into_untyped_uuid()),
                 link_request::secret_signature.eq(request.secret_signature.clone()),
                 link_request::created_at.eq(Utc::now()),
                 link_request::expires_at.eq(request.expires_at),

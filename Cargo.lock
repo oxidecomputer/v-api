@@ -1309,6 +1309,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "newtype-uuid"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a5ff2b31594942586c1520da8f1e5c705729ec67b3c2ad0fe459f0b576e4d9a"
+dependencies = [
+ "schemars",
+ "serde",
+ "uuid",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2950,6 +2961,7 @@ dependencies = [
  "hyper-rustls 0.24.2",
  "jsonwebtoken",
  "mockall",
+ "newtype-uuid",
  "oauth2",
  "partial-struct",
  "rand",
@@ -2977,7 +2989,6 @@ dependencies = [
  "tracing-slog",
  "tracing-subscriber",
  "uuid",
- "v-api-permissions",
  "v-model",
  "yup-oauth2",
 ]
@@ -2988,18 +2999,6 @@ version = "0.1.0"
 dependencies = [
  "diesel",
  "diesel_migrations",
-]
-
-[[package]]
-name = "v-api-permissions"
-version = "0.1.0"
-dependencies = [
- "diesel",
- "schemars",
- "serde",
- "serde_json",
- "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -3014,6 +3013,7 @@ dependencies = [
  "diesel_migrations",
  "http 0.2.12",
  "mockall",
+ "newtype-uuid",
  "partial-struct",
  "schemars",
  "serde",
@@ -3022,7 +3022,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
- "v-api-permissions",
 ]
 
 [[package]]

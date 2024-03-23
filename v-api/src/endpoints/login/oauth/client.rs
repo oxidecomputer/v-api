@@ -4,12 +4,14 @@
 
 use chrono::{DateTime, Utc};
 use dropshot::{HttpError, HttpResponseCreated, HttpResponseOk, Path, RequestContext, TypedBody};
+use newtype_uuid::{GenericUuid, TypedUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
-use uuid::Uuid;
-use v_api_permissions::Caller;
-use v_model::{OAuthClient, OAuthClientRedirectUri, OAuthClientSecret};
+use v_model::{
+    permissions::Caller, OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret,
+    OAuthRedirectUriId, OAuthSecretId,
+};
 
 use crate::{
     authn::key::RawApiKey,
@@ -59,8 +61,7 @@ where
         &caller.id,
         vec![
             VPermission::GetOAuthClient(client.id),
-            VPermission::UpdateOAuthClient(client.id),
-            VPermission::DeleteOAuthClient(client.id),
+            VPermission::ManageOAuthClient(client.id),
         ]
         .into(),
     )
@@ -71,7 +72,7 @@ where
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct GetOAuthClientPath {
-    pub client_id: Uuid,
+    pub client_id: TypedUuid<OAuthClientId>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -91,12 +92,12 @@ where
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct AddOAuthClientSecretPath {
-    pub client_id: Uuid,
+    pub client_id: TypedUuid<OAuthClientId>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InitialOAuthClientSecretResponse {
-    pub id: Uuid,
+    pub id: TypedUuid<OAuthSecretId>,
     pub key: OpenApiSecretString,
     pub created_at: DateTime<Utc>,
 }
@@ -118,13 +119,13 @@ where
 pub async fn create_oauth_client_secret_inner<T>(
     ctx: &VContext<T>,
     caller: Caller<T>,
-    client_id: &Uuid,
+    client_id: &TypedUuid<OAuthClientId>,
 ) -> Result<HttpResponseOk<InitialOAuthClientSecretResponse>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
 {
-    let id = Uuid::new_v4();
-    let secret = RawApiKey::generate::<24>(&id)
+    let id = TypedUuid::new_v4();
+    let secret = RawApiKey::generate::<24>(id.as_untyped_uuid())
         .sign(ctx.signer())
         .await
         .map_err(to_internal_error)?;
@@ -141,8 +142,8 @@ where
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct DeleteOAuthClientSecretPath {
-    pub client_id: Uuid,
-    pub secret_id: Uuid,
+    pub client_id: TypedUuid<OAuthClientId>,
+    pub secret_id: TypedUuid<OAuthSecretId>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -163,7 +164,7 @@ where
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct AddOAuthClientRedirectPath {
-    pub client_id: Uuid,
+    pub client_id: TypedUuid<OAuthClientId>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -191,8 +192,8 @@ where
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct DeleteOAuthClientRedirectPath {
-    pub client_id: Uuid,
-    pub redirect_uri_id: Uuid,
+    pub client_id: TypedUuid<OAuthClientId>,
+    pub redirect_uri_id: TypedUuid<OAuthRedirectUriId>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -220,9 +221,9 @@ mod tests {
 
     use chrono::Utc;
     use mockall::predicate::eq;
-    use uuid::Uuid;
-    use v_api_permissions::Caller;
+    use newtype_uuid::TypedUuid;
     use v_model::{
+        permissions::Caller,
         storage::{MockApiUserStore, MockOAuthClientSecretStore, MockOAuthClientStore},
         ApiUser, OAuthClient, OAuthClientSecret,
     };
@@ -238,13 +239,13 @@ mod tests {
     };
 
     fn mock_user() -> ApiUser<VPermission> {
-        let user_id = Uuid::new_v4();
+        let user_id = TypedUuid::new_v4();
         ApiUser {
             id: user_id,
             permissions: vec![
                 VPermission::CreateOAuthClient,
                 VPermission::GetApiUser(user_id),
-                VPermission::UpdateApiUser(user_id),
+                VPermission::ManageApiUser(user_id),
             ]
             .into(),
             groups: BTreeSet::new(),
@@ -322,7 +323,7 @@ mod tests {
             .0;
         caller
             .permissions
-            .insert(VPermission::UpdateOAuthClient(client.id));
+            .insert(VPermission::ManageOAuthClient(client.id));
 
         let secret = create_oauth_client_secret_inner(&ctx, caller, &client.id)
             .await

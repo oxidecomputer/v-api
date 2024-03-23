@@ -16,6 +16,7 @@ chrono = { workspace = true, features = ["serde"] }
 diesel = { workspace = true, features = ["chrono", "uuid", "serde_json"] }
 http = { workspace = true }
 mockall = { workspace = true, optional = true }
+newtype-uuid = { workspace = true }
 partial-struct = { workspace = true }
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 serde = { workspace = true, features = ["derive"] }
@@ -23,7 +24,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"]  }
-v-api-permissions = { path = "../v-api-permissions" }
 
 [dev-dependencies]
 diesel_migrations = { version = "2.1.0", features = ["postgres"] }

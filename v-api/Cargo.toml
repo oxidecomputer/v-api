@@ -23,6 +23,7 @@ hyper = { workspace = true }
 hyper-rustls = { workspace = true, features = ["http2"] }
 jsonwebtoken = { workspace = true }
 oauth2 = { workspace = true }
+newtype-uuid = { workspace = true }
 partial-struct = { workspace = true }
 rand = { workspace = true, features = ["std"] }
 rand_core = { workspace = true, features = ["std"] }
@@ -49,7 +50,6 @@ tracing-bunyan-formatter = { workspace = true }
 tracing-slog = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "json"] }
 uuid = { workspace = true, features = ["v4", "serde"]  }
-v-api-permissions = { path = "../v-api-permissions" }
 v-model = { path = "../v-model" }
 yup-oauth2 = { workspace = true }
 

@@ -5,12 +5,15 @@
 use std::collections::BTreeSet;
 
 use async_trait::async_trait;
+use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tap::TapFallible;
-use uuid::Uuid;
-use v_api_permissions::{Permission, Permissions};
-use v_model::{storage::StoreError, Mapper};
+use v_model::{
+    permissions::{Permission, Permissions},
+    storage::StoreError,
+    AccessGroupId, Mapper, MapperId,
+};
 
 use crate::{
     context::VContext,
@@ -43,12 +46,12 @@ where
         &self,
         ctx: &VContext<T>,
         user: &UserInfo,
-    ) -> ResourceResult<BTreeSet<Uuid>, StoreError>;
+    ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError>;
 }
 
 #[derive(Debug, Serialize)]
 pub struct Mapping<T> {
-    pub id: Uuid,
+    pub id: TypedUuid<MapperId>,
     pub name: String,
     pub rule: MappingRules<T>,
     pub activations: Option<i32>,
@@ -107,7 +110,7 @@ where
         &self,
         ctx: &VContext<T>,
         user: &UserInfo,
-    ) -> ResourceResult<BTreeSet<Uuid>, StoreError> {
+    ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError> {
         match self {
             Self::Default(rule) => rule.groups_for(ctx, user).await,
             Self::EmailAddress(rule) => rule.groups_for(ctx, user).await,

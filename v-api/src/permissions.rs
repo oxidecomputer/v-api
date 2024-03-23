@@ -2,19 +2,23 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use newtype_uuid::TypedUuid;
 use partial_struct::partial;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use thiserror::Error;
-use uuid::Uuid;
-use v_api_permissions::{Permission, Permissions};
+use v_model::permissions::{Permission, Permissions};
+use v_model::{AccessGroupId, ApiKeyId, MapperId, OAuthClientId, UserId};
 
 pub trait VAppPermission: Permission + From<VPermission> + AsScope {}
 impl<T> VAppPermission for T where T: Permission + From<VPermission> + AsScope {}
 
 pub trait VAppPermissionResponse: Permission {}
 impl<T> VAppPermissionResponse for T where T: Permission {}
+
+// TODO: Split permissions into expanded and contracted permission sets. Contracted permissions
+// are stored in the database as such
 
 #[derive(Debug, Error)]
 pub enum ApiPermissionError {
@@ -28,72 +32,69 @@ pub enum ApiPermissionError {
 )]
 pub enum VPermission {
     // User information permissions
-    CreateApiUserToken(Uuid),
-    CreateApiUserTokenSelf,
-    CreateApiUserTokenAssigned,
-    CreateApiUserTokenAll,
-    GetApiUser(Uuid),
-    GetApiUserSelf,
-    GetApiUserAssigned,
-    GetApiUserAll,
-    GetApiUserToken(Uuid),
-    GetApiUserTokenSelf,
-    GetApiUserTokenAssigned,
-    GetApiUserTokenAll,
-    DeleteApiUserToken(Uuid),
-    DeleteApiUserTokenSelf,
-    DeleteApiUserTokenAssigned,
-    DeleteApiUserTokenAll,
     CreateApiUser,
-    UpdateApiUser(Uuid),
-    UpdateApiUserSelf,
-    UpdateApiUserAssigned,
-    UpdateApiUserAll,
+    GetApiUser(TypedUuid<UserId>),
+    GetApiUsers(BTreeSet<TypedUuid<UserId>>),
+    // #[v_api(alias = GetApiUser)]
+    GetApiUserSelf,
+    // #[v_api(alias = GetApiUser)]
+    GetApiUsersAssigned,
+    GetApiUsersAll,
+    ManageApiUser(TypedUuid<UserId>),
+    ManageApiUsers(BTreeSet<TypedUuid<UserId>>),
+    ManageApiUsersAssigned,
+    ManageApiUsersAll,
+
+    // User api key permissions
+    CreateApiKey(TypedUuid<UserId>),
+    CreateApiKeySelf,
+    CreateApiKeyAssigned,
+    CreateApiKeyAll,
+    GetApiKey(TypedUuid<ApiKeyId>),
+    GetApiKeys(BTreeSet<TypedUuid<ApiKeyId>>),
+    GetApiKeyAssigned,
+    GetApiKeysAll,
+    ManageApiKey(TypedUuid<ApiKeyId>),
+    ManageApiKeys(BTreeSet<TypedUuid<ApiKeyId>>),
+    ManageApiKeysAssigned,
+    ManageApiKeysAll,
 
     // User provider permissions
     CreateUserApiProviderLinkToken,
 
     // Group permissions,
+    CreateGroup,
     GetGroupsJoined,
     GetGroupsAll,
-    CreateGroup,
-    UpdateGroup(Uuid),
-    AddToGroup(Uuid),
-    RemoveFromGroup(Uuid),
-    ManageGroupMembership(Uuid),
-    ManageGroupMemberships(BTreeSet<Uuid>),
-    ManageGroupMembershipAssigned,
-    ManageGroupMembershipAll,
-    DeleteGroup(Uuid),
-    ManageGroup(Uuid),
-    ManageGroups(BTreeSet<Uuid>),
+    ManageGroup(TypedUuid<AccessGroupId>),
+    ManageGroups(BTreeSet<TypedUuid<AccessGroupId>>),
     ManageGroupsAssigned,
     ManageGroupsAll,
 
+    // Group Membership Permissions
+    ManageGroupMembership(TypedUuid<AccessGroupId>),
+    ManageGroupMemberships(BTreeSet<TypedUuid<AccessGroupId>>),
+    ManageGroupMembershipsAssigned,
+    ManageGroupMembershipsAll,
+
     // Mapper permissions
-    ListMappers,
     CreateMapper,
-    UpdateMapper(Uuid),
-    DeleteMapper(Uuid),
-    ManageMapper(Uuid),
-    ManageMappers(BTreeSet<Uuid>),
+    GetMappersAll,
+    ManageMapper(TypedUuid<MapperId>),
+    ManageMappers(BTreeSet<TypedUuid<MapperId>>),
     ManageMappersAssigned,
     ManageMappersAll,
 
     // OAuth client manage permissions
     CreateOAuthClient,
-    GetOAuthClient(Uuid),
-    GetOAuthClients(BTreeSet<Uuid>),
+    GetOAuthClient(TypedUuid<OAuthClientId>),
+    GetOAuthClients(BTreeSet<TypedUuid<OAuthClientId>>),
     GetOAuthClientsAssigned,
     GetOAuthClientsAll,
-    UpdateOAuthClient(Uuid),
-    UpdateOAuthClients(BTreeSet<Uuid>),
-    UpdateOAuthClientsAssigned,
-    UpdateOAuthClientsAll,
-    DeleteOAuthClient(Uuid),
-    DeleteOAuthClients(BTreeSet<Uuid>),
-    DeleteOAuthClientsAssigned,
-    DeleteOAuthClientsAll,
+    ManageOAuthClient(TypedUuid<OAuthClientId>),
+    ManageOAuthClients(BTreeSet<TypedUuid<OAuthClientId>>),
+    ManageOAuthClientsAssigned,
+    ManageOAuthClientsAll,
 
     // Internal permissions
     CreateAccessToken,
@@ -118,71 +119,56 @@ pub trait AsScope: Sized {
 impl AsScope for VPermission {
     fn as_scope(&self) -> &str {
         match self {
-            VPermission::CreateApiUserToken(_) => "user:token:w",
-            VPermission::CreateApiUserTokenSelf => "user:token:w",
-            VPermission::CreateApiUserTokenAssigned => "user:token:w",
-            VPermission::CreateApiUserTokenAll => "user:token:w",
-            VPermission::GetApiUser(_) => "user:info:r",
-            VPermission::GetApiUserSelf => "user:info:r",
-            VPermission::GetApiUserAssigned => "user:info:r",
-            VPermission::GetApiUserAll => "user:info:r",
-            VPermission::GetApiUserToken(_) => "user:token:r",
-            VPermission::GetApiUserTokenSelf => "user:token:r",
-            VPermission::GetApiUserTokenAssigned => "user:token:r",
-            VPermission::GetApiUserTokenAll => "user:token:r",
-            VPermission::DeleteApiUserToken(_) => "user:token:w",
-            VPermission::DeleteApiUserTokenSelf => "user:token:w",
-            VPermission::DeleteApiUserTokenAssigned => "user:token:w",
-            VPermission::DeleteApiUserTokenAll => "user:token:w",
             VPermission::CreateApiUser => "user:info:w",
-            VPermission::UpdateApiUser(_) => "user:info:w",
-            VPermission::UpdateApiUserSelf => "user:info:w",
-            VPermission::UpdateApiUserAssigned => "user:info:w",
-            VPermission::UpdateApiUserAll => "user:info:w",
-
+            VPermission::GetApiUser(_) => "user:info:r",
+            VPermission::GetApiUsers(_) => "user:info:r",
+            VPermission::GetApiUserSelf => "user:info:r",
+            VPermission::GetApiUsersAssigned => "user:info:r",
+            VPermission::GetApiUsersAll => "user:info:r",
+            VPermission::ManageApiUser(_) => "user:info:w",
+            VPermission::ManageApiUsers(_) => "user:info:w",
+            VPermission::ManageApiUsersAssigned => "user:info:w",
+            VPermission::ManageApiUsersAll => "user:info:w",
+            VPermission::CreateApiKey(_) => "user:key:w",
+            VPermission::CreateApiKeySelf => "user:key:w",
+            VPermission::CreateApiKeyAssigned => "user:key:w",
+            VPermission::CreateApiKeyAll => "user:key:w",
+            VPermission::GetApiKey(_) => "user:key:r",
+            VPermission::GetApiKeys(_) => "user:key:r",
+            VPermission::GetApiKeyAssigned => "user:key:r",
+            VPermission::GetApiKeysAll => "user:key:r",
+            VPermission::ManageApiKey(_) => "user:key:w",
+            VPermission::ManageApiKeys(_) => "user:key:w",
+            VPermission::ManageApiKeysAssigned => "user:key:w",
+            VPermission::ManageApiKeysAll => "user:key:w",
             VPermission::CreateUserApiProviderLinkToken => "user:provider:w",
-
-            VPermission::GetGroupsJoined => "group:r",
-            VPermission::GetGroupsAll => "group:r",
-            VPermission::CreateGroup => "group:w",
-            VPermission::UpdateGroup(_) => "group:w",
-            VPermission::AddToGroup(_) => "group:membership:w",
-            VPermission::RemoveFromGroup(_) => "group:membership:w",
+            VPermission::GetGroupsJoined => "group:info:r",
+            VPermission::GetGroupsAll => "group:info:r",
+            VPermission::CreateGroup => "group:info:w",
+            VPermission::ManageGroup(_) => "group:info:w",
+            VPermission::ManageGroups(_) => "group:info:w",
+            VPermission::ManageGroupsAssigned => "group:info:w",
+            VPermission::ManageGroupsAll => "group:info:w",
             VPermission::ManageGroupMembership(_) => "group:membership:w",
             VPermission::ManageGroupMemberships(_) => "group:membership:w",
-            VPermission::ManageGroupMembershipAssigned => "group:membership:w",
-            VPermission::ManageGroupMembershipAll => "group:membership:w",
-            VPermission::DeleteGroup(_) => "group:w",
-            VPermission::ManageGroup(_) => "group:w",
-            VPermission::ManageGroups(_) => "group:w",
-            VPermission::ManageGroupsAssigned => "group:w",
-            VPermission::ManageGroupsAll => "group:w",
-
-            VPermission::ListMappers => "mapper:r",
+            VPermission::ManageGroupMembershipsAssigned => "group:membership:w",
+            VPermission::ManageGroupMembershipsAll => "group:membership:w",
             VPermission::CreateMapper => "mapper:w",
-            VPermission::UpdateMapper(_) => "mapper:w",
-            VPermission::DeleteMapper(_) => "mapper:w",
+            VPermission::GetMappersAll => "mapper:r",
             VPermission::ManageMapper(_) => "mapper:w",
             VPermission::ManageMappers(_) => "mapper:w",
             VPermission::ManageMappersAssigned => "mapper:w",
             VPermission::ManageMappersAll => "mapper:w",
-
             VPermission::CreateOAuthClient => "oauth:client:w",
             VPermission::GetOAuthClient(_) => "oauth:client:r",
             VPermission::GetOAuthClients(_) => "oauth:client:r",
             VPermission::GetOAuthClientsAssigned => "oauth:client:r",
             VPermission::GetOAuthClientsAll => "oauth:client:r",
-            VPermission::UpdateOAuthClient(_) => "oauth:client:w",
-            VPermission::UpdateOAuthClients(_) => "oauth:client:w",
-            VPermission::UpdateOAuthClientsAssigned => "oauth:client:w",
-            VPermission::UpdateOAuthClientsAll => "oauth:client:w",
-            VPermission::DeleteOAuthClient(_) => "oauth:client:w",
-            VPermission::DeleteOAuthClients(_) => "oauth:client:w",
-            VPermission::DeleteOAuthClientsAssigned => "oauth:client:w",
-            VPermission::DeleteOAuthClientsAll => "oauth:client:w",
-
+            VPermission::ManageOAuthClient(_) => "oauth:client:w",
+            VPermission::ManageOAuthClients(_) => "oauth:client:w",
+            VPermission::ManageOAuthClientsAssigned => "oauth:client:w",
+            VPermission::ManageOAuthClientsAll => "oauth:client:w",
             VPermission::CreateAccessToken => "",
-
             VPermission::Removed => "",
         }
     }
@@ -199,28 +185,27 @@ impl AsScope for VPermission {
             match entry.as_ref() {
                 "user:info:r" => {
                     permissions.insert(VPermission::GetApiUserSelf);
-                    permissions.insert(VPermission::GetApiUserAll);
+                    permissions.insert(VPermission::GetApiUsersAssigned);
+                    permissions.insert(VPermission::GetApiUsersAll);
                 }
                 "user:info:w" => {
-                    permissions.insert(VPermission::UpdateApiUserSelf);
-                    permissions.insert(VPermission::UpdateApiUserAssigned);
-                    permissions.insert(VPermission::UpdateApiUserAll);
+                    permissions.insert(VPermission::CreateApiUser);
+                    permissions.insert(VPermission::ManageApiUsersAssigned);
+                    permissions.insert(VPermission::ManageApiUsersAll);
                 }
                 "user:provider:w" => {
                     permissions.insert(VPermission::CreateUserApiProviderLinkToken);
                 }
                 "user:token:r" => {
-                    permissions.insert(VPermission::GetApiUserTokenSelf);
-                    permissions.insert(VPermission::GetApiUserTokenAssigned);
-                    permissions.insert(VPermission::GetApiUserTokenAll);
+                    permissions.insert(VPermission::GetApiKeyAssigned);
+                    permissions.insert(VPermission::GetApiKeysAll);
                 }
                 "user:token:w" => {
-                    permissions.insert(VPermission::CreateApiUserTokenSelf);
-                    permissions.insert(VPermission::CreateApiUserTokenAssigned);
-                    permissions.insert(VPermission::CreateApiUserTokenAll);
-                    permissions.insert(VPermission::DeleteApiUserTokenSelf);
-                    permissions.insert(VPermission::DeleteApiUserTokenAssigned);
-                    permissions.insert(VPermission::DeleteApiUserTokenAll);
+                    permissions.insert(VPermission::CreateApiKeySelf);
+                    permissions.insert(VPermission::CreateApiKeyAssigned);
+                    permissions.insert(VPermission::CreateApiKeyAll);
+                    permissions.insert(VPermission::ManageApiKeysAssigned);
+                    permissions.insert(VPermission::ManageApiKeysAll);
                 }
                 "group:r" => {
                     permissions.insert(VPermission::GetGroupsJoined);
@@ -232,11 +217,11 @@ impl AsScope for VPermission {
                     permissions.insert(VPermission::ManageGroupsAll);
                 }
                 "group:membership:w" => {
-                    permissions.insert(VPermission::ManageGroupMembershipAssigned);
-                    permissions.insert(VPermission::ManageGroupMembershipAll);
+                    permissions.insert(VPermission::ManageGroupMembershipsAssigned);
+                    permissions.insert(VPermission::ManageGroupMembershipsAll);
                 }
                 "mapper:r" => {
-                    permissions.insert(VPermission::ListMappers);
+                    permissions.insert(VPermission::GetMappersAll);
                 }
                 "mapper:w" => {
                     permissions.insert(VPermission::CreateMapper);
@@ -249,10 +234,8 @@ impl AsScope for VPermission {
                 }
                 "oauth:client:w" => {
                     permissions.insert(VPermission::CreateOAuthClient);
-                    permissions.insert(VPermission::UpdateOAuthClientsAssigned);
-                    permissions.insert(VPermission::UpdateOAuthClientsAll);
-                    permissions.insert(VPermission::DeleteOAuthClientsAssigned);
-                    permissions.insert(VPermission::DeleteOAuthClientsAll);
+                    permissions.insert(VPermission::ManageOAuthClientsAssigned);
+                    permissions.insert(VPermission::ManageOAuthClientsAll);
                 }
                 other => return Err(ApiPermissionError::InvalidScope(other.to_string())),
             }
@@ -262,324 +245,248 @@ impl AsScope for VPermission {
     }
 }
 
-// pub trait PermissionStorage {
-//     fn contract(&self, owner: &Uuid) -> Self;
-//     fn expand(&self, owner: &Uuid, owner_permissions: Option<&Self>) -> Self;
-// }
-
 pub trait PermissionStorage {
-    fn contract(collection: &Permissions<Self>, owner: &Uuid) -> Permissions<Self>
+    fn contract(collection: &Permissions<Self>) -> Permissions<Self>
     where
         Self: Sized;
     fn expand(
         collection: &Permissions<Self>,
-        owner: &Uuid,
-        owner_permissions: Option<&Permissions<Self>>,
+        actor: &TypedUuid<UserId>,
+        actor_permissions: Option<&Permissions<Self>>,
     ) -> Permissions<Self>
     where
         Self: Sized;
 }
 
-// impl PermissionStorage for Permissions<VPermission> {
-//     fn contract(&self, owner: &Uuid) -> Self {
-//         let mut contracted = Vec::new();
-
-//         let mut manage_group_memberships = BTreeSet::<Uuid>::new();
-//         let mut manage_groups = BTreeSet::<Uuid>::new();
-//         let mut read_oauth_clients = BTreeSet::<Uuid>::new();
-//         let mut update_oauth_clients = BTreeSet::<Uuid>::new();
-//         let mut delete_oauth_clients = BTreeSet::<Uuid>::new();
-
-//         for p in self.iter() {
-//             match p {
-//                 VPermission::GetApiUser(id) => contracted.push(if id == owner {
-//                     VPermission::GetApiUserSelf
-//                 } else {
-//                     VPermission::GetApiUser(*id)
-//                 }),
-//                 VPermission::CreateApiUserToken(id) => contracted.push(if id == owner {
-//                     VPermission::CreateApiUserTokenSelf
-//                 } else {
-//                     VPermission::CreateApiUserToken(*id)
-//                 }),
-//                 VPermission::GetApiUserToken(id) => contracted.push(if id == owner {
-//                     VPermission::GetApiUserTokenSelf
-//                 } else {
-//                     VPermission::GetApiUserToken(*id)
-//                 }),
-//                 VPermission::DeleteApiUserToken(id) => contracted.push(if id == owner {
-//                     VPermission::DeleteApiUserTokenSelf
-//                 } else {
-//                     VPermission::DeleteApiUserToken(*id)
-//                 }),
-//                 VPermission::UpdateApiUser(id) => contracted.push(if id == owner {
-//                     VPermission::UpdateApiUserSelf
-//                 } else {
-//                     VPermission::UpdateApiUser(*id)
-//                 }),
-
-//                 VPermission::ManageGroupMembership(id) => {
-//                     manage_group_memberships.insert(*id);
-//                 }
-//                 VPermission::ManageGroup(id) => {
-//                     manage_groups.insert(*id);
-//                 }
-
-//                 VPermission::GetOAuthClient(id) => {
-//                     read_oauth_clients.insert(*id);
-//                 }
-//                 VPermission::UpdateOAuthClient(id) => {
-//                     update_oauth_clients.insert(*id);
-//                 }
-//                 VPermission::DeleteOAuthClient(id) => {
-//                     delete_oauth_clients.insert(*id);
-//                 }
-
-//                 other => contracted.push(other.clone()),
-//             }
-//         }
-
-//         contracted.push(VPermission::ManageGroupMemberships(
-//             manage_group_memberships,
-//         ));
-//         contracted.push(VPermission::ManageGroups(manage_groups));
-//         contracted.push(VPermission::GetOAuthClients(read_oauth_clients));
-//         contracted.push(VPermission::UpdateOAuthClients(update_oauth_clients));
-//         contracted.push(VPermission::DeleteOAuthClients(delete_oauth_clients));
-
-//         contracted.into()
-//     }
-
-//     fn expand(&self, owner: &Uuid, owner_permissions: Option<&Permissions<VPermission>>) -> Self {
-//         let mut expanded = Vec::new();
-
-//         for p in self.iter() {
-//             match p {
-//                 VPermission::GetApiUserSelf => {
-//                     expanded.push(p.clone());
-//                     expanded.push(VPermission::GetApiUser(*owner))
-//                 }
-//                 VPermission::CreateApiUserTokenSelf => {
-//                     expanded.push(p.clone());
-//                     expanded.push(VPermission::CreateApiUserToken(*owner))
-//                 }
-//                 VPermission::GetApiUserTokenSelf => {
-//                     expanded.push(p.clone());
-//                     expanded.push(VPermission::GetApiUserToken(*owner))
-//                 }
-//                 VPermission::DeleteApiUserTokenSelf => {
-//                     expanded.push(p.clone());
-//                     expanded.push(VPermission::DeleteApiUserToken(*owner))
-//                 }
-//                 VPermission::UpdateApiUserSelf => {
-//                     expanded.push(p.clone());
-//                     expanded.push(VPermission::UpdateApiUser(*owner))
-//                 }
-
-//                 VPermission::ManageGroupMemberships(ids) => {
-//                     for id in ids {
-//                         expanded.push(VPermission::ManageGroupMembership(*id))
-//                     }
-//                 }
-//                 VPermission::ManageGroups(ids) => {
-//                     for id in ids {
-//                         expanded.push(VPermission::ManageGroup(*id))
-//                     }
-//                 }
-
-//                 VPermission::GetOAuthClients(ids) => {
-//                     for id in ids {
-//                         expanded.push(VPermission::GetOAuthClient(*id))
-//                     }
-//                 }
-//                 VPermission::UpdateOAuthClients(ids) => {
-//                     for id in ids {
-//                         expanded.push(VPermission::UpdateOAuthClient(*id))
-//                     }
-//                 }
-//                 VPermission::DeleteOAuthClients(ids) => {
-//                     for id in ids {
-//                         expanded.push(VPermission::DeleteOAuthClient(*id))
-//                     }
-//                 }
-
-//                 VPermission::ManageGroupMembershipAssigned => {
-//                     expanded.push(p.clone());
-
-//                     if let Some(owner_permissions) = owner_permissions {
-//                         for p in owner_permissions.iter() {
-//                             match p {
-//                                 VPermission::ManageGroupMembership(id) => {
-//                                     expanded.push(VPermission::ManageGroupMembership(*id))
-//                                 }
-//                                 _ => (),
-//                             }
-//                         }
-//                     }
-//                 }
-//                 VPermission::ManageGroupsAssigned => {
-//                     expanded.push(p.clone());
-
-//                     if let Some(owner_permissions) = owner_permissions {
-//                         for p in owner_permissions.iter() {
-//                             match p {
-//                                 VPermission::ManageGroup(id) => {
-//                                     expanded.push(VPermission::ManageGroup(*id))
-//                                 }
-//                                 _ => (),
-//                             }
-//                         }
-//                     }
-//                 }
-//                 VPermission::GetOAuthClientsAssigned => {
-//                     expanded.push(p.clone());
-
-//                     if let Some(owner_permissions) = owner_permissions {
-//                         for p in owner_permissions.iter() {
-//                             match p {
-//                                 VPermission::GetOAuthClient(id) => {
-//                                     expanded.push(VPermission::GetOAuthClient(*id))
-//                                 }
-//                                 _ => (),
-//                             }
-//                         }
-//                     }
-//                 }
-//                 VPermission::UpdateOAuthClientsAssigned => {
-//                     expanded.push(p.clone());
-
-//                     if let Some(owner_permissions) = owner_permissions {
-//                         for p in owner_permissions.iter() {
-//                             match p {
-//                                 VPermission::UpdateOAuthClient(id) => {
-//                                     expanded.push(VPermission::UpdateOAuthClient(*id))
-//                                 }
-//                                 _ => (),
-//                             }
-//                         }
-//                     }
-//                 }
-//                 VPermission::DeleteOAuthClientsAssigned => {
-//                     expanded.push(p.clone());
-
-//                     if let Some(owner_permissions) = owner_permissions {
-//                         for p in owner_permissions.iter() {
-//                             match p {
-//                                 VPermission::DeleteOAuthClient(id) => {
-//                                     expanded.push(VPermission::DeleteOAuthClient(*id))
-//                                 }
-//                                 _ => (),
-//                             }
-//                         }
-//                     }
-//                 }
-
-//                 other => expanded.push(other.clone()),
-//             }
-//         }
-
-//         expanded.into()
-//     }
-// }
-
 impl PermissionStorage for VPermission {
-    fn contract(collection: &Permissions<Self>, owner: &Uuid) -> Permissions<Self> {
+    fn contract(collection: &Permissions<Self>) -> Permissions<Self> {
         let mut contracted = Vec::new();
 
-        let mut manage_group_memberships = BTreeSet::<Uuid>::new();
-        let mut manage_groups = BTreeSet::<Uuid>::new();
-        let mut read_oauth_clients = BTreeSet::<Uuid>::new();
-        let mut update_oauth_clients = BTreeSet::<Uuid>::new();
-        let mut delete_oauth_clients = BTreeSet::<Uuid>::new();
+        let mut read_users = BTreeSet::<TypedUuid<UserId>>::new();
+        let mut write_users = BTreeSet::<TypedUuid<UserId>>::new();
+        let mut read_keys = BTreeSet::<TypedUuid<ApiKeyId>>::new();
+        let mut write_keys = BTreeSet::<TypedUuid<ApiKeyId>>::new();
+        let mut write_groups = BTreeSet::<TypedUuid<AccessGroupId>>::new();
+        let mut write_group_memberships = BTreeSet::<TypedUuid<AccessGroupId>>::new();
+        let mut write_mappers = BTreeSet::<TypedUuid<MapperId>>::new();
+        let mut read_oauth_clients = BTreeSet::<TypedUuid<OAuthClientId>>::new();
+        let mut write_oauth_clients = BTreeSet::<TypedUuid<OAuthClientId>>::new();
 
         for p in collection.iter() {
             match p {
-                VPermission::GetApiUser(id) => contracted.push(if id == owner {
-                    VPermission::GetApiUserSelf
-                } else {
-                    VPermission::GetApiUser(*id)
-                }),
-                VPermission::CreateApiUserToken(id) => contracted.push(if id == owner {
-                    VPermission::CreateApiUserTokenSelf
-                } else {
-                    VPermission::CreateApiUserToken(*id)
-                }),
-                VPermission::GetApiUserToken(id) => contracted.push(if id == owner {
-                    VPermission::GetApiUserTokenSelf
-                } else {
-                    VPermission::GetApiUserToken(*id)
-                }),
-                VPermission::DeleteApiUserToken(id) => contracted.push(if id == owner {
-                    VPermission::DeleteApiUserTokenSelf
-                } else {
-                    VPermission::DeleteApiUserToken(*id)
-                }),
-                VPermission::UpdateApiUser(id) => contracted.push(if id == owner {
-                    VPermission::UpdateApiUserSelf
-                } else {
-                    VPermission::UpdateApiUser(*id)
-                }),
-
-                VPermission::ManageGroupMembership(id) => {
-                    manage_group_memberships.insert(*id);
+                // Contract user info permissions
+                VPermission::GetApiUser(id) => {
+                    read_users.insert(*id);
                 }
+                VPermission::GetApiUsers(ids) => {
+                    read_users.extend(ids);
+                }
+                VPermission::ManageApiUser(id) => {
+                    write_users.insert(*id);
+                }
+                VPermission::ManageApiUsers(ids) => {
+                    write_users.extend(ids);
+                }
+
+                // Contract api key permissions
+                VPermission::GetApiKey(id) => {
+                    read_keys.insert(*id);
+                }
+                VPermission::GetApiKeys(ids) => {
+                    read_keys.extend(ids);
+                }
+                VPermission::ManageApiKey(id) => {
+                    write_keys.insert(*id);
+                }
+                VPermission::ManageApiKeys(ids) => {
+                    write_keys.extend(ids);
+                }
+
+                // Contract group permissions
                 VPermission::ManageGroup(id) => {
-                    manage_groups.insert(*id);
+                    write_groups.insert(*id);
+                }
+                VPermission::ManageGroups(ids) => {
+                    write_groups.extend(ids);
+                }
+                VPermission::ManageGroupMembership(id) => {
+                    write_group_memberships.insert(*id);
+                }
+                VPermission::ManageGroupMemberships(ids) => {
+                    write_group_memberships.extend(ids);
                 }
 
+                // Contract mapper permissions
+                VPermission::ManageMapper(id) => {
+                    write_mappers.insert(*id);
+                }
+                VPermission::ManageMappers(ids) => {
+                    write_mappers.extend(ids);
+                }
+
+                // Contract oauth client permissions
                 VPermission::GetOAuthClient(id) => {
                     read_oauth_clients.insert(*id);
                 }
-                VPermission::UpdateOAuthClient(id) => {
-                    update_oauth_clients.insert(*id);
+                VPermission::GetOAuthClients(ids) => {
+                    read_oauth_clients.extend(ids);
                 }
-                VPermission::DeleteOAuthClient(id) => {
-                    delete_oauth_clients.insert(*id);
+                VPermission::ManageOAuthClient(id) => {
+                    write_oauth_clients.insert(*id);
+                }
+                VPermission::ManageOAuthClients(ids) => {
+                    write_oauth_clients.extend(ids);
                 }
 
+                // Alias permissions contract in to nothing
+                VPermission::GetApiUserSelf => (),
+                VPermission::GetApiUsersAssigned => (),
+                VPermission::ManageApiUsersAssigned => (),
+                VPermission::CreateApiKeySelf => (),
+                VPermission::CreateApiKeyAssigned => (),
+                VPermission::GetApiKeyAssigned => (),
+                VPermission::ManageApiKeysAssigned => (),
+                VPermission::ManageGroupsAssigned => (),
+                VPermission::ManageGroupMembershipsAssigned => (),
+                VPermission::ManageMappersAssigned => (),
+                VPermission::GetOAuthClientsAssigned => (),
+                VPermission::ManageOAuthClientsAssigned => (),
+
+                // Add the remaining permissions as is
                 other => contracted.push(other.clone()),
             }
         }
 
-        contracted.push(VPermission::ManageGroupMemberships(
-            manage_group_memberships,
-        ));
-        contracted.push(VPermission::ManageGroups(manage_groups));
+        contracted.push(VPermission::GetApiUsers(read_users));
+        contracted.push(VPermission::ManageApiUsers(write_users));
+        contracted.push(VPermission::GetApiKeys(read_keys));
+        contracted.push(VPermission::ManageApiKeys(write_keys));
+        contracted.push(VPermission::ManageGroups(write_groups));
+        contracted.push(VPermission::ManageGroupMemberships(write_group_memberships));
+        contracted.push(VPermission::ManageMappers(write_mappers));
         contracted.push(VPermission::GetOAuthClients(read_oauth_clients));
-        contracted.push(VPermission::UpdateOAuthClients(update_oauth_clients));
-        contracted.push(VPermission::DeleteOAuthClients(delete_oauth_clients));
+        contracted.push(VPermission::ManageOAuthClients(write_oauth_clients));
 
         contracted.into()
     }
 
     fn expand(
         collection: &Permissions<Self>,
-        owner: &Uuid,
-        owner_permissions: Option<&Permissions<Self>>,
+        actor: &TypedUuid<UserId>,
+        actor_permissions: Option<&Permissions<Self>>,
     ) -> Permissions<Self> {
         let mut expanded = Vec::new();
 
         for p in collection.iter() {
             match p {
-                VPermission::GetApiUserSelf => {
-                    expanded.push(p.clone());
-                    expanded.push(VPermission::GetApiUser(*owner))
+                VPermission::GetApiUserSelf => expanded.push(VPermission::GetApiUser(*actor)),
+                VPermission::GetApiUsers(ids) => {
+                    for id in ids {
+                        expanded.push(VPermission::GetApiUser(*id))
+                    }
                 }
-                VPermission::CreateApiUserTokenSelf => {
-                    expanded.push(p.clone());
-                    expanded.push(VPermission::CreateApiUserToken(*owner))
+                VPermission::GetApiUsersAssigned => {
+                    if let Some(actor_permissions) = actor_permissions {
+                        expanded.extend(
+                            actor_permissions
+                                .iter()
+                                .filter(|op| match op {
+                                    VPermission::GetApiUser(_) => true,
+                                    _ => false,
+                                })
+                                .cloned(),
+                        );
+                    }
                 }
-                VPermission::GetApiUserTokenSelf => {
-                    expanded.push(p.clone());
-                    expanded.push(VPermission::GetApiUserToken(*owner))
+                VPermission::ManageApiUsers(ids) => {
+                    for id in ids {
+                        expanded.push(VPermission::ManageApiUser(*id))
+                    }
                 }
-                VPermission::DeleteApiUserTokenSelf => {
-                    expanded.push(p.clone());
-                    expanded.push(VPermission::DeleteApiUserToken(*owner))
+                VPermission::ManageApiUsersAssigned => {
+                    if let Some(actor_permissions) = actor_permissions {
+                        expanded.extend(
+                            actor_permissions
+                                .iter()
+                                .filter(|op| match op {
+                                    VPermission::ManageApiUser(_) => true,
+                                    _ => false,
+                                })
+                                .cloned(),
+                        );
+                    }
                 }
-                VPermission::UpdateApiUserSelf => {
-                    expanded.push(p.clone());
-                    expanded.push(VPermission::UpdateApiUser(*owner))
+
+                VPermission::CreateApiKeySelf => {
+                    expanded.push(VPermission::CreateApiKey(*actor));
+                }
+                VPermission::CreateApiKeyAssigned => {
+                    if let Some(actor_permissions) = actor_permissions {
+                        expanded.extend(
+                            actor_permissions
+                                .iter()
+                                .filter(|op| match op {
+                                    VPermission::CreateApiKey(_) => true,
+                                    _ => false,
+                                })
+                                .cloned(),
+                        );
+                    }
+                }
+                VPermission::GetApiKeys(ids) => {
+                    for id in ids {
+                        expanded.push(VPermission::GetApiKey(*id))
+                    }
+                }
+                VPermission::GetApiKeyAssigned => {
+                    if let Some(actor_permissions) = actor_permissions {
+                        expanded.extend(
+                            actor_permissions
+                                .iter()
+                                .filter(|op| match op {
+                                    VPermission::GetApiKey(_) => true,
+                                    _ => false,
+                                })
+                                .cloned(),
+                        );
+                    }
+                }
+                VPermission::ManageApiKeys(ids) => {
+                    for id in ids {
+                        expanded.push(VPermission::ManageApiKey(*id))
+                    }
+                }
+                VPermission::ManageApiKeysAssigned => {
+                    if let Some(actor_permissions) = actor_permissions {
+                        expanded.extend(
+                            actor_permissions
+                                .iter()
+                                .filter(|op| match op {
+                                    VPermission::ManageApiKey(_) => true,
+                                    _ => false,
+                                })
+                                .cloned(),
+                        );
+                    }
+                }
+
+                VPermission::ManageGroups(ids) => {
+                    for id in ids {
+                        expanded.push(VPermission::ManageGroup(*id))
+                    }
+                }
+                VPermission::ManageGroupsAssigned => {
+                    if let Some(actor_permissions) = actor_permissions {
+                        expanded.extend(
+                            actor_permissions
+                                .iter()
+                                .filter(|op| match op {
+                                    VPermission::ManageGroup(_) => true,
+                                    _ => false,
+                                })
+                                .cloned(),
+                        );
+                    }
                 }
 
                 VPermission::ManageGroupMemberships(ids) => {
@@ -587,9 +494,36 @@ impl PermissionStorage for VPermission {
                         expanded.push(VPermission::ManageGroupMembership(*id))
                     }
                 }
-                VPermission::ManageGroups(ids) => {
+                VPermission::ManageGroupMembershipsAssigned => {
+                    if let Some(actor_permissions) = actor_permissions {
+                        expanded.extend(
+                            actor_permissions
+                                .iter()
+                                .filter(|op| match op {
+                                    VPermission::ManageGroupMembership(_) => true,
+                                    _ => false,
+                                })
+                                .cloned(),
+                        );
+                    }
+                }
+
+                VPermission::ManageMappers(ids) => {
                     for id in ids {
-                        expanded.push(VPermission::ManageGroup(*id))
+                        expanded.push(VPermission::ManageMapper(*id))
+                    }
+                }
+                VPermission::ManageMappersAssigned => {
+                    if let Some(actor_permissions) = actor_permissions {
+                        expanded.extend(
+                            actor_permissions
+                                .iter()
+                                .filter(|op| match op {
+                                    VPermission::ManageMapper(_) => true,
+                                    _ => false,
+                                })
+                                .cloned(),
+                        );
                     }
                 }
 
@@ -598,85 +532,35 @@ impl PermissionStorage for VPermission {
                         expanded.push(VPermission::GetOAuthClient(*id))
                     }
                 }
-                VPermission::UpdateOAuthClients(ids) => {
-                    for id in ids {
-                        expanded.push(VPermission::UpdateOAuthClient(*id))
-                    }
-                }
-                VPermission::DeleteOAuthClients(ids) => {
-                    for id in ids {
-                        expanded.push(VPermission::DeleteOAuthClient(*id))
-                    }
-                }
-
-                VPermission::ManageGroupMembershipAssigned => {
-                    expanded.push(p.clone());
-
-                    if let Some(owner_permissions) = owner_permissions {
-                        for p in owner_permissions.iter() {
-                            match p {
-                                VPermission::ManageGroupMembership(id) => {
-                                    expanded.push(VPermission::ManageGroupMembership(*id))
-                                }
-                                _ => (),
-                            }
-                        }
-                    }
-                }
-                VPermission::ManageGroupsAssigned => {
-                    expanded.push(p.clone());
-
-                    if let Some(owner_permissions) = owner_permissions {
-                        for p in owner_permissions.iter() {
-                            match p {
-                                VPermission::ManageGroup(id) => {
-                                    expanded.push(VPermission::ManageGroup(*id))
-                                }
-                                _ => (),
-                            }
-                        }
-                    }
-                }
                 VPermission::GetOAuthClientsAssigned => {
-                    expanded.push(p.clone());
-
-                    if let Some(owner_permissions) = owner_permissions {
-                        for p in owner_permissions.iter() {
-                            match p {
-                                VPermission::GetOAuthClient(id) => {
-                                    expanded.push(VPermission::GetOAuthClient(*id))
-                                }
-                                _ => (),
-                            }
-                        }
+                    if let Some(actor_permissions) = actor_permissions {
+                        expanded.extend(
+                            actor_permissions
+                                .iter()
+                                .filter(|op| match op {
+                                    VPermission::GetOAuthClient(_) => true,
+                                    _ => false,
+                                })
+                                .cloned(),
+                        );
                     }
                 }
-                VPermission::UpdateOAuthClientsAssigned => {
-                    expanded.push(p.clone());
-
-                    if let Some(owner_permissions) = owner_permissions {
-                        for p in owner_permissions.iter() {
-                            match p {
-                                VPermission::UpdateOAuthClient(id) => {
-                                    expanded.push(VPermission::UpdateOAuthClient(*id))
-                                }
-                                _ => (),
-                            }
-                        }
+                VPermission::ManageOAuthClients(ids) => {
+                    for id in ids {
+                        expanded.push(VPermission::ManageOAuthClient(*id))
                     }
                 }
-                VPermission::DeleteOAuthClientsAssigned => {
-                    expanded.push(p.clone());
-
-                    if let Some(owner_permissions) = owner_permissions {
-                        for p in owner_permissions.iter() {
-                            match p {
-                                VPermission::DeleteOAuthClient(id) => {
-                                    expanded.push(VPermission::DeleteOAuthClient(*id))
-                                }
-                                _ => (),
-                            }
-                        }
+                VPermission::ManageOAuthClientsAssigned => {
+                    if let Some(actor_permissions) = actor_permissions {
+                        expanded.extend(
+                            actor_permissions
+                                .iter()
+                                .filter(|op| match op {
+                                    VPermission::ManageOAuthClient(_) => true,
+                                    _ => false,
+                                })
+                                .cloned(),
+                        );
                     }
                 }
 

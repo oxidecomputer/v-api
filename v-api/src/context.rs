@@ -6,6 +6,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use dropshot::{HttpError, RequestContext, ServerContext};
 use http::StatusCode;
 use jsonwebtoken::jwk::JwkSet;
+use newtype_uuid::{GenericUuid, TypedUuid};
 use oauth2::CsrfToken;
 use std::{
     collections::{BTreeSet, HashMap},
@@ -16,8 +17,8 @@ use std::{
 use thiserror::Error;
 use tracing::{info_span, instrument, Instrument};
 use uuid::Uuid;
-use v_api_permissions::{Caller, Permission, Permissions};
 use v_model::{
+    permissions::{Caller, Permission, Permissions},
     schema_ext::LoginAttemptState,
     storage::{
         AccessGroupFilter, AccessGroupStore, AccessTokenStore, ApiKeyFilter, ApiKeyStore,
@@ -26,11 +27,12 @@ use v_model::{
         OAuthClientFilter, OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore,
         StoreError,
     },
-    AccessGroup, AccessToken, ApiKey, ApiUser, ApiUserProvider, InvalidValueError, LinkRequest,
-    LoginAttempt, Mapper, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
-    NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMapper, NewOAuthClient,
-    NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientRedirectUri,
-    OAuthClientSecret,
+    AccessGroup, AccessGroupId, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserProvider,
+    InvalidValueError, LinkRequest, LinkRequestId, LoginAttempt, LoginAttemptId, Mapper, MapperId,
+    NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, NewLinkRequest,
+    NewLoginAttempt, NewMapper, NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret,
+    OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId,
+    OAuthSecretId, UserId, UserProviderId,
 };
 
 use crate::{
@@ -246,19 +248,19 @@ where
             storage,
 
             unauthenticated_caller: Caller {
-                id: Uuid::parse_str("00000000-0000-4000-8000-000000000000").unwrap(),
+                id: "00000000-0000-4000-8000-000000000000".parse().unwrap(),
                 permissions: vec![].into(),
             },
             registration_caller: Caller {
-                id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+                id: "00000000-0000-4000-8000-000000000001".parse().unwrap(),
                 permissions: vec![
                     VPermission::CreateApiUser.into(),
-                    VPermission::GetApiUserAll.into(),
-                    VPermission::UpdateApiUserAll.into(),
+                    VPermission::GetApiUsersAll.into(),
+                    VPermission::ManageApiUsersAll.into(),
                     VPermission::CreateGroup.into(),
                     VPermission::GetGroupsAll.into(),
                     VPermission::CreateMapper.into(),
-                    VPermission::ListMappers.into(),
+                    VPermission::GetMappersAll.into(),
                     VPermission::GetOAuthClientsAll.into(),
                     VPermission::CreateAccessToken.into(),
                 ]
@@ -416,16 +418,16 @@ where
     async fn get_base_permissions(
         &self,
         auth: &AuthToken,
-    ) -> Result<(Uuid, BasePermissions<T>), CallerError> {
+    ) -> Result<(TypedUuid<UserId>, BasePermissions<T>), CallerError> {
         Ok(match auth {
             AuthToken::ApiKey(api_key) => {
                 async {
                     tracing::debug!("Attempt to authenticate");
 
-                    let id = Uuid::from_slice(api_key.id()).map_err(|err| {
-                    tracing::info!(?err, slice = ?api_key.id(), "Failed to parse id from API key");
-                    CallerError::InvalidKey
-                })?;
+                    let id = TypedUuid::from_untyped_uuid(Uuid::from_slice(api_key.id()).map_err(|err| {
+                        tracing::info!(?err, slice = ?api_key.id(), "Failed to parse id from API key");
+                        CallerError::InvalidKey
+                    })?);
 
                     let mut key = ApiKeyStore::list(
                         &*self.storage,
@@ -451,7 +453,7 @@ where
                         } else {
                             tracing::debug!("Verified caller key");
                             Ok((
-                                key.api_user_id,
+                                key.user_id,
                                 key.permissions
                                     .map(BasePermissions::Restricted)
                                     .unwrap_or(BasePermissions::Full),
@@ -596,8 +598,8 @@ where
                     .update_api_user_provider(
                         caller,
                         NewApiUserProvider {
-                            id: Uuid::new_v4(),
-                            api_user_id: user.id,
+                            id: TypedUuid::new_v4(),
+                            user_id: user.id,
                             emails: info.verified_emails,
                             provider: info.external_id.provider().to_string(),
                             provider_id: info.external_id.id().to_string(),
@@ -637,7 +639,7 @@ where
 
                 // Update the found user to ensure it has at least the mapped permissions and groups
                 let user = self
-                    .get_api_user(caller, &provider.api_user_id)
+                    .get_api_user(caller, &provider.user_id)
                     .await
                     .map_err(|err| ApiError::from(err))
                     .to_resource_result()?;
@@ -672,7 +674,7 @@ where
         &self,
         caller: &Caller<T>,
         info: &UserInfo,
-    ) -> ResourceResult<(Permissions<T>, BTreeSet<Uuid>), StoreError> {
+    ) -> ResourceResult<(Permissions<T>, BTreeSet<TypedUuid<AccessGroupId>>), StoreError> {
         let mut mapped_permissions = Permissions::new();
         let mut mapped_groups = BTreeSet::new();
 
@@ -731,9 +733,9 @@ where
     async fn ensure_api_user(
         &self,
         caller: &Caller<T>,
-        api_user_id: Uuid,
+        api_user_id: TypedUuid<UserId>,
         mut mapped_permissions: Permissions<T>,
-        mut mapped_groups: BTreeSet<Uuid>,
+        mut mapped_groups: BTreeSet<TypedUuid<AccessGroupId>>,
     ) -> ResourceResult<ApiUser<T>, StoreError> {
         match self.get_api_user(caller, &api_user_id).await {
             ResourceResult::Ok(api_user) => {
@@ -778,7 +780,7 @@ where
                 caller,
                 NewAccessToken {
                     id: claims.jti,
-                    api_user_id: api_user.id,
+                    user_id: api_user.id,
                     revoked_at: None,
                 },
             )
@@ -798,11 +800,11 @@ where
     pub async fn get_api_user(
         &self,
         caller: &Caller<T>,
-        id: &Uuid,
+        id: &TypedUuid<UserId>,
     ) -> ResourceResult<ApiUser<T>, StoreError> {
         if caller.any(&[
             &VPermission::GetApiUser(*id).into(),
-            &VPermission::GetApiUserAll.into(),
+            &VPermission::GetApiUsersAll.into(),
         ]) {
             ApiUserStore::get(&*self.storage, id, false)
                 .await
@@ -831,7 +833,7 @@ where
         users.retain(|user| {
             caller.any(&[
                 &VPermission::GetApiUser(user.id).into(),
-                &VPermission::GetApiUserAll.into(),
+                &VPermission::GetApiUsersAll.into(),
             ])
         });
 
@@ -843,15 +845,15 @@ where
         &self,
         caller: &Caller<T>,
         permissions: Permissions<T>,
-        groups: BTreeSet<Uuid>,
+        groups: BTreeSet<TypedUuid<AccessGroupId>>,
     ) -> ResourceResult<ApiUser<T>, StoreError> {
         if caller.can(&VPermission::CreateApiUser.into()) {
             let mut new_user = NewApiUser {
-                id: Uuid::new_v4(),
+                id: TypedUuid::new_v4(),
                 permissions: permissions,
                 groups: groups,
             };
-            new_user.permissions = T::contract(&new_user.permissions, &new_user.id);
+            new_user.permissions = T::contract(&new_user.permissions);
             ApiUserStore::upsert(&*self.storage, new_user)
                 .await
                 .to_resource_result()
@@ -867,10 +869,10 @@ where
         mut api_user: NewApiUser<T>,
     ) -> ResourceResult<ApiUser<T>, StoreError> {
         if caller.any(&[
-            &VPermission::UpdateApiUser(api_user.id).into(),
-            &VPermission::UpdateApiUserAll.into(),
+            &VPermission::ManageApiUser(api_user.id).into(),
+            &VPermission::ManageApiUsersAll.into(),
         ]) {
-            api_user.permissions = T::contract(&api_user.permissions, &api_user.id);
+            api_user.permissions = T::contract(&api_user.permissions);
             ApiUserStore::upsert(&*self.storage, api_user)
                 .await
                 .to_resource_result()
@@ -882,12 +884,12 @@ where
     pub async fn add_permissions_to_user(
         &self,
         caller: &Caller<T>,
-        user_id: &Uuid,
+        user_id: &TypedUuid<UserId>,
         new_permissions: Permissions<T>,
     ) -> ResourceResult<ApiUser<T>, StoreError> {
         if caller.any(&[
-            &VPermission::UpdateApiUser(*user_id).into(),
-            &VPermission::UpdateApiUserAll.into(),
+            &VPermission::ManageApiUser(*user_id).into(),
+            &VPermission::ManageApiUsersAll.into(),
         ]) {
             let user = self.get_api_user(caller, user_id).await?;
 
@@ -907,11 +909,11 @@ where
         &self,
         caller: &Caller<T>,
         token: NewApiKey<T>,
-        api_user_id: &Uuid,
+        api_user_id: &TypedUuid<UserId>,
     ) -> ResourceResult<ApiKey<T>, StoreError> {
         if caller.any(&[
-            &VPermission::CreateApiUserToken(*api_user_id).into(),
-            &VPermission::CreateApiUserTokenAll.into(),
+            &VPermission::CreateApiKey(*api_user_id).into(),
+            &VPermission::CreateApiKeyAll.into(),
         ]) {
             ApiKeyStore::upsert(&*self.storage, token)
                 .await
@@ -924,13 +926,13 @@ where
     pub async fn get_api_user_token(
         &self,
         caller: &Caller<T>,
-        id: &Uuid,
+        api_key_id: &TypedUuid<ApiKeyId>,
     ) -> ResourceResult<ApiKey<T>, StoreError> {
         if caller.any(&[
-            &VPermission::GetApiUserToken(*id).into(),
-            &VPermission::GetApiUserTokenAll.into(),
+            &VPermission::GetApiKey(*api_key_id).into(),
+            &VPermission::GetApiKeysAll.into(),
         ]) {
-            ApiKeyStore::get(&*self.storage, id, false)
+            ApiKeyStore::get(&*self.storage, api_key_id, false)
                 .await
                 .opt_to_resource_result()
         } else {
@@ -941,7 +943,7 @@ where
     pub async fn get_api_user_tokens(
         &self,
         caller: &Caller<T>,
-        api_user_id: &Uuid,
+        api_user_id: &TypedUuid<UserId>,
         pagination: &ListPagination,
     ) -> ResourceResult<Vec<ApiKey<T>>, StoreError> {
         let mut tokens = ApiKeyStore::list(
@@ -959,8 +961,8 @@ where
 
         tokens.retain(|token| {
             caller.any(&[
-                &VPermission::GetApiUserToken(token.id).into(),
-                &VPermission::GetApiUserTokenAll.into(),
+                &VPermission::GetApiKey(token.id).into(),
+                &VPermission::GetApiKeysAll.into(),
             ])
         });
 
@@ -970,10 +972,14 @@ where
     pub async fn get_api_user_provider(
         &self,
         caller: &Caller<T>,
-        id: &Uuid,
+        user_id: &TypedUuid<UserId>,
+        provider_id: &TypedUuid<UserProviderId>,
     ) -> ResourceResult<ApiUserProvider, StoreError> {
-        if caller.can(&VPermission::GetApiUser(*id).into()) {
-            ApiUserProviderStore::get(&*self.storage, id, false)
+        if caller.any(&[
+            &VPermission::GetApiUser(*user_id).into(),
+            &VPermission::GetApiUsersAll.into(),
+        ]) {
+            ApiUserProviderStore::get(&*self.storage, provider_id, false)
                 .await
                 .opt_to_resource_result()
         } else {
@@ -993,8 +999,8 @@ where
 
         providers.retain(|provider| {
             caller.any(&[
-                &VPermission::GetApiUser(provider.api_user_id).into(),
-                &VPermission::GetApiUserAll.into(),
+                &VPermission::GetApiUser(provider.user_id).into(),
+                &VPermission::GetApiUsersAll.into(),
             ])
         });
 
@@ -1007,8 +1013,8 @@ where
         api_user_provider: NewApiUserProvider,
     ) -> ResourceResult<ApiUserProvider, StoreError> {
         if caller.any(&[
-            &VPermission::UpdateApiUser(api_user_provider.id).into(),
-            &VPermission::UpdateApiUserAll.into(),
+            &VPermission::ManageApiUser(api_user_provider.user_id).into(),
+            &VPermission::ManageApiUsersAll.into(),
         ]) {
             ApiUserProviderStore::upsert(&*self.storage, api_user_provider)
                 .await
@@ -1021,11 +1027,11 @@ where
     pub async fn delete_api_user_token(
         &self,
         caller: &Caller<T>,
-        id: &Uuid,
+        id: &TypedUuid<ApiKeyId>,
     ) -> ResourceResult<ApiKey<T>, StoreError> {
         if caller.any(&[
-            &VPermission::DeleteApiUserToken(*id).into(),
-            &VPermission::DeleteApiUserTokenAll.into(),
+            &VPermission::ManageApiKey(*id).into(),
+            &VPermission::ManageApiKeysAll.into(),
         ]) {
             ApiKeyStore::delete(&*self.storage, id)
                 .await
@@ -1076,7 +1082,10 @@ where
         LoginAttemptStore::upsert(&*self.storage, attempt).await
     }
 
-    pub async fn get_login_attempt(&self, id: &Uuid) -> Result<Option<LoginAttempt>, StoreError> {
+    pub async fn get_login_attempt(
+        &self,
+        id: &TypedUuid<LoginAttemptId>,
+    ) -> Result<Option<LoginAttempt>, StoreError> {
         LoginAttemptStore::get(&*self.storage, id).await
     }
 
@@ -1123,9 +1132,14 @@ where
         caller: &Caller<T>,
     ) -> ResourceResult<OAuthClient, StoreError> {
         if caller.can(&VPermission::CreateOAuthClient.into()) {
-            OAuthClientStore::upsert(&*self.storage, NewOAuthClient { id: Uuid::new_v4() })
-                .await
-                .to_resource_result()
+            OAuthClientStore::upsert(
+                &*self.storage,
+                NewOAuthClient {
+                    id: TypedUuid::new_v4(),
+                },
+            )
+            .await
+            .to_resource_result()
         } else {
             resource_restricted()
         }
@@ -1134,7 +1148,7 @@ where
     pub async fn get_oauth_client(
         &self,
         caller: &Caller<T>,
-        id: &Uuid,
+        id: &TypedUuid<OAuthClientId>,
     ) -> ResourceResult<OAuthClient, StoreError> {
         if caller.any(&[
             &VPermission::GetOAuthClient(*id).into(),
@@ -1176,13 +1190,13 @@ where
     pub async fn add_oauth_secret(
         &self,
         caller: &Caller<T>,
-        id: &Uuid,
-        client_id: &Uuid,
+        id: &TypedUuid<OAuthSecretId>,
+        client_id: &TypedUuid<OAuthClientId>,
         secret: &str,
     ) -> ResourceResult<OAuthClientSecret, StoreError> {
         if caller.any(&[
-            &VPermission::UpdateOAuthClient(*client_id).into(),
-            &VPermission::UpdateOAuthClientsAll.into(),
+            &VPermission::ManageOAuthClient(*client_id).into(),
+            &VPermission::ManageOAuthClientsAll.into(),
         ]) {
             OAuthClientSecretStore::upsert(
                 &*self.storage,
@@ -1202,12 +1216,12 @@ where
     pub async fn delete_oauth_secret(
         &self,
         caller: &Caller<T>,
-        id: &Uuid,
-        client_id: &Uuid,
+        id: &TypedUuid<OAuthSecretId>,
+        client_id: &TypedUuid<OAuthClientId>,
     ) -> ResourceResult<OAuthClientSecret, StoreError> {
         if caller.any(&[
-            &VPermission::UpdateOAuthClient(*client_id).into(),
-            &VPermission::UpdateOAuthClientsAll.into(),
+            &VPermission::ManageOAuthClient(*client_id).into(),
+            &VPermission::ManageOAuthClientsAll.into(),
         ]) {
             OAuthClientSecretStore::delete(&*self.storage, id)
                 .await
@@ -1220,17 +1234,17 @@ where
     pub async fn add_oauth_redirect_uri(
         &self,
         caller: &Caller<T>,
-        client_id: &Uuid,
+        client_id: &TypedUuid<OAuthClientId>,
         uri: &str,
     ) -> ResourceResult<OAuthClientRedirectUri, StoreError> {
         if caller.any(&[
-            &VPermission::UpdateOAuthClient(*client_id).into(),
-            &VPermission::UpdateOAuthClientsAll.into(),
+            &VPermission::ManageOAuthClient(*client_id).into(),
+            &VPermission::ManageOAuthClientsAll.into(),
         ]) {
             OAuthClientRedirectUriStore::upsert(
                 &*self.storage,
                 NewOAuthClientRedirectUri {
-                    id: Uuid::new_v4(),
+                    id: TypedUuid::new_v4(),
                     oauth_client_id: *client_id,
                     redirect_uri: uri.to_string(),
                 },
@@ -1245,12 +1259,12 @@ where
     pub async fn delete_oauth_redirect_uri(
         &self,
         caller: &Caller<T>,
-        id: &Uuid,
-        client_id: &Uuid,
+        id: &TypedUuid<OAuthRedirectUriId>,
+        client_id: &TypedUuid<OAuthClientId>,
     ) -> ResourceResult<OAuthClientRedirectUri, StoreError> {
         if caller.any(&[
-            &VPermission::UpdateOAuthClient(*client_id).into(),
-            &VPermission::UpdateOAuthClientsAll.into(),
+            &VPermission::ManageOAuthClient(*client_id).into(),
+            &VPermission::ManageOAuthClientsAll.into(),
         ]) {
             OAuthClientRedirectUriStore::delete(&*self.storage, id)
                 .await
@@ -1318,7 +1332,10 @@ where
         caller: &Caller<T>,
         group: NewAccessGroup<T>,
     ) -> ResourceResult<AccessGroup<T>, StoreError> {
-        if caller.can(&VPermission::UpdateGroup(group.id).into()) {
+        if caller.any(&[
+            &VPermission::ManageGroup(group.id).into(),
+            &VPermission::ManageGroupsAll.into(),
+        ]) {
             AccessGroupStore::upsert(&*self.storage, &group)
                 .await
                 .to_resource_result()
@@ -1330,10 +1347,13 @@ where
     pub async fn delete_group(
         &self,
         caller: &Caller<T>,
-        group_id: &Uuid,
+        group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<AccessGroup<T>, StoreError> {
-        if caller.can(&VPermission::DeleteGroup(*group_id).into()) {
-            AccessGroupStore::delete(&*self.storage, &group_id)
+        if caller.any(&[
+            &VPermission::ManageGroup(*group_id).into(),
+            &VPermission::ManageGroupsAll.into(),
+        ]) {
+            AccessGroupStore::delete(&*self.storage, group_id)
                 .await
                 .opt_to_resource_result()
         } else {
@@ -1344,10 +1364,13 @@ where
     pub async fn add_api_user_to_group(
         &self,
         caller: &Caller<T>,
-        api_user_id: &Uuid,
-        group_id: &Uuid,
+        api_user_id: &TypedUuid<UserId>,
+        group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<ApiUser<T>, StoreError> {
-        if caller.can(&VPermission::AddToGroup(*group_id).into()) {
+        if caller.any(&[
+            &VPermission::ManageGroupMembership(*group_id).into(),
+            &VPermission::ManageGroupMembershipsAll.into(),
+        ]) {
             // TODO: This needs to be wrapped in a transaction. That requires reworking the way the
             // store traits are handled. Ideally we could have an API that still abstracts away the
             // underlying connection management while allowing for transactions. Possibly something
@@ -1371,10 +1394,13 @@ where
     pub async fn remove_api_user_from_group(
         &self,
         caller: &Caller<T>,
-        api_user_id: &Uuid,
-        group_id: &Uuid,
+        api_user_id: &TypedUuid<UserId>,
+        group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<ApiUser<T>, StoreError> {
-        if caller.can(&VPermission::RemoveFromGroup(*group_id).into()) {
+        if caller.any(&[
+            &VPermission::ManageGroupMembership(*group_id).into(),
+            &VPermission::ManageGroupMembershipsAll.into(),
+        ]) {
             // TODO: This needs to be wrapped in a transaction. That requires reworking the way the
             // store traits are handled. Ideally we could have an API that still abstracts away the
             // underlying connection management while allowing for transactions. Possibly something
@@ -1418,7 +1444,7 @@ where
         caller: &Caller<T>,
         included_depleted: bool,
     ) -> ResourceResult<Vec<Mapper>, StoreError> {
-        if caller.can(&VPermission::ListMappers.into()) {
+        if caller.can(&VPermission::GetMappersAll.into()) {
             MapperStore::list(
                 &*self.storage,
                 MapperFilter::default().depleted(included_depleted),
@@ -1448,10 +1474,9 @@ where
     pub async fn remove_mapper(
         &self,
         caller: &Caller<T>,
-        id: &Uuid,
+        id: &TypedUuid<MapperId>,
     ) -> ResourceResult<Mapper, StoreError> {
         if caller.any(&[
-            &VPermission::DeleteMapper(*id).into(),
             &VPermission::ManageMapper(*id).into(),
             &VPermission::ManageMappersAll.into(),
         ]) {
@@ -1490,20 +1515,23 @@ where
     }
 
     // TODO: Need a permission for this action
-    pub async fn get_link_request(&self, id: &Uuid) -> Result<Option<LinkRequest>, StoreError> {
+    pub async fn get_link_request(
+        &self,
+        id: &TypedUuid<LinkRequestId>,
+    ) -> Result<Option<LinkRequest>, StoreError> {
         Ok(LinkRequestStore::get(&*self.storage, id, false, false).await?)
     }
 
     pub async fn create_link_request_token(
         &self,
         caller: &Caller<T>,
-        source_provider: &Uuid,
-        source_user: &Uuid,
-        target: &Uuid,
+        source_provider: &TypedUuid<UserProviderId>,
+        source_user: &TypedUuid<UserId>,
+        target: &TypedUuid<UserId>,
     ) -> ResourceResult<SignedApiKey, StoreError> {
         if caller.can(&VPermission::CreateUserApiProviderLinkToken.into()) {
-            let link_id = Uuid::new_v4();
-            let secret = RawApiKey::generate::<8>(&link_id);
+            let link_id = TypedUuid::new_v4();
+            let secret = RawApiKey::generate::<8>(link_id.as_untyped_uuid());
             let signed = secret.sign(&*self.secrets.signer).await.unwrap();
 
             LinkRequestStore::upsert(
@@ -1511,8 +1539,8 @@ where
                 &NewLinkRequest {
                     id: link_id,
                     source_provider_id: *source_provider,
-                    source_api_user_id: *source_user,
-                    target_api_user_id: *target,
+                    source_user_id: *source_user,
+                    target_user_id: *target,
                     secret_signature: signed.signature().to_string(),
                     expires_at: Utc::now().add(TimeDelta::try_minutes(15).unwrap()),
                     completed_at: None,
@@ -1532,23 +1560,27 @@ where
         link_request: LinkRequest,
     ) -> ResourceResult<ApiUserProvider, StoreError> {
         let mut provider = self
-            .get_api_user_provider(caller, &link_request.source_provider_id)
+            .get_api_user_provider(
+                caller,
+                &link_request.source_user_id,
+                &link_request.source_provider_id,
+            )
             .await?;
 
         // This check attempts to prevent a stolen link request from being activated
-        if caller.can(&VPermission::UpdateApiUser(link_request.source_api_user_id).into()) {
-            provider.api_user_id = link_request.target_api_user_id;
+        if caller.can(&VPermission::ManageApiUser(link_request.source_user_id).into()) {
+            provider.user_id = link_request.target_user_id;
 
             tracing::info!(?provider, "Created provider update");
 
-            let source_api_user_id = link_request.source_api_user_id;
+            let source_user_id = link_request.source_user_id;
             let mut update_request: NewLinkRequest = link_request.into();
             update_request.completed_at = Some(Utc::now());
             LinkRequestStore::upsert(&*self.storage, &update_request)
                 .await
                 .to_resource_result()?;
 
-            ApiUserProviderStore::transfer(&*self.storage, provider.into(), source_api_user_id)
+            ApiUserProviderStore::transfer(&*self.storage, provider.into(), source_user_id)
                 .await
                 .to_resource_result()
         } else {
@@ -1561,12 +1593,12 @@ where
 mod tests {
     use chrono::{TimeDelta, Utc};
     use mockall::predicate::eq;
+    use newtype_uuid::TypedUuid;
     use std::{collections::BTreeSet, ops::Add, sync::Arc};
-    use uuid::Uuid;
-    use v_api_permissions::Permissions;
     use v_model::{
+        permissions::Permissions,
         storage::{AccessGroupFilter, ListPagination, MockAccessGroupStore, MockApiUserStore},
-        AccessGroup, ApiUser, ApiUserProvider,
+        AccessGroup, ApiUser, ApiUserProvider, UserId,
     };
 
     use crate::{
@@ -1585,7 +1617,7 @@ mod tests {
 
     async fn create_token(
         ctx: &VContext<VPermission>,
-        user_id: Uuid,
+        user_id: TypedUuid<UserId>,
         scope: Vec<String>,
     ) -> AuthToken {
         let user = ApiUser {
@@ -1598,8 +1630,8 @@ mod tests {
         };
 
         let provider = ApiUserProvider {
-            id: Uuid::new_v4(),
-            api_user_id: user_id,
+            id: TypedUuid::new_v4(),
+            user_id: user_id,
             provider: "test".to_string(),
             provider_id: "test_id".to_string(),
             emails: vec![],
@@ -1629,7 +1661,7 @@ mod tests {
     async fn test_jwt_permissions() {
         let mut storage = MockStorage::new();
 
-        let group_id = Uuid::new_v4();
+        let group_id = TypedUuid::new_v4();
         let group_permissions: Permissions<VPermission> = vec![VPermission::CreateGroup].into();
         let group = AccessGroup {
             id: group_id,
@@ -1652,8 +1684,8 @@ mod tests {
             )
             .returning(move |_, _| Ok(vec![group.clone()]));
 
-        let user_id = Uuid::new_v4();
-        let user_permissions: Permissions<VPermission> = vec![VPermission::ListMappers].into();
+        let user_id = TypedUuid::new_v4();
+        let user_permissions: Permissions<VPermission> = vec![VPermission::GetMappersAll].into();
         let mut groups = BTreeSet::new();
         groups.insert(group_id);
         let user = ApiUser {
@@ -1696,7 +1728,7 @@ mod tests {
         assert_eq!(
             Permissions::<VPermission>::from(vec![
                 VPermission::CreateGroup,
-                VPermission::ListMappers,
+                VPermission::GetMappersAll,
             ]),
             permissions.permissions
         );
@@ -1706,9 +1738,10 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod test_mocks {
     use async_trait::async_trait;
+    use newtype_uuid::TypedUuid;
     use std::sync::Arc;
-    use v_api_permissions::Caller;
     use v_model::{
+        permissions::Caller,
         storage::{
             AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserProviderStore, ApiUserStore,
             LinkRequestStore, ListPagination, LoginAttemptStore, MapperStore, MockAccessGroupStore,
@@ -1717,8 +1750,10 @@ pub(crate) mod test_mocks {
             MockOAuthClientRedirectUriStore, MockOAuthClientSecretStore, MockOAuthClientStore,
             OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore,
         },
-        ApiKey, ApiUserProvider, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
-        NewApiUserProvider, NewLoginAttempt, NewMapper,
+        AccessGroupId, AccessTokenId, ApiKey, ApiKeyId, ApiUserProvider, LinkRequestId,
+        LoginAttemptId, MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
+        NewApiUserProvider, NewLoginAttempt, NewMapper, OAuthClientId, OAuthRedirectUriId,
+        OAuthSecretId, UserId, UserProviderId,
     };
 
     use crate::{
@@ -1798,7 +1833,7 @@ pub(crate) mod test_mocks {
     impl ApiUserStore<VPermission> for MockStorage {
         async fn get(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<UserId>,
             deleted: bool,
         ) -> Result<Option<v_model::ApiUser<VPermission>>, v_model::storage::StoreError> {
             self.api_user_store.as_ref().unwrap().get(id, deleted).await
@@ -1825,7 +1860,7 @@ pub(crate) mod test_mocks {
 
         async fn delete(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<UserId>,
         ) -> Result<Option<v_model::ApiUser<VPermission>>, v_model::storage::StoreError> {
             self.api_user_store.as_ref().unwrap().delete(id).await
         }
@@ -1835,7 +1870,7 @@ pub(crate) mod test_mocks {
     impl ApiKeyStore<VPermission> for MockStorage {
         async fn get(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<ApiKeyId>,
             deleted: bool,
         ) -> Result<Option<ApiKey<VPermission>>, v_model::storage::StoreError> {
             self.api_user_token_store
@@ -1870,7 +1905,7 @@ pub(crate) mod test_mocks {
 
         async fn delete(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<ApiKeyId>,
         ) -> Result<Option<ApiKey<VPermission>>, v_model::storage::StoreError> {
             self.api_user_token_store.as_ref().unwrap().delete(id).await
         }
@@ -1880,7 +1915,7 @@ pub(crate) mod test_mocks {
     impl ApiUserProviderStore for MockStorage {
         async fn get(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<UserProviderId>,
             deleted: bool,
         ) -> Result<Option<ApiUserProvider>, v_model::storage::StoreError> {
             self.api_user_provider_store
@@ -1916,7 +1951,7 @@ pub(crate) mod test_mocks {
         async fn transfer(
             &self,
             provider: NewApiUserProvider,
-            current_api_user_id: uuid::Uuid,
+            current_api_user_id: TypedUuid<UserId>,
         ) -> Result<ApiUserProvider, v_model::storage::StoreError> {
             self.api_user_provider_store
                 .as_ref()
@@ -1927,7 +1962,7 @@ pub(crate) mod test_mocks {
 
         async fn delete(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<UserProviderId>,
         ) -> Result<Option<ApiUserProvider>, v_model::storage::StoreError> {
             self.api_user_provider_store
                 .as_ref()
@@ -1941,7 +1976,7 @@ pub(crate) mod test_mocks {
     impl AccessTokenStore for MockStorage {
         async fn get(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<AccessTokenId>,
             revoked: bool,
         ) -> Result<Option<v_model::AccessToken>, v_model::storage::StoreError> {
             self.device_token_store
@@ -1979,7 +2014,7 @@ pub(crate) mod test_mocks {
     impl LoginAttemptStore for MockStorage {
         async fn get(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<LoginAttemptId>,
         ) -> Result<Option<v_model::LoginAttempt>, v_model::storage::StoreError> {
             self.login_attempt_store.as_ref().unwrap().get(id).await
         }
@@ -2012,7 +2047,7 @@ pub(crate) mod test_mocks {
     impl OAuthClientStore for MockStorage {
         async fn get(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<OAuthClientId>,
             deleted: bool,
         ) -> Result<Option<v_model::OAuthClient>, v_model::storage::StoreError> {
             self.oauth_client_store
@@ -2047,7 +2082,7 @@ pub(crate) mod test_mocks {
 
         async fn delete(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<OAuthClientId>,
         ) -> Result<Option<v_model::OAuthClient>, v_model::storage::StoreError> {
             self.oauth_client_store.as_ref().unwrap().delete(id).await
         }
@@ -2068,7 +2103,7 @@ pub(crate) mod test_mocks {
 
         async fn delete(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<OAuthSecretId>,
         ) -> Result<Option<v_model::OAuthClientSecret>, v_model::storage::StoreError> {
             self.oauth_client_secret_store
                 .as_ref()
@@ -2093,7 +2128,7 @@ pub(crate) mod test_mocks {
 
         async fn delete(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<OAuthRedirectUriId>,
         ) -> Result<Option<v_model::OAuthClientRedirectUri>, v_model::storage::StoreError> {
             self.oauth_client_redirect_uri_store
                 .as_ref()
@@ -2107,7 +2142,7 @@ pub(crate) mod test_mocks {
     impl AccessGroupStore<VPermission> for MockStorage {
         async fn get(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<AccessGroupId>,
             deleted: bool,
         ) -> Result<Option<v_model::AccessGroup<VPermission>>, v_model::storage::StoreError>
         {
@@ -2143,7 +2178,7 @@ pub(crate) mod test_mocks {
 
         async fn delete(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<AccessGroupId>,
         ) -> Result<Option<v_model::AccessGroup<VPermission>>, v_model::storage::StoreError>
         {
             self.access_group_store.as_ref().unwrap().delete(id).await
@@ -2154,7 +2189,7 @@ pub(crate) mod test_mocks {
     impl MapperStore for MockStorage {
         async fn get(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<MapperId>,
             used: bool,
             deleted: bool,
         ) -> Result<Option<v_model::Mapper>, v_model::storage::StoreError> {
@@ -2186,7 +2221,7 @@ pub(crate) mod test_mocks {
 
         async fn delete(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<MapperId>,
         ) -> Result<Option<v_model::Mapper>, v_model::storage::StoreError> {
             self.mapper_store.as_ref().unwrap().delete(id).await
         }
@@ -2196,7 +2231,7 @@ pub(crate) mod test_mocks {
     impl LinkRequestStore for MockStorage {
         async fn get(
             &self,
-            id: &uuid::Uuid,
+            id: &TypedUuid<LinkRequestId>,
             expired: bool,
             completed: bool,
         ) -> Result<Option<v_model::LinkRequest>, v_model::storage::StoreError> {
