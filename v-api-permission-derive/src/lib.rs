@@ -778,7 +778,7 @@ fn permission_storage_contract_tokens(
 
     quote! {
         fn contract(collection: &Permissions<Self>) -> Permissions<Self> {
-            let mut base = <Self as PermissionStorage>::contract(collection);
+            let mut base = <Self as v_model::permissions::PermissionStorage>::contract(collection);
             let mut contracted = Vec::new();
 
             #collection_instantiation
@@ -862,7 +862,7 @@ fn permission_storage_expand_tokens(
             actor: &newtype_uuid::TypedUuid<v_model::UserId>,
             actor_permissions: Option<&Permissions<Self>>,
         ) -> Permissions<Self> {
-            let mut base = <Self as PermissionStorage>::expand(collection, actor, actor_permissions.clone());
+            let mut base = <Self as v_model::permissions::PermissionStorage>::expand(collection, actor, actor_permissions.clone());
             let mut expanded = Vec::new();
 
             for p in collection.iter() {
