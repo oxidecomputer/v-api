@@ -206,7 +206,8 @@ pub trait AsScope: Sized {
     fn from_scope_arg(scope_arg: &str) -> Permissions<Self> {
         Self::from_scope(scope_arg.split(' '))
     }
-    fn from_scope<T, S>(_scope: T) -> Permissions<Self>
+    #[allow(unused)]
+    fn from_scope<T, S>(scope: T) -> Permissions<Self>
     where
         T: Iterator<Item = S> + Clone,
         S: AsRef<str>,
@@ -233,10 +234,11 @@ pub trait PermissionStorage {
     {
         Permissions::default()
     }
+    #[allow(unused)]
     fn expand(
-        _collection: &Permissions<Self>,
-        _actor: &TypedUuid<UserId>,
-        _actor_permissions: Option<&Permissions<Self>>,
+        collection: &Permissions<Self>,
+        actor: &TypedUuid<UserId>,
+        actor_permissions: Option<&Permissions<Self>>,
     ) -> Permissions<Self>
     where
         Self: Sized,

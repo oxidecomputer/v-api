@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use v_api_permission_derive::v_api;
 use v_model::permissions::AsScope;
 use v_model::permissions::{
-    AsScopeInternal, Permission, PermissionStorage, PermissionStorageInternal, Permissions,
+    AsScopeInternal, Permission, PermissionStorage, PermissionStorageInternal,
 };
 
 pub trait VAppPermission:
