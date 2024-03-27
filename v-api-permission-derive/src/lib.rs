@@ -674,7 +674,7 @@ fn as_scope_trait_tokens(
 
             fn from_scope<T, S>(
                 scope: T,
-            ) -> Permissions<#permission_type>
+            ) -> v_model::Permissions<#permission_type>
             where
                 T: Iterator<Item = S> + Clone,
                 S: AsRef<str>,
@@ -777,7 +777,7 @@ fn permission_storage_contract_tokens(
     });
 
     quote! {
-        fn contract(collection: &Permissions<Self>) -> Permissions<Self> {
+        fn contract(collection: &v_model::Permissions<Self>) -> v_model::Permissions<Self> {
             let mut base = <Self as v_model::permissions::PermissionStorage>::contract(collection);
             let mut contracted = Vec::new();
 
@@ -858,10 +858,10 @@ fn permission_storage_expand_tokens(
 
     quote! {
         fn expand(
-            collection: &Permissions<Self>,
+            collection: &v_model::Permissions<Self>,
             actor: &newtype_uuid::TypedUuid<v_model::UserId>,
-            actor_permissions: Option<&Permissions<Self>>,
-        ) -> Permissions<Self> {
+            actor_permissions: Option<&v_model::Permissions<Self>>,
+        ) -> v_model::Permissions<Self> {
             let mut base = <Self as v_model::permissions::PermissionStorage>::expand(collection, actor, actor_permissions.clone());
             let mut expanded = Vec::new();
 

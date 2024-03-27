@@ -2,10 +2,7 @@ use std::collections::BTreeSet;
 use uuid::Uuid;
 use v_api::permissions::VPermission;
 use v_api_permission_derive::v_api;
-use v_model::{
-    permissions::{AsScope, PermissionStorage},
-    Permissions,
-};
+use v_model::permissions::{AsScope, PermissionStorage};
 
 #[test]
 fn test_derive() {
