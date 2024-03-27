@@ -1719,7 +1719,7 @@ mod tests {
             &ctx,
             user_id,
             vec![
-                "group:w".to_string(),
+                "group:info:w".to_string(),
                 "mapper:r".to_string(),
                 "user:info:r".to_string(),
             ],
