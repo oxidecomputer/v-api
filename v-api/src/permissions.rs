@@ -7,19 +7,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use v_api_permission_derive::v_api;
-use v_model::permissions::AsScope;
-use v_model::permissions::{
-    AsScopeInternal, Permission, PermissionStorage, PermissionStorageInternal,
-};
+use v_model::permissions::{AsScope, Permission, PermissionStorage};
 
-pub trait VAppPermission:
-    Permission + From<VPermission> + AsScopeInternal + PermissionStorageInternal
-{
-}
-impl<T> VAppPermission for T where
-    T: Permission + From<VPermission> + AsScopeInternal + PermissionStorageInternal
-{
-}
+pub trait VAppPermission: Permission + From<VPermission> + AsScope + PermissionStorage {}
+impl<T> VAppPermission for T where T: Permission + From<VPermission> + AsScope + PermissionStorage {}
 
 pub trait VAppPermissionResponse: Permission {}
 impl<T> VAppPermissionResponse for T where T: Permission {}
@@ -33,6 +24,3 @@ impl<T> VAppPermissionResponse for T where T: Permission {}
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, PartialOrd, Ord,
 )]
 pub enum VPermission {}
-
-impl AsScope for VPermission {}
-impl PermissionStorage for VPermission {}

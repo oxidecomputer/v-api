@@ -635,7 +635,7 @@ fn as_scope_trait_tokens(
                 quote! {}
             };
             let variant_ident = variant.ident.clone();
-            quote! { #permission_type::#variant_ident #fields => Some(#to) }
+            quote! { #permission_type::#variant_ident #fields => #to }
         })
     });
     let from_scope_mapping = scope_settings
@@ -662,35 +662,30 @@ fn as_scope_trait_tokens(
         });
 
     quote! {
-        impl v_model::permissions::AsScopeInternal for #permission_type {
-            fn as_scope(&self) -> Option<&str> {
-                <Self as v_model::permissions::AsScope>::as_scope(self).or_else(|| {
-                    match self {
-                        #(#as_scope_mapping,)*
-                        _ => None,
-                    }
-                })
+        impl v_model::permissions::AsScope for #permission_type {
+            fn as_scope(&self) -> &str {
+                match self {
+                    #(#as_scope_mapping,)*
+                    _ => "",
+                }
             }
 
-            fn from_scope<T, S>(
-                scope: T,
-            ) -> v_model::Permissions<#permission_type>
+            fn from_scope<S>(
+                scope: impl Iterator<Item = S>,
+            ) -> Result<v_model::Permissions<Self>, v_model::permissions::PermissionError>
             where
-                T: Iterator<Item = S> + Clone,
                 S: AsRef<str>,
             {
-                let mut permissions = <Self as v_model::permissions::AsScope>::from_scope(scope.clone());
+                let mut permissions = v_model::Permissions::default();
 
                 for entry in scope {
                     match entry.as_ref() {
                         #(#from_scope_mapping,)*
-                        other => {
-                            // Drop any unrecognized scopes
-                        }
+                        other => return Err(v_model::permissions::PermissionError::InvalidScope(other.to_string())),
                     }
                 }
 
-                permissions
+                Ok(permissions)
             }
         }
     }
@@ -706,7 +701,7 @@ fn permission_storage_trait_tokens(
     let expand_tokens = permission_storage_expand_tokens(permission_type, expand_settings);
 
     quote! {
-        impl v_model::permissions::PermissionStorageInternal for #permission_type {
+        impl v_model::permissions::PermissionStorage for #permission_type {
             #contract_tokens
             #expand_tokens
         }
@@ -778,7 +773,6 @@ fn permission_storage_contract_tokens(
 
     quote! {
         fn contract(collection: &v_model::Permissions<Self>) -> v_model::Permissions<Self> {
-            let mut base = <Self as v_model::permissions::PermissionStorage>::contract(collection);
             let mut contracted = Vec::new();
 
             #collection_instantiation
@@ -794,8 +788,7 @@ fn permission_storage_contract_tokens(
 
             #collections_add
 
-            base.append(&mut contracted.into());
-            base
+            contracted.into()
         }
     }
 }
@@ -862,7 +855,6 @@ fn permission_storage_expand_tokens(
             actor: &newtype_uuid::TypedUuid<v_model::UserId>,
             actor_permissions: Option<&v_model::Permissions<Self>>,
         ) -> v_model::Permissions<Self> {
-            let mut base = <Self as v_model::permissions::PermissionStorage>::expand(collection, actor, actor_permissions.clone());
             let mut expanded = Vec::new();
 
             for p in collection.iter() {
@@ -873,8 +865,7 @@ fn permission_storage_expand_tokens(
                 }
             }
 
-            base.append(&mut expanded.into());
-            base
+            expanded.into()
         }
     }
 }

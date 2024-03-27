@@ -2,7 +2,6 @@ use std::collections::BTreeSet;
 use uuid::Uuid;
 use v_api::permissions::VPermission;
 use v_api_permission_derive::v_api;
-use v_model::permissions::{AsScope, PermissionStorage};
 
 #[test]
 fn test_derive() {
@@ -36,7 +35,4 @@ fn test_derive() {
         #[v_api(expand(kind = alias, variant = ReadItem, source = actor), scope(to = "read", from = "read"))]
         ReadItemsAssigned,
     }
-
-    impl AsScope for AppPermissions {}
-    impl PermissionStorage for AppPermissions {}
 }
