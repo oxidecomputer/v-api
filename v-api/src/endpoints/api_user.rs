@@ -17,7 +17,7 @@ use tap::TapFallible;
 use tracing::instrument;
 use uuid::Uuid;
 use v_model::{
-    permissions::{Caller, Permission, Permissions},
+    permissions::{Caller, Permission, Permissions, PermissionStorage},
     storage::{ApiUserProviderFilter, ListPagination},
     AccessGroupId, ApiKeyId, ApiUser, ApiUserProvider, NewApiKey, NewApiUser, UserId,
 };
@@ -26,7 +26,7 @@ use crate::{
     authn::key::RawApiKey,
     context::ApiContext,
     error::ApiError,
-    permissions::{PermissionStorage, VAppPermission, VAppPermissionResponse},
+    permissions::{VAppPermission, VAppPermissionResponse},
     secrets::OpenApiSecretString,
     util::response::{bad_request, not_found, to_internal_error, unauthorized},
     VContext,

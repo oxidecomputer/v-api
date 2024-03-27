@@ -9,14 +9,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use v_model::{
-    permissions::Caller, OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret,
+    permissions::{Caller, PermissionStorage}, OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret,
     OAuthRedirectUriId, OAuthSecretId,
 };
 
 use crate::{
     authn::key::RawApiKey,
     context::{ApiContext, VContextWithCaller},
-    permissions::{PermissionStorage, VAppPermission, VPermission},
+    permissions::{VAppPermission, VPermission},
     secrets::OpenApiSecretString,
     util::response::to_internal_error,
     VContext,

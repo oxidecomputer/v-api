@@ -18,7 +18,7 @@ use thiserror::Error;
 use tracing::{info_span, instrument, Instrument};
 use uuid::Uuid;
 use v_model::{
-    permissions::{Caller, Permission, Permissions},
+    permissions::{AsScope, Caller, Permission, PermissionError, PermissionStorage, Permissions},
     schema_ext::LoginAttemptState,
     storage::{
         AccessGroupFilter, AccessGroupStore, AccessTokenStore, ApiKeyFilter, ApiKeyStore,
@@ -50,7 +50,7 @@ use crate::{
     },
     error::{ApiError, AppError},
     mapper::{MapperRule, Mapping},
-    permissions::{ApiPermissionError, AsScope, PermissionStorage, VPermission},
+    permissions::VPermission,
     util::response::{
         bad_request, client_error, internal_error, resource_error, resource_restricted,
         ResourceError, ResourceResult, ToResourceResult, ToResourceResultOpt,
@@ -191,7 +191,7 @@ pub enum CallerError {
     #[error("Supplied API key is invalid")]
     InvalidKey,
     #[error("Invalid scope: {0}")]
-    Scope(#[from] ApiPermissionError),
+    Scope(#[from] PermissionError),
     #[error("Inner storage failure: {0}")]
     Storage(#[from] StoreError),
 }

@@ -20,13 +20,13 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::instrument;
 use v_model::{
-    permissions::Permission, AccessTokenId, ApiUser, ApiUserProvider, UserId, UserProviderId,
+    permissions::{Permission, AsScope, PermissionStorage}, AccessTokenId, ApiUser, ApiUserProvider, UserId, UserProviderId,
 };
 
 use crate::{
     config::AsymmetricKey,
     context::VContext,
-    permissions::{AsScope, PermissionStorage, VPermission},
+    permissions::VPermission,
 };
 
 use super::{Signer, SigningKeyError};

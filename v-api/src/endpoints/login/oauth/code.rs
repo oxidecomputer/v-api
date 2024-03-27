@@ -27,7 +27,7 @@ use tap::TapFallible;
 use tracing::instrument;
 use v_model::{
     schema_ext::LoginAttemptState, LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient,
-    OAuthClientId,
+    OAuthClientId, permissions::{AsScope, PermissionStorage}
 };
 
 use super::{OAuthProvider, OAuthProviderNameParam, UserInfoProvider};
@@ -39,7 +39,7 @@ use crate::{
         LoginError, UserInfo,
     },
     error::ApiError,
-    permissions::{AsScope, PermissionStorage, VAppPermission, VPermission},
+    permissions::{VAppPermission, VPermission},
     secrets::OpenApiSecretString,
     util::{
         request::RequestCookies,

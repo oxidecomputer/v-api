@@ -9,7 +9,7 @@ use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use v_model::{
-    permissions::{Permission, Permissions},
+    permissions::{Permission, Permissions, AsScope, PermissionStorage},
     storage::StoreError,
     AccessGroupId,
 };
@@ -17,7 +17,7 @@ use v_model::{
 use crate::{
     context::VContext,
     endpoints::login::UserInfo,
-    permissions::{AsScope, PermissionStorage, VPermission},
+    permissions::VPermission,
     util::response::ResourceResult,
 };
 

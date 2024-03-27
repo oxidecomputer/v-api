@@ -15,6 +15,7 @@ use diesel::{
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::UserId;
 
@@ -190,4 +191,35 @@ where
         let value = <serde_json::Value as FromSql<Jsonb, Pg>>::from_sql(bytes)?;
         Ok(serde_json::from_value(value)?)
     }
+}
+
+#[derive(Debug, Error)]
+pub enum PermissionError {
+    #[error("Scope is invalid: {0}")]
+    InvalidScope(String),
+}
+
+pub trait AsScope: Sized {
+    fn as_scope(&self) -> &str;
+    fn from_scope_arg(scope_arg: &str) -> Result<Permissions<Self>, PermissionError> {
+        Self::from_scope(scope_arg.split(' '))
+    }
+    fn from_scope<S>(
+        scope: impl Iterator<Item = S>,
+    ) -> Result<Permissions<Self>, PermissionError>
+    where
+        S: AsRef<str>;
+}
+
+pub trait PermissionStorage {
+    fn contract(collection: &Permissions<Self>) -> Permissions<Self>
+    where
+        Self: Sized;
+    fn expand(
+        collection: &Permissions<Self>,
+        actor: &TypedUuid<UserId>,
+        actor_permissions: Option<&Permissions<Self>>,
+    ) -> Permissions<Self>
+    where
+        Self: Sized;
 }

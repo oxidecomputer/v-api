@@ -10,7 +10,7 @@ use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tap::TapFallible;
 use v_model::{
-    permissions::{Permission, Permissions},
+    permissions::{Permission, Permissions, AsScope, PermissionStorage},
     storage::StoreError,
     AccessGroupId, Mapper, MapperId,
 };
@@ -18,7 +18,7 @@ use v_model::{
 use crate::{
     context::VContext,
     endpoints::login::UserInfo,
-    permissions::{AsScope, PermissionStorage, VPermission},
+    permissions::VPermission,
     util::response::ResourceResult,
 };
 

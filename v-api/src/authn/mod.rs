@@ -21,12 +21,13 @@ use sha2::{Digest, Sha256};
 use std::{fmt::Debug, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
+use v_model::permissions::PermissionStorage;
 
 use crate::{
     authn::key::RawApiKey,
     config::AsymmetricKey,
     context::ApiContext,
-    permissions::{PermissionStorage, VAppPermission},
+    permissions::VAppPermission,
     util::{cloud_kms_client, response::unauthorized},
 };
 

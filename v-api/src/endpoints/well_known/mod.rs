@@ -7,10 +7,11 @@ use jsonwebtoken::jwk::{AlgorithmParameters, JwkSet, PublicKeyUse};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
+use v_model::permissions::PermissionStorage;
 
 use crate::{
     context::ApiContext,
-    permissions::{PermissionStorage, VAppPermission},
+    permissions::VAppPermission,
 };
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]

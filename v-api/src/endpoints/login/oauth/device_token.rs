@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tap::TapFallible;
 use tracing::instrument;
+use v_model::permissions::PermissionStorage;
 
 use super::{
     ClientType, OAuthProvider, OAuthProviderInfo, OAuthProviderNameParam, UserInfoProvider,
@@ -22,7 +23,7 @@ use crate::{
     context::ApiContext,
     endpoints::login::LoginError,
     error::ApiError,
-    permissions::{PermissionStorage, VAppPermission},
+    permissions::VAppPermission,
     util::response::bad_request,
 };
 
