@@ -8,12 +8,14 @@ use newtype_uuid::TypedUuid;
 use serde::Deserialize;
 use thiserror::Error;
 use tracing::Instrument;
-use v_model::{permissions::{Permissions, PermissionStorage}, storage::StoreError, NewAccessGroup, NewMapper};
+use v_model::{
+    permissions::{PermissionStorage, Permissions},
+    storage::StoreError,
+    NewAccessGroup, NewMapper,
+};
 
 use crate::{
-    context::VContext,
-    mapper::MappingRules,
-    permissions::VAppPermission,
+    context::VContext, mapper::MappingRules, permissions::VAppPermission,
     util::response::ResourceError,
 };
 

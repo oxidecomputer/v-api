@@ -2,7 +2,10 @@ use heck::ToSnakeCase;
 use proc_macro::TokenStream;
 use proc_macro2::Literal;
 use quote::{format_ident, quote, quote_spanned};
-use std::{collections::HashMap, hash::{Hash, Hasher}};
+use std::{
+    collections::HashMap,
+    hash::{Hash, Hasher},
+};
 use syn::{
     parse::{Parse, ParseStream},
     parse_macro_input,
@@ -179,9 +182,10 @@ impl Parse for ExpandSettings {
                 .find(|s| s.name == "variant")
                 .expect("Expand must contain a \"variant\" setting")
                 .value,
-            value: settings.iter().find(|s| s.name == "value").map(|s| {
-                s.value.clone()
-            }),
+            value: settings
+                .iter()
+                .find(|s| s.name == "value")
+                .map(|s| s.value.clone()),
             source: settings.iter().find(|s| s.name == "source").map(|s| {
                 match s.value.to_string().as_str() {
                     "actor" => ExternalSource::Actor,
@@ -223,7 +227,7 @@ pub fn v_api(attr: TokenStream, input: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(input as DeriveInput);
     input = match inject_system_permission_variants(input) {
         Ok(input) => input,
-        Err(err) => return err.to_compile_error().into()
+        Err(err) => return err.to_compile_error().into(),
     };
     let input_span = input.span();
 
@@ -241,15 +245,12 @@ pub fn v_api(attr: TokenStream, input: TokenStream) -> TokenStream {
                             Ok(VariantSettings(settings)) => {
                                 for setting in settings {
                                     match setting {
-                                        VariantSetting::Contract(setting) => {
-                                            contract_settings.push((variant_clone.clone(), setting.clone()))
-                                        }
-                                        VariantSetting::Expand(setting) => {
-                                            expand_settings.push((variant_clone.clone(), setting.clone()))
-                                        }
-                                        VariantSetting::Scope(setting) => {
-                                            scope_settings.push((variant_clone.clone(), setting.clone()))
-                                        }
+                                        VariantSetting::Contract(setting) => contract_settings
+                                            .push((variant_clone.clone(), setting.clone())),
+                                        VariantSetting::Expand(setting) => expand_settings
+                                            .push((variant_clone.clone(), setting.clone())),
+                                        VariantSetting::Scope(setting) => scope_settings
+                                            .push((variant_clone.clone(), setting.clone())),
                                     }
                                 }
                             }
@@ -261,12 +262,14 @@ pub fn v_api(attr: TokenStream, input: TokenStream) -> TokenStream {
                 variant.attrs.retain(|attr| !attr.path.is_ident(MACRO_ID));
             }
             let as_scope_out = as_scope_trait_tokens(input.ident.clone(), scope_settings);
-            let permission_storage_out = permission_storage_trait_tokens(&input.ident, contract_settings, expand_settings);
+            let permission_storage_out =
+                permission_storage_trait_tokens(&input.ident, contract_settings, expand_settings);
 
             quote! {
                 #as_scope_out
                 #permission_storage_out
-            }.into()
+            }
+            .into()
         }
         _ => quote_spanned! {
                 input_span => compile_error!("v_api may only be applied to enums");
@@ -285,7 +288,8 @@ pub fn v_api(attr: TokenStream, input: TokenStream) -> TokenStream {
         #input
         #from
         #trait_impl_tokens
-    }.into()
+    }
+    .into()
 }
 
 struct LiteralKey {
@@ -316,7 +320,10 @@ impl Hash for LiteralKey {
     }
 }
 
-fn from_system_permission_tokens(source: &Ident, permission_type: &Ident) -> proc_macro2::TokenStream {
+fn from_system_permission_tokens(
+    source: &Ident,
+    permission_type: &Ident,
+) -> proc_macro2::TokenStream {
     if source != permission_type {
         quote! {
             impl From<#source> for #permission_type {
@@ -387,10 +394,8 @@ fn inject_system_permission_variants(mut input: DeriveInput) -> Result<DeriveInp
     let tokens = system_permission_tokens();
     let system_permissions: DeriveInput = syn::parse(tokens).unwrap();
     let system_variants = match system_permissions.data {
-        Data::Enum(data_enum) => {
-            data_enum.variants
-        }
-        _ => unreachable!("System permissions are always an enum")
+        Data::Enum(data_enum) => data_enum.variants,
+        _ => unreachable!("System permissions are always an enum"),
     };
 
     match input.data {
@@ -609,7 +614,8 @@ fn system_permission_tokens() -> TokenStream {
             #[serde(other)]
             Removed,
         }
-    }.into()
+    }
+    .into()
 }
 
 fn as_scope_trait_tokens(
@@ -617,22 +623,20 @@ fn as_scope_trait_tokens(
     scope_settings: Vec<(Variant, ScopeSettings)>,
 ) -> proc_macro2::TokenStream {
     let as_scope_mapping = scope_settings.iter().filter_map(|(variant, settings)| {
-        settings
-            .to
-            .as_ref()
-            .map(|to| {
-                let fields = if variant.fields.len() > 0 {
-                    let mut fields = quote! {};
-                    variant.fields.iter().for_each(|_| {
-                        fields = quote! { _, #fields }
-                    });
-                    quote! { (#fields) }
-                } else {
-                    quote! { }
-                };
-                let variant_ident = variant.ident.clone();
-                quote! { #permission_type::#variant_ident #fields => Some(#to) }
-            })
+        settings.to.as_ref().map(|to| {
+            let fields = if variant.fields.len() > 0 {
+                let mut fields = quote! {};
+                variant
+                    .fields
+                    .iter()
+                    .for_each(|_| fields = quote! { _, #fields });
+                quote! { (#fields) }
+            } else {
+                quote! {}
+            };
+            let variant_ident = variant.ident.clone();
+            quote! { #permission_type::#variant_ident #fields => Some(#to) }
+        })
     });
     let from_scope_mapping = scope_settings
         .iter()
@@ -730,13 +734,17 @@ fn permission_storage_contract_tokens(
 
         let fields = if variant.fields.len() > 0 {
             let mut fields = quote! {};
-            variant.fields.iter().enumerate().for_each(|(index, field)| {
-                let field_ident = field.ident.as_ref().unwrap_or(&stock_field_names[index]);
-                fields = quote! { #field_ident, #fields }
-            });
+            variant
+                .fields
+                .iter()
+                .enumerate()
+                .for_each(|(index, field)| {
+                    let field_ident = field.ident.as_ref().unwrap_or(&stock_field_names[index]);
+                    fields = quote! { #field_ident, #fields }
+                });
             fields
         } else {
-            quote! { }
+            quote! {}
         };
 
         branches.push(match setting.kind {

@@ -10,14 +10,11 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tracing::instrument;
 use v_model::{
-    permissions::{Permission, Permissions, PermissionStorage},
+    permissions::{Permission, PermissionStorage, Permissions},
     AccessGroup, AccessGroupId, NewAccessGroup,
 };
 
-use crate::{
-    context::ApiContext,
-    permissions::VAppPermission,
-};
+use crate::{context::ApiContext, permissions::VAppPermission};
 
 fn into_group_response<T, U>(group: AccessGroup<T>) -> AccessGroup<U>
 where

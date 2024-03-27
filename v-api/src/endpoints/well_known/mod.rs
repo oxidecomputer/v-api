@@ -9,10 +9,7 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use v_model::permissions::PermissionStorage;
 
-use crate::{
-    context::ApiContext,
-    permissions::VAppPermission,
-};
+use crate::{context::ApiContext, permissions::VAppPermission};
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct OpenIdConfiguration {

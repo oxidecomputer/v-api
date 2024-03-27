@@ -9,8 +9,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use v_model::{
-    permissions::{Caller, PermissionStorage}, OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret,
-    OAuthRedirectUriId, OAuthSecretId,
+    permissions::{Caller, PermissionStorage},
+    OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId,
+    OAuthSecretId,
 };
 
 use crate::{

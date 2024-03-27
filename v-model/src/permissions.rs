@@ -206,12 +206,11 @@ pub trait AsScope: Sized {
     fn from_scope_arg(scope_arg: &str) -> Permissions<Self> {
         Self::from_scope(scope_arg.split(' '))
     }
-    fn from_scope<T, S>(
-        _scope: T,
-    ) -> Permissions<Self>
+    fn from_scope<T, S>(_scope: T) -> Permissions<Self>
     where
         T: Iterator<Item = S> + Clone,
-        S: AsRef<str> {
+        S: AsRef<str>,
+    {
         Permissions::default()
     }
 }
@@ -221,9 +220,7 @@ pub trait AsScopeInternal: Sized + AsScope {
     fn from_scope_arg(scope_arg: &str) -> Permissions<Self> {
         <Self as AsScopeInternal>::from_scope(scope_arg.split(' '))
     }
-    fn from_scope<T, S>(
-        scope: T,
-    ) -> Permissions<Self>
+    fn from_scope<T, S>(scope: T) -> Permissions<Self>
     where
         T: Iterator<Item = S> + Clone,
         S: AsRef<str>;
@@ -232,7 +229,8 @@ pub trait AsScopeInternal: Sized + AsScope {
 pub trait PermissionStorage {
     fn contract(_collection: &Permissions<Self>) -> Permissions<Self>
     where
-        Self: Sized {
+        Self: Sized,
+    {
         Permissions::default()
     }
     fn expand(
@@ -241,7 +239,8 @@ pub trait PermissionStorage {
         _actor_permissions: Option<&Permissions<Self>>,
     ) -> Permissions<Self>
     where
-        Self: Sized {
+        Self: Sized,
+    {
         Permissions::default()
     }
 }

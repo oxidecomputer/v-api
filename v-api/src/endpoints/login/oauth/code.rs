@@ -26,8 +26,8 @@ use std::{fmt::Debug, ops::Add};
 use tap::TapFallible;
 use tracing::instrument;
 use v_model::{
-    schema_ext::LoginAttemptState, LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient,
-    OAuthClientId, permissions::PermissionStorage
+    permissions::PermissionStorage, schema_ext::LoginAttemptState, LoginAttempt, LoginAttemptId,
+    NewLoginAttempt, OAuthClient, OAuthClientId,
 };
 
 use super::{OAuthProvider, OAuthProviderNameParam, UserInfoProvider};

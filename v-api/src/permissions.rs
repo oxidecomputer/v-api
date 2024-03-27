@@ -3,15 +3,23 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use partial_struct::partial;
-use v_api_permission_derive::v_api;
 use schemars::JsonSchema;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use v_model::permissions::{AsScopeInternal, Permission, PermissionStorage, PermissionStorageInternal, Permissions};
+use v_api_permission_derive::v_api;
 use v_model::permissions::AsScope;
+use v_model::permissions::{
+    AsScopeInternal, Permission, PermissionStorage, PermissionStorageInternal, Permissions,
+};
 
-pub trait VAppPermission: Permission + From<VPermission> + AsScopeInternal + PermissionStorageInternal {}
-impl<T> VAppPermission for T where T: Permission + From<VPermission> + AsScopeInternal + PermissionStorageInternal {}
+pub trait VAppPermission:
+    Permission + From<VPermission> + AsScopeInternal + PermissionStorageInternal
+{
+}
+impl<T> VAppPermission for T where
+    T: Permission + From<VPermission> + AsScopeInternal + PermissionStorageInternal
+{
+}
 
 pub trait VAppPermissionResponse: Permission {}
 impl<T> VAppPermissionResponse for T where T: Permission {}

@@ -7,16 +7,10 @@ use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use v_model::{
-    permissions::Permissions,
-    storage::StoreError,
-    AccessGroupId,
-};
+use v_model::{permissions::Permissions, storage::StoreError, AccessGroupId};
 
 use crate::{
-    context::VContext,
-    endpoints::login::UserInfo,
-    permissions::VAppPermission,
+    context::VContext, endpoints::login::UserInfo, permissions::VAppPermission,
     util::response::ResourceResult,
 };
 

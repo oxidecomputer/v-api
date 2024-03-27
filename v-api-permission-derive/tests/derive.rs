@@ -2,7 +2,10 @@ use std::collections::BTreeSet;
 use uuid::Uuid;
 use v_api::permissions::VPermission;
 use v_api_permission_derive::v_api;
-use v_model::{permissions::{AsScope, PermissionStorage}, Permissions};
+use v_model::{
+    permissions::{AsScope, PermissionStorage},
+    Permissions,
+};
 
 #[test]
 fn test_derive() {
@@ -11,7 +14,16 @@ fn test_derive() {
     // }
     #[v_api(From(VPermission))]
     #[derive(
-        Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema, PartialOrd, Ord,
+        Debug,
+        Clone,
+        PartialEq,
+        Eq,
+        Hash,
+        serde::Serialize,
+        serde::Deserialize,
+        schemars::JsonSchema,
+        PartialOrd,
+        Ord,
     )]
     enum AppPermissions {
         #[v_api(contract(kind = append, variant = CreateItems))]

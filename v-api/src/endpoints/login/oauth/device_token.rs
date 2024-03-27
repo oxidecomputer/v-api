@@ -20,11 +20,8 @@ use super::{
     ClientType, OAuthProvider, OAuthProviderInfo, OAuthProviderNameParam, UserInfoProvider,
 };
 use crate::{
-    context::ApiContext,
-    endpoints::login::LoginError,
-    error::ApiError,
-    permissions::VAppPermission,
-    util::response::bad_request,
+    context::ApiContext, endpoints::login::LoginError, error::ApiError,
+    permissions::VAppPermission, util::response::bad_request,
 };
 
 #[instrument(skip(rqctx), err(Debug))]

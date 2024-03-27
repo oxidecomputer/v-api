@@ -9,16 +9,10 @@ use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tap::TapFallible;
-use v_model::{
-    permissions::Permissions,
-    storage::StoreError,
-    AccessGroupId, Mapper, MapperId,
-};
+use v_model::{permissions::Permissions, storage::StoreError, AccessGroupId, Mapper, MapperId};
 
 use crate::{
-    context::VContext,
-    endpoints::login::UserInfo,
-    permissions::VAppPermission,
+    context::VContext, endpoints::login::UserInfo, permissions::VAppPermission,
     util::response::ResourceResult,
 };
 

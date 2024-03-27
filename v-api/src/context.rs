@@ -18,7 +18,10 @@ use thiserror::Error;
 use tracing::{info_span, instrument, Instrument};
 use uuid::Uuid;
 use v_model::{
-    permissions::{AsScopeInternal, Caller, Permission, PermissionError, PermissionStorageInternal, Permissions},
+    permissions::{
+        AsScopeInternal, Caller, Permission, PermissionError, PermissionStorageInternal,
+        Permissions,
+    },
     schema_ext::LoginAttemptState,
     storage::{
         AccessGroupFilter, AccessGroupStore, AccessTokenStore, ApiKeyFilter, ApiKeyStore,
@@ -350,8 +353,11 @@ where
                         let combined_permissions = match &base_permissions {
                             BasePermissions::Full => user_permissions.clone(),
                             BasePermissions::Restricted(permissions) => {
-                                let token_permissions =
-                                    <T as PermissionStorageInternal>::expand(permissions, &user.id, Some(&user_permissions));
+                                let token_permissions = <T as PermissionStorageInternal>::expand(
+                                    permissions,
+                                    &user.id,
+                                    Some(&user_permissions),
+                                );
                                 token_permissions.intersect(&user_permissions)
                             }
                         };
@@ -810,7 +816,11 @@ where
                 .await
                 .map(|opt| {
                     opt.map(|mut user| {
-                        user.permissions = <T as PermissionStorageInternal>::expand(&user.permissions, &user.id, None);
+                        user.permissions = <T as PermissionStorageInternal>::expand(
+                            &user.permissions,
+                            &user.id,
+                            None,
+                        );
                         user
                     })
                 })
@@ -853,7 +863,8 @@ where
                 permissions: permissions,
                 groups: groups,
             };
-            new_user.permissions = <T as PermissionStorageInternal>::contract(&new_user.permissions);
+            new_user.permissions =
+                <T as PermissionStorageInternal>::contract(&new_user.permissions);
             ApiUserStore::upsert(&*self.storage, new_user)
                 .await
                 .to_resource_result()
@@ -872,7 +883,8 @@ where
             &VPermission::ManageApiUser(api_user.id).into(),
             &VPermission::ManageApiUsersAll.into(),
         ]) {
-            api_user.permissions = <T as PermissionStorageInternal>::contract(&api_user.permissions);
+            api_user.permissions =
+                <T as PermissionStorageInternal>::contract(&api_user.permissions);
             ApiUserStore::upsert(&*self.storage, api_user)
                 .await
                 .to_resource_result()

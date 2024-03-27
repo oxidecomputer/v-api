@@ -8,16 +8,10 @@ use async_trait::async_trait;
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use v_model::{
-    permissions::Permissions,
-    storage::StoreError,
-    AccessGroupId,
-};
+use v_model::{permissions::Permissions, storage::StoreError, AccessGroupId};
 
 use crate::{
-    context::VContext,
-    endpoints::login::UserInfo,
-    permissions::VAppPermission,
+    context::VContext, endpoints::login::UserInfo, permissions::VAppPermission,
     util::response::ResourceResult,
 };
 
@@ -34,7 +28,7 @@ pub struct EmailAddressMapper<T> {
 #[async_trait]
 impl<T> MapperRule<T> for EmailAddressMapper<T>
 where
-    T: VAppPermission
+    T: VAppPermission,
 {
     async fn permissions_for(
         &self,

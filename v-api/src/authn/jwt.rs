@@ -19,15 +19,9 @@ use rsa::traits::PublicKeyParts;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::instrument;
-use v_model::{
-    AccessTokenId, ApiUser, ApiUserProvider, UserId, UserProviderId,
-};
+use v_model::{AccessTokenId, ApiUser, ApiUserProvider, UserId, UserProviderId};
 
-use crate::{
-    config::AsymmetricKey,
-    context::VContext,
-    permissions::VAppPermission,
-};
+use crate::{config::AsymmetricKey, context::VContext, permissions::VAppPermission};
 
 use super::{Signer, SigningKeyError};
 

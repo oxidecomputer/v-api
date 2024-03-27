@@ -7,13 +7,9 @@ use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
-use v_model::{UserId, UserProviderId, permissions::PermissionStorage};
+use v_model::{permissions::PermissionStorage, UserId, UserProviderId};
 
-use crate::{
-    context::ApiContext,
-    permissions::VAppPermission,
-    secrets::OpenApiSecretString,
-};
+use crate::{context::ApiContext, permissions::VAppPermission, secrets::OpenApiSecretString};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ApiUserProviderPath {

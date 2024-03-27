@@ -17,7 +17,7 @@ use tap::TapFallible;
 use tracing::instrument;
 use uuid::Uuid;
 use v_model::{
-    permissions::{Caller, Permission, Permissions, PermissionStorage},
+    permissions::{Caller, Permission, PermissionStorage, Permissions},
     storage::{ApiUserProviderFilter, ListPagination},
     AccessGroupId, ApiKeyId, ApiUser, ApiUserProvider, NewApiKey, NewApiUser, UserId,
 };

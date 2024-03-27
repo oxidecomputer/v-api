@@ -7,7 +7,10 @@ use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
-use v_model::{permissions::{Permission, AsScope, PermissionStorage}, Mapper, MapperId, NewMapper};
+use v_model::{
+    permissions::{AsScope, Permission, PermissionStorage},
+    Mapper, MapperId, NewMapper,
+};
 
 use crate::{
     context::ApiContext,
