@@ -412,13 +412,13 @@ fn system_permission_tokens() -> TokenStream {
                 contract(kind = append, variant = GetApiUsers),
                 scope(to = "user:info:r")
             )]
-            GetApiUser(TypedUuid<UserId>),
+            GetApiUser(newtype_uuid::TypedUuid<v_model::UserId>),
             #[v_api(
                 contract(kind = extend, variant = GetApiUsers),
                 expand(kind = iter, variant = GetApiUser),
                 scope(to = "user:info:r")
             )]
-            GetApiUsers(BTreeSet<TypedUuid<UserId>>),
+            GetApiUsers(BTreeSet<newtype_uuid::TypedUuid<v_model::UserId>>),
             #[v_api(
                 expand(kind = replace, variant = GetApiUser, value = actor)
                 scope(to = "user:info:r", from = "user:info:r")
@@ -437,13 +437,13 @@ fn system_permission_tokens() -> TokenStream {
                 contract(kind = append, variant = ManageApiUsers),
                 scope(to = "user:info:w")
             )]
-            ManageApiUser(TypedUuid<UserId>),
+            ManageApiUser(newtype_uuid::TypedUuid<v_model::UserId>),
             #[v_api(
                 contract(kind = extend, variant = ManageApiUsers),
                 expand(kind = iter, variant = ManageApiUser),
                 scope(to = "user:info:w")
             )]
-            ManageApiUsers(BTreeSet<TypedUuid<UserId>>),
+            ManageApiUsers(BTreeSet<newtype_uuid::TypedUuid<v_model::UserId>>),
             #[v_api(
                 expand(kind = alias, variant = ManageApiUser, source = actor),
                 scope(to = "user:info:w", from = "user:info:w")
@@ -452,7 +452,7 @@ fn system_permission_tokens() -> TokenStream {
             #[v_api(scope(to = "user:info:w", from = "user:info:w"))]
             ManageApiUsersAll,
             #[v_api(scope(to = "user:token:w"))]
-            CreateApiKey(TypedUuid<UserId>),
+            CreateApiKey(newtype_uuid::TypedUuid<v_model::UserId>),
             #[v_api(
                 scope(to = "user:token:w", from = "user:token:w")
             )]
@@ -465,13 +465,13 @@ fn system_permission_tokens() -> TokenStream {
                 contract(kind = append, variant = GetApiKeys),
                 scope(to = "user:token:r")
             )]
-            GetApiKey(TypedUuid<ApiKeyId>),
+            GetApiKey(newtype_uuid::TypedUuid<v_model::ApiKeyId>),
             #[v_api(
                 contract(kind = extend, variant = GetApiKeys),
                 expand(kind = iter, variant = GetApiKey),
                 scope(to = "user:token:r")
             )]
-            GetApiKeys(BTreeSet<TypedUuid<ApiKeyId>>),
+            GetApiKeys(BTreeSet<newtype_uuid::TypedUuid<v_model::ApiKeyId>>),
             #[v_api(
                 expand(kind = alias, variant = GetApiKey, source = actor),
                 scope(to = "user:token:r", from = "user:token:r")
@@ -483,13 +483,13 @@ fn system_permission_tokens() -> TokenStream {
                 contract(kind = append, variant = ManageApiKeys),
                 scope(to = "user:token:w")
             )]
-            ManageApiKey(TypedUuid<ApiKeyId>),
+            ManageApiKey(newtype_uuid::TypedUuid<v_model::ApiKeyId>),
             #[v_api(
                 contract(kind = extend, variant = ManageApiKeys),
                 expand(kind = iter, variant = ManageApiKey),
                 scope(to = "user:token:w")
             )]
-            ManageApiKeys(BTreeSet<TypedUuid<ApiKeyId>>),
+            ManageApiKeys(BTreeSet<newtype_uuid::TypedUuid<v_model::ApiKeyId>>),
             #[v_api(
                 expand(kind = alias, variant = ManageApiKey, source = actor),
                 scope(to = "user:token:w", from = "user:token:w")
@@ -509,13 +509,13 @@ fn system_permission_tokens() -> TokenStream {
                 contract(kind = append, variant = ManageGroups),
                 scope(to = "group:info:w")
             )]
-            ManageGroup(TypedUuid<AccessGroupId>),
+            ManageGroup(newtype_uuid::TypedUuid<v_model::AccessGroupId>),
             #[v_api(
                 contract(kind = extend, variant = ManageGroups),
                 expand(kind = iter, variant = ManageGroup),
                 scope(to = "group:info:w")
             )]
-            ManageGroups(BTreeSet<TypedUuid<AccessGroupId>>),
+            ManageGroups(BTreeSet<newtype_uuid::TypedUuid<v_model::AccessGroupId>>),
             #[v_api(
                 expand(kind = alias, variant = ManageGroup, source = actor),
                 scope(to = "group:info:w", from = "group:info:w")
@@ -527,13 +527,13 @@ fn system_permission_tokens() -> TokenStream {
                 contract(kind = append, variant = ManageGroupMemberships)
                 scope(to = "group:membership:w")
             )]
-            ManageGroupMembership(TypedUuid<AccessGroupId>),
+            ManageGroupMembership(newtype_uuid::TypedUuid<v_model::AccessGroupId>),
             #[v_api(
                 contract(kind = extend, variant = ManageGroupMemberships)
                 expand(kind = iter, variant = ManageGroupMembership)
                 scope(to = "group:membership:w")
             )]
-            ManageGroupMemberships(BTreeSet<TypedUuid<AccessGroupId>>),
+            ManageGroupMemberships(BTreeSet<newtype_uuid::TypedUuid<v_model::AccessGroupId>>),
             #[v_api(
                 expand(kind = alias, variant = ManageGroupMembership, source = actor),
                 scope(to = "group:membership:w", from = "group:membership:w")
@@ -550,13 +550,13 @@ fn system_permission_tokens() -> TokenStream {
                 contract(kind = append, variant = ManageMappers),
                 scope(to = "mapper:w")
             )]
-            ManageMapper(TypedUuid<MapperId>),
+            ManageMapper(newtype_uuid::TypedUuid<v_model::MapperId>),
             #[v_api(
                 contract(kind = extend, variant = ManageMappers),
                 expand(kind = iter, variant = ManageMapper)
                 scope(to = "mapper:w")
             )]
-            ManageMappers(BTreeSet<TypedUuid<MapperId>>),
+            ManageMappers(BTreeSet<newtype_uuid::TypedUuid<v_model::MapperId>>),
             #[v_api(
                 expand(kind = alias, variant = ManageMapper, source = actor)
                 scope(to = "mapper:w", from = "mapper:w")
@@ -571,13 +571,13 @@ fn system_permission_tokens() -> TokenStream {
                 contract(kind = append, variant = GetOAuthClients),
                 scope(to = "oauth:client:r")
             )]
-            GetOAuthClient(TypedUuid<OAuthClientId>),
+            GetOAuthClient(newtype_uuid::TypedUuid<v_model::OAuthClientId>),
             #[v_api(
                 contract(kind = extend, variant = GetOAuthClients),
                 expand(kind = iter, variant = GetOAuthClient),
                 scope(to = "oauth:client:r")
             )]
-            GetOAuthClients(BTreeSet<TypedUuid<OAuthClientId>>),
+            GetOAuthClients(BTreeSet<newtype_uuid::TypedUuid<v_model::OAuthClientId>>),
             #[v_api(
                 expand(kind = alias, variant = GetOAuthClient, source = actor),
                 scope(to = "oauth:client:r", from = "oauth:client:r")
@@ -589,13 +589,13 @@ fn system_permission_tokens() -> TokenStream {
                 contract(kind = append, variant = ManageOAuthClients),
                 scope(to = "oauth:client:w")
             )]
-            ManageOAuthClient(TypedUuid<OAuthClientId>),
+            ManageOAuthClient(newtype_uuid::TypedUuid<v_model::OAuthClientId>),
             #[v_api(
                 contract(kind = extend, variant = ManageOAuthClients),
                 expand(kind = iter, variant = ManageOAuthClient),
                 scope(to = "oauth:client:w")
             )]
-            ManageOAuthClients(BTreeSet<TypedUuid<OAuthClientId>>),
+            ManageOAuthClients(BTreeSet<newtype_uuid::TypedUuid<v_model::OAuthClientId>>),
             #[v_api(
                 expand(kind = alias, variant = ManageOAuthClient, source = actor),
                 scope(to = "oauth:client:w", from = "oauth:client:w")
@@ -844,7 +844,7 @@ fn permission_storage_expand_tokens(
     quote! {
         fn expand(
             collection: &Permissions<Self>,
-            actor: &TypedUuid<UserId>,
+            actor: &newtype_uuid::TypedUuid<v_model::UserId>,
             actor_permissions: Option<&Permissions<Self>>,
         ) -> Permissions<Self> {
             let mut expanded = Vec::new();
