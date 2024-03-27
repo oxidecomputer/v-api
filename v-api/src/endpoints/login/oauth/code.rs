@@ -27,7 +27,7 @@ use tap::TapFallible;
 use tracing::instrument;
 use v_model::{
     schema_ext::LoginAttemptState, LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient,
-    OAuthClientId, permissions::{AsScope, PermissionStorage}
+    OAuthClientId, permissions::PermissionStorage
 };
 
 use super::{OAuthProvider, OAuthProviderNameParam, UserInfoProvider};
@@ -39,7 +39,7 @@ use crate::{
         LoginError, UserInfo,
     },
     error::ApiError,
-    permissions::{VAppPermission, VPermission},
+    permissions::VAppPermission,
     secrets::OpenApiSecretString,
     util::{
         request::RequestCookies,
@@ -182,9 +182,6 @@ where
 
     // Check that the passed in scopes are valid. The scopes are not currently restricted by client
     let scope = query.scope.unwrap_or_else(|| DEFAULT_SCOPE.to_string());
-    let scope_error = VPermission::from_scope_arg(&scope)
-        .err()
-        .map(|_| "invalid_scope".to_string());
 
     // Construct a new login attempt with the minimum required values
     let mut attempt = NewLoginAttempt::new(
@@ -202,8 +199,7 @@ where
     // TODO: Make this configurable
     attempt.expires_at = Some(Utc::now().add(TimeDelta::try_minutes(5).unwrap()));
 
-    // Assign any scope errors that arose
-    attempt.error = scope_error;
+    // TODO: Assign any scope errors that arose. Currently we drop any unknown or unsupported scopes
 
     // Add in the user defined state and redirect uri
     attempt.state = Some(query.state);

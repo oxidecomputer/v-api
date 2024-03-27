@@ -20,13 +20,13 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::instrument;
 use v_model::{
-    permissions::{Permission, AsScope, PermissionStorage}, AccessTokenId, ApiUser, ApiUserProvider, UserId, UserProviderId,
+    AccessTokenId, ApiUser, ApiUserProvider, UserId, UserProviderId,
 };
 
 use crate::{
     config::AsymmetricKey,
     context::VContext,
-    permissions::VPermission,
+    permissions::VAppPermission,
 };
 
 use super::{Signer, SigningKeyError};
@@ -73,7 +73,7 @@ impl Claims {
         expires_at: DateTime<Utc>,
     ) -> Self
     where
-        T: Permission + From<VPermission> + AsScope + PermissionStorage,
+        T: VAppPermission,
     {
         Claims {
             iss: ctx.public_url().to_string(),
@@ -91,7 +91,7 @@ impl Claims {
 impl Jwt {
     pub async fn new<T>(ctx: &VContext<T>, token: &str) -> Result<Self, JwtError>
     where
-        T: Permission + From<VPermission> + AsScope + PermissionStorage,
+        T: VAppPermission,
     {
         tracing::trace!("Decode JWT from headers");
 

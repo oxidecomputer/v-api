@@ -18,7 +18,7 @@ use thiserror::Error;
 use tracing::{info_span, instrument, Instrument};
 use uuid::Uuid;
 use v_model::{
-    permissions::{AsScope, Caller, Permission, PermissionError, PermissionStorage, Permissions},
+    permissions::{AsScopeInternal, Caller, Permission, PermissionError, PermissionStorageInternal, Permissions},
     schema_ext::LoginAttemptState,
     storage::{
         AccessGroupFilter, AccessGroupStore, AccessTokenStore, ApiKeyFilter, ApiKeyStore,
@@ -50,7 +50,7 @@ use crate::{
     },
     error::{ApiError, AppError},
     mapper::{MapperRule, Mapping},
-    permissions::VPermission,
+    permissions::{VAppPermission, VPermission},
     util::response::{
         bad_request, client_error, internal_error, resource_error, resource_restricted,
         ResourceError, ResourceResult, ToResourceResult, ToResourceResultOpt,
@@ -107,13 +107,13 @@ pub struct VContext<T> {
 }
 
 pub trait ApiContext: ServerContext {
-    type AppPermissions: Permission + From<VPermission> + AsScope;
+    type AppPermissions: VAppPermission;
     fn v_ctx(&self) -> &VContext<Self::AppPermissions>;
 }
 
 impl<T> ApiContext for VContext<T>
 where
-    T: Permission + From<VPermission> + AsScope,
+    T: VAppPermission,
 {
     type AppPermissions = T;
     fn v_ctx(&self) -> &VContext<T> {
@@ -157,7 +157,7 @@ impl From<VContextCallerError> for HttpError {
 
 impl<T, U> VContextWithCaller<T> for RequestContext<U>
 where
-    T: Permission + From<VPermission> + AsScope + PermissionStorage,
+    T: VAppPermission,
     U: ApiContext<AppPermissions = T>,
 {
     async fn as_ctx(&self) -> Result<(&VContext<T>, Caller<T>), VContextCallerError> {
@@ -229,7 +229,7 @@ enum BasePermissions<T: Permission> {
 
 impl<T> VContext<T>
 where
-    T: Permission + From<VPermission> + AsScope + PermissionStorage,
+    T: VAppPermission,
 {
     pub async fn new(
         public_url: String,
@@ -351,7 +351,7 @@ where
                             BasePermissions::Full => user_permissions.clone(),
                             BasePermissions::Restricted(permissions) => {
                                 let token_permissions =
-                                    T::expand(permissions, &user.id, Some(&user_permissions));
+                                    <T as PermissionStorageInternal>::expand(permissions, &user.id, Some(&user_permissions));
                                 token_permissions.intersect(&user_permissions)
                             }
                         };
@@ -470,7 +470,7 @@ where
             AuthToken::Jwt(jwt) => {
                 // AuthnToken::Jwt can only be generated from a verified JWT
                 let permissions = match &jwt.claims.scp {
-                    Some(scp) => BasePermissions::Restricted(T::from_scope(scp.iter())?),
+                    Some(scp) => BasePermissions::Restricted(<T as AsScopeInternal>::from_scope(scp.iter())),
                     None => BasePermissions::Full,
                 };
                 Ok((jwt.claims.sub, permissions))
@@ -508,7 +508,7 @@ where
         let permissions = groups
             .into_iter()
             .fold(Permissions::new(), |mut aggregate, group| {
-                let mut expanded = T::expand(&group.permissions, &user.id, Some(&user.permissions));
+                let mut expanded = <T as PermissionStorageInternal>::expand(&group.permissions, &user.id, Some(&user.permissions));
 
                 tracing::trace!(group_id = ?group.id, group_name = ?group.name, permissions = ?expanded, "Transformed group into permission set");
                 aggregate.append(&mut expanded);
@@ -810,7 +810,7 @@ where
                 .await
                 .map(|opt| {
                     opt.map(|mut user| {
-                        user.permissions = T::expand(&user.permissions, &user.id, None);
+                        user.permissions = <T as PermissionStorageInternal>::expand(&user.permissions, &user.id, None);
                         user
                     })
                 })
@@ -853,7 +853,7 @@ where
                 permissions: permissions,
                 groups: groups,
             };
-            new_user.permissions = T::contract(&new_user.permissions);
+            new_user.permissions = <T as PermissionStorageInternal>::contract(&new_user.permissions);
             ApiUserStore::upsert(&*self.storage, new_user)
                 .await
                 .to_resource_result()
@@ -872,7 +872,7 @@ where
             &VPermission::ManageApiUser(api_user.id).into(),
             &VPermission::ManageApiUsersAll.into(),
         ]) {
-            api_user.permissions = T::contract(&api_user.permissions);
+            api_user.permissions = <T as PermissionStorageInternal>::contract(&api_user.permissions);
             ApiUserStore::upsert(&*self.storage, api_user)
                 .await
                 .to_resource_result()

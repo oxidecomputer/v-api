@@ -200,18 +200,53 @@ pub enum PermissionError {
 }
 
 pub trait AsScope: Sized {
-    fn as_scope(&self) -> &str;
-    fn from_scope_arg(scope_arg: &str) -> Result<Permissions<Self>, PermissionError> {
+    fn as_scope(&self) -> Option<&str> {
+        None
+    }
+    fn from_scope_arg(scope_arg: &str) -> Permissions<Self> {
         Self::from_scope(scope_arg.split(' '))
     }
-    fn from_scope<S>(
-        scope: impl Iterator<Item = S>,
-    ) -> Result<Permissions<Self>, PermissionError>
+    fn from_scope<T, S>(
+        _scope: T,
+    ) -> Permissions<Self>
     where
+        T: Iterator<Item = S> + Clone,
+        S: AsRef<str> {
+        Permissions::default()
+    }
+}
+
+pub trait AsScopeInternal: Sized + AsScope {
+    fn as_scope(&self) -> Option<&str>;
+    fn from_scope_arg(scope_arg: &str) -> Permissions<Self> {
+        <Self as AsScopeInternal>::from_scope(scope_arg.split(' '))
+    }
+    fn from_scope<T, S>(
+        scope: T,
+    ) -> Permissions<Self>
+    where
+        T: Iterator<Item = S> + Clone,
         S: AsRef<str>;
 }
 
 pub trait PermissionStorage {
+    fn contract(_collection: &Permissions<Self>) -> Permissions<Self>
+    where
+        Self: Sized {
+        Permissions::default()
+    }
+    fn expand(
+        _collection: &Permissions<Self>,
+        _actor: &TypedUuid<UserId>,
+        _actor_permissions: Option<&Permissions<Self>>,
+    ) -> Permissions<Self>
+    where
+        Self: Sized {
+        Permissions::default()
+    }
+}
+
+pub trait PermissionStorageInternal: PermissionStorage {
     fn contract(collection: &Permissions<Self>) -> Permissions<Self>
     where
         Self: Sized;

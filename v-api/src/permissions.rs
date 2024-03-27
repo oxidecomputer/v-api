@@ -2,17 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use newtype_uuid::TypedUuid;
 use partial_struct::partial;
 use v_api_permission_derive::v_api;
 use schemars::JsonSchema;
 use serde::{Serialize, Deserialize};
 use std::collections::BTreeSet;
-use v_model::permissions::{Permission, Permissions};
-use v_model::{AccessGroupId, ApiKeyId, MapperId, OAuthClientId, UserId, permissions::AsScope};
+use v_model::permissions::{AsScopeInternal, Permission, PermissionStorage, PermissionStorageInternal, Permissions};
+use v_model::permissions::AsScope;
 
-pub trait VAppPermission: Permission + From<VPermission> + AsScope {}
-impl<T> VAppPermission for T where T: Permission + From<VPermission> + AsScope {}
+pub trait VAppPermission: Permission + From<VPermission> + AsScopeInternal + PermissionStorageInternal {}
+impl<T> VAppPermission for T where T: Permission + From<VPermission> + AsScopeInternal + PermissionStorageInternal {}
 
 pub trait VAppPermissionResponse: Permission {}
 impl<T> VAppPermissionResponse for T where T: Permission {}
@@ -26,3 +25,6 @@ impl<T> VAppPermissionResponse for T where T: Permission {}
     Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, PartialOrd, Ord,
 )]
 pub enum VPermission {}
+
+impl AsScope for VPermission {}
+impl PermissionStorage for VPermission {}

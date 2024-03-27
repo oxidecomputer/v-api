@@ -10,7 +10,7 @@ use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tap::TapFallible;
 use v_model::{
-    permissions::{Permission, Permissions, AsScope, PermissionStorage},
+    permissions::Permissions,
     storage::StoreError,
     AccessGroupId, Mapper, MapperId,
 };
@@ -18,7 +18,7 @@ use v_model::{
 use crate::{
     context::VContext,
     endpoints::login::UserInfo,
-    permissions::VPermission,
+    permissions::VAppPermission,
     util::response::ResourceResult,
 };
 
@@ -35,7 +35,7 @@ pub mod github_username;
 #[async_trait]
 pub trait MapperRule<T>: Send + Sync
 where
-    T: Permission + From<VPermission> + AsScope + PermissionStorage,
+    T: VAppPermission,
 {
     async fn permissions_for(
         &self,
@@ -91,7 +91,7 @@ pub enum MappingRules<T> {
 #[async_trait]
 impl<T> MapperRule<T> for MappingRules<T>
 where
-    T: Permission + From<VPermission> + AsScope + PermissionStorage,
+    T: VAppPermission,
 {
     async fn permissions_for(
         &self,

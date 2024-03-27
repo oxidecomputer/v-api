@@ -12,7 +12,7 @@ use v_model::{permissions::{Permission, AsScope, PermissionStorage}, Mapper, Map
 use crate::{
     context::ApiContext,
     mapper::MappingRules,
-    permissions::VPermission,
+    permissions::{VAppPermission, VPermission},
     util::{
         is_uniqueness_error,
         response::{conflict, ResourceError},
@@ -58,7 +58,7 @@ pub async fn create_mapper_op<T, U>(
 ) -> Result<HttpResponseCreated<Mapper>, HttpError>
 where
     T: ApiContext<AppPermissions = U>,
-    T::AppPermissions: Permission + From<VPermission> + AsScope + PermissionStorage,
+    T::AppPermissions: VAppPermission,
 {
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
