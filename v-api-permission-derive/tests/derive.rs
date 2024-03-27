@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use std::collections::BTreeSet;
 use uuid::Uuid;
 use v_api::permissions::VPermission;
@@ -5,9 +9,6 @@ use v_api_permission_derive::v_api;
 
 #[test]
 fn test_derive() {
-    // let x = VPermission::CreateApiUser;
-    // match x {
-    // }
     #[v_api(From(VPermission))]
     #[derive(
         Debug,
