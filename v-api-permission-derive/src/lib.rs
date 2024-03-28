@@ -349,7 +349,7 @@ fn from_system_permission_tokens(
                         VPermission::CreateApiKeyAll => Self::CreateApiKeyAll,
                         VPermission::GetApiKey(inner) => Self::GetApiKey(inner),
                         VPermission::GetApiKeys(inner) => Self::GetApiKeys(inner),
-                        VPermission::GetApiKeyAssigned => Self::GetApiKeyAssigned,
+                        VPermission::GetApiKeysAssigned => Self::GetApiKeysAssigned,
                         VPermission::GetApiKeysAll => Self::GetApiKeysAll,
                         VPermission::ManageApiKey(inner) => Self::ManageApiKey(inner),
                         VPermission::ManageApiKeys(inner) => Self::ManageApiKeys(inner),
@@ -485,7 +485,7 @@ fn system_permission_tokens() -> TokenStream {
                 expand(kind = alias, variant = GetApiKey, source = actor),
                 scope(to = "user:token:r", from = "user:token:r")
             )]
-            GetApiKeyAssigned,
+            GetApiKeysAssigned,
             #[v_api(scope(to = "user:token:r", from = "user:token:r"))]
             GetApiKeysAll,
             #[v_api(
