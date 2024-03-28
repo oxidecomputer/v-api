@@ -241,7 +241,7 @@ mod macros {
             /// Create a new link token for linking this provider to a different api user
             #[endpoint {
                 method = POST,
-                path = "/api-user-provider/{identifier}/link-token",
+                path = "/api-user-provider/{provider_id}/link-token",
             }]
             pub async fn create_link_token(
                 rqctx: RequestContext<$context_type>,
@@ -267,7 +267,7 @@ mod macros {
             /// Get user information for a given user id
             #[endpoint {
                 method = GET,
-                path = "/api-user/{identifier}",
+                path = "/api-user/{user_id}",
             }]
             pub async fn get_api_user(
                 rqctx: RequestContext<$context_type>,
@@ -291,7 +291,7 @@ mod macros {
             /// Update the permissions assigned to a given user
             #[endpoint {
                 method = POST,
-                path = "/api-user/{identifier}",
+                path = "/api-user/{user_id}",
             }]
             pub async fn update_api_user(
                 rqctx: RequestContext<$context_type>,
@@ -304,7 +304,7 @@ mod macros {
             /// List the active and expired API tokens for a given user
             #[endpoint {
                 method = GET,
-                path = "/api-user/{identifier}/token",
+                path = "/api-user/{user_id}/token",
             }]
             pub async fn list_api_user_tokens(
                 rqctx: RequestContext<$context_type>,
@@ -317,7 +317,7 @@ mod macros {
             // is the only time that the returned token will be accessible
             #[endpoint {
                 method = POST,
-                path = "/api-user/{identifier}/token",
+                path = "/api-user/{user_id}/token",
             }]
             pub async fn create_api_user_token(
                 rqctx: RequestContext<$context_type>,
@@ -330,7 +330,7 @@ mod macros {
             // Get details for a specific API token
             #[endpoint {
                 method = GET,
-                path = "/api-user/{identifier}/token/{token_identifier}",
+                path = "/api-user/{user_id}/token/{api_key_id}",
             }]
             pub async fn get_api_user_token(
                 rqctx: RequestContext<$context_type>,
@@ -342,7 +342,7 @@ mod macros {
             // Revoke a specific API token so it can no longer be used
             #[endpoint {
                 method = DELETE,
-                path = "/api-user/{identifier}/token/{token_identifier}",
+                path = "/api-user/{user_id}/token/{api_key_id}",
             }]
             pub async fn delete_api_user_token(
                 rqctx: RequestContext<$context_type>,
@@ -353,7 +353,7 @@ mod macros {
     
             #[endpoint {
                 method = POST,
-                path = "/api-user/{identifier}/group",
+                path = "/api-user/{user_id}/group",
             }]
             pub async fn add_api_user_to_group(
                 rqctx: RequestContext<$context_type>,
@@ -365,7 +365,7 @@ mod macros {
     
             #[endpoint {
                 method = DELETE,
-                path = "/api-user/{identifier}/group/{group_id}",
+                path = "/api-user/{user_id}/group/{group_id}",
             }]
             pub async fn remove_api_user_from_group(
                 rqctx: RequestContext<$context_type>,
@@ -377,7 +377,7 @@ mod macros {
             /// Link an existing login provider to this user
             #[endpoint {
                 method = POST,
-                path = "/api-user/{identifier}/link",
+                path = "/api-user/{user_id}/link",
             }]
             pub async fn link_provider(
                 rqctx: RequestContext<$context_type>,
@@ -459,7 +459,7 @@ mod macros {
     
             #[endpoint {
                 method = DELETE,
-                path = "/mapper/{identifier}",
+                path = "/mapper/{mapper_id}",
             }]
             pub async fn delete_mapper(
                 rqctx: RequestContext<$context_type>,

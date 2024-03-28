@@ -94,7 +94,7 @@ where
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MapperPath {
-    identifier: TypedUuid<MapperId>,
+    mapper_id: TypedUuid<MapperId>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -111,6 +111,6 @@ where
     let caller = ctx.get_caller(auth.as_ref()).await?;
 
     Ok(HttpResponseOk(
-        ctx.remove_mapper(&caller, &path.identifier).await?,
+        ctx.remove_mapper(&caller, &path.mapper_id).await?,
     ))
 }
