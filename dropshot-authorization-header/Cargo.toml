@@ -9,5 +9,4 @@ edition = "2021"
 async-trait = { workspace = true }
 base64 = { workspace = true }
 dropshot = { workspace = true }
-http = { workspace = true }
 tracing = { workspace = true }

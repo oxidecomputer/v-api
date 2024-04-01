@@ -15,7 +15,6 @@ crc32c = { workspace = true }
 diesel = { workspace = true }
 dropshot = { workspace = true }
 dropshot-authorization-header = { path = "../dropshot-authorization-header" }
-dropshot-verified-body = { workspace = true, features = ["github"] }
 google-cloudkms1 = { workspace = true }
 hex = { workspace = true }
 http = { workspace = true }
@@ -27,28 +26,19 @@ newtype-uuid = { workspace = true }
 partial-struct = { workspace = true }
 rand = { workspace = true, features = ["std"] }
 rand_core = { workspace = true, features = ["std"] }
-regex = { workspace = true }
 reqwest = { workspace = true }
-ring = { workspace = true }
 rsa = { workspace = true, features = ["sha2"] }
 schemars = { workspace = true, features = ["chrono"] }
 secrecy = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }
-serde_bytes = { workspace = true }
 serde_json = { workspace = true }
 serde_urlencoded = { workspace = true }
 sha2 = { workspace = true }
-slog = { workspace = true }
-slog-async = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 toml = { workspace = true }
 tracing = { workspace = true }
-tracing-appender = { workspace = true }
-tracing-bunyan-formatter = { workspace = true }
-tracing-slog = { workspace = true }
-tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "json"] }
 uuid = { workspace = true, features = ["v4", "serde"]  }
 v-api-permission-derive = { path = "../v-api-permission-derive" }
 v-model = { path = "../v-model" }
