@@ -1467,11 +1467,11 @@ dependencies = [
 [[package]]
 name = "partial-struct"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/partial-struct#595e1fd6cb4e5e61b5bee4679137ee664f475a44"
+source = "git+https://github.com/oxidecomputer/partial-struct#0477490a38803053550b672c3c0f12266c4385cc"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.57",
 ]
 
 [[package]]
@@ -2803,7 +2803,7 @@ dependencies = [
  "quote",
  "schemars",
  "serde",
- "syn 1.0.109",
+ "syn 2.0.57",
  "uuid",
  "v-api",
  "v-model",

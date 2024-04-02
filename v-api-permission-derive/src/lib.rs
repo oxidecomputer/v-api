@@ -244,7 +244,7 @@ pub fn v_api(attr: TokenStream, input: TokenStream) -> TokenStream {
             for variant in data_enum.variants.iter_mut() {
                 let variant_clone = variant.clone();
                 for variant_attrs in variant.attrs.iter_mut() {
-                    if variant_attrs.path.is_ident(MACRO_ID) {
+                    if variant_attrs.path().is_ident(MACRO_ID) {
                         match variant_attrs.parse_args::<VariantSettings>() {
                             Ok(VariantSettings(settings)) => {
                                 for setting in settings {
@@ -263,7 +263,7 @@ pub fn v_api(attr: TokenStream, input: TokenStream) -> TokenStream {
                     }
                 }
 
-                variant.attrs.retain(|attr| !attr.path.is_ident(MACRO_ID));
+                variant.attrs.retain(|attr| !attr.path().is_ident(MACRO_ID));
             }
             let as_scope_out = as_scope_trait_tokens(input.ident.clone(), scope_settings);
             let permission_storage_out =
