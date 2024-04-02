@@ -3,10 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use diesel::result::{DatabaseErrorKind, Error as DieselError};
-use google_cloudkms1::{
-    hyper_rustls::{self, HttpsConnector},
-    CloudKMS,
-};
+use google_cloudkms1::{hyper_rustls::HttpsConnector, CloudKMS};
 use hyper::client::HttpConnector;
 use v_model::storage::StoreError;
 
