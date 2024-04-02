@@ -11,26 +11,29 @@ API for handling users and access groups out.
 ### Integration
 
 The crate assumes that the hosting application is using a Postgres database or can provide a
-connection to one.
+connection to one. Want a different backend? Please contribute, it will be gladly welcome.
 
 The `v-model` crate contains [diesel](https://diesel.rs/) migrations for initializing the necessary
-tables in a database.
+tables in a database. `v-model-installer` exposes embedded migrations via [diesel_migrations](https://docs.rs/diesel_migrations/latest/diesel_migrations/).
 
 To add the endpoints in to the hosting server:
 
-1. Implement a the `From` trait for converting between `v-api` permissions and your permissions. If
-you do not implement your own permission data, then the `ApiPermission` enum can be used directly.
+1. Derive the `v_api` permission traits for your Permission enum. You can use the built-in macro:
 
 ```rust
+use v_api::permissions::VPermission;
+use v_api_permission_derive::v_api;
+
+#[v_api(From(VPermision))]
 pub enum MyPermission {
   // ...
 }
+```
 
-impl From<ApiPermission> for MyPermission {
-    fn from(value: ApiPermission) -> Self {
-        // ...
-    }
-}
+Or implement the `VAppPermission` trait yourself:
+
+```rust
+pub trait VAppPermission: Permission + From<VPermission> + AsScope + PermissionStorage {}
 ```
 
 2. Implement the `ApiContext` trait for your server context. This trait is how you communicate to
@@ -99,3 +102,14 @@ The following endpoints are injected by the `inject_endpoints` macro:
 | GET | /mapper | View all mappers |
 | POST | /mapper | Create a new mapper |
 | DELETE | /mapper/{identifier} | Delete and existing mapper |
+
+## Contributing
+
+We're open to PRs that improve these services, especially if they make the repo easier for others
+to use and contribute to. However, we are a small company, and the primary goal of this repo is as
+an internal tool for Oxide, so we can't guarantee that PRs will be integrated.
+
+## License
+
+Unless otherwise noted, all components are licensed under the
+[Mozilla Public License Version 2.0](LICENSE).
