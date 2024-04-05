@@ -7,7 +7,6 @@ pub mod config;
 mod context;
 pub mod endpoints;
 pub mod error;
-pub mod initial_data;
 pub mod mapper;
 pub mod permissions;
 mod secrets;

@@ -4,7 +4,6 @@
 
 use std::path::PathBuf;
 
-use config::{Config, ConfigError, Environment, File};
 use secrecy::SecretString;
 use serde::{
     de::{self, Visitor},
@@ -16,21 +15,6 @@ use thiserror::Error;
 pub enum AppConfigError {
     #[error("Encountered invalid log format.")]
     InvalidLogFormatVariant,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct AppConfig {
-    pub log_format: ServerLogFormat,
-    pub log_directory: Option<PathBuf>,
-    pub initial_mappers: Option<String>,
-    pub public_url: String,
-    pub server_port: u16,
-    pub database_url: String,
-    pub keys: Vec<AsymmetricKey>,
-    pub jwt: JwtConfig,
-    pub spec: Option<SpecConfig>,
-    pub authn: AuthnProviders,
-    pub search: SearchConfig,
 }
 
 #[derive(Debug)]
@@ -142,28 +126,4 @@ pub struct OAuthWebConfig {
     pub client_id: String,
     pub client_secret: SecretString,
     pub redirect_uri: String,
-}
-
-#[derive(Debug, Default, Deserialize)]
-pub struct SearchConfig {
-    pub host: String,
-    pub key: String,
-    pub index: String,
-}
-
-impl AppConfig {
-    pub fn new(config_sources: Option<Vec<String>>) -> Result<Self, ConfigError> {
-        let mut config = Config::builder()
-            .add_source(File::with_name("config.toml").required(false))
-            .add_source(File::with_name("v-api/config.toml").required(false));
-
-        for source in config_sources.unwrap_or_default() {
-            config = config.add_source(File::with_name(&source).required(false));
-        }
-
-        config
-            .add_source(Environment::default())
-            .build()?
-            .try_deserialize()
-    }
 }
