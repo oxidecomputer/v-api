@@ -25,7 +25,7 @@ hyper = "0.14.28"
 hyper-rustls = "0.24.2"
 jsonwebtoken = "9.3.0"
 mockall = "0.12.1"
-newtype-uuid = { version = "1.0.1", features = ["schemars08", "serde", "v4"] }
+newtype-uuid = { version = "1.1.0", features = ["schemars08", "serde", "v4"] }
 oauth2 = "4.4.2"
 partial-struct = { git = "https://github.com/oxidecomputer/partial-struct" }
 proc-macro2 = "1"
