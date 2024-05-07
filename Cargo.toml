@@ -17,7 +17,7 @@ crc32c = "0.6.5"
 diesel = { version = "2.1.6", features = ["postgres"] }
 diesel_migrations = { version = "2.1.0" }
 dropshot = "0.10.0"
-google-cloudkms1 = "5.0.4"
+google-cloudkms1 = { git = "https://github.com/Byron/google-apis-rs.git", ref = "ce47a46ca4e80dfbb2ead94037169bc5257c306e" }
 heck = "0.5.0"
 hex = "0.4.3"
 http = "0.2.12"
@@ -48,4 +48,4 @@ toml = "0.8.12"
 tracing = "0.1.40"
 uuid = "1.8.0"
 valuable = "0.1.0"
-yup-oauth2 = "8.3.3"
+yup-oauth2 = "9.0.0"
