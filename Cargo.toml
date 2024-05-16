@@ -16,7 +16,7 @@ cookie = { version = "0.18.1" }
 crc32c = "0.6.5"
 diesel = { version = "2.1.6", features = ["postgres"] }
 diesel_migrations = { version = "2.1.0" }
-dropshot = "0.10.0"
+dropshot = "0.10.1"
 google-cloudkms1 = { git = "https://github.com/Byron/google-apis-rs.git", ref = "ce47a46ca4e80dfbb2ead94037169bc5257c306e" }
 heck = "0.5.0"
 hex = "0.4.3"
