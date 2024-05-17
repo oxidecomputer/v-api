@@ -53,9 +53,15 @@ impl<'de> Deserialize<'de> for ServerLogFormat {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct JwtConfig {
     pub default_expiration: i64,
+}
+
+impl Default for JwtConfig {
+    fn default() -> Self {
+        Self { default_expiration: 3600 }
+    }
 }
 
 #[derive(Debug, Deserialize)]
