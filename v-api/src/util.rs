@@ -105,6 +105,27 @@ pub mod response {
         InternalError(#[source] E),
     }
 
+    impl<E> ResourceError<E> {
+        pub fn inner_into<F>(self) -> ResourceError<F>
+        where
+            F: From<E>,
+        {
+            match self {
+                ResourceError::DoesNotExist => ResourceError::DoesNotExist,
+                ResourceError::Restricted => ResourceError::Restricted,
+                ResourceError::InternalError(inner) => ResourceError::InternalError(inner.into()),
+            }
+        }
+
+        pub fn map<G, F: FnOnce(E) -> G>(self, op: F) -> ResourceError<G> {
+            match self {
+                ResourceError::DoesNotExist => ResourceError::DoesNotExist,
+                ResourceError::Restricted => ResourceError::Restricted,
+                ResourceError::InternalError(inner) => ResourceError::InternalError(op(inner)),
+            }
+        }
+    }
+
     pub trait ToResourceResultOpt<T, E> {
         fn opt_to_resource_result(self) -> ResourceResult<T, E>;
     }

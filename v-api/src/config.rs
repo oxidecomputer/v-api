@@ -60,7 +60,9 @@ pub struct JwtConfig {
 
 impl Default for JwtConfig {
     fn default() -> Self {
-        Self { default_expiration: 3600 }
+        Self {
+            default_expiration: 3600,
+        }
     }
 }
 
