@@ -463,6 +463,7 @@ fn system_permission_tokens() -> TokenStream {
             #[v_api(scope(to = "user:token:w"))]
             CreateApiKey(newtype_uuid::TypedUuid<v_model::UserId>),
             #[v_api(
+                expand(kind = replace, variant = CreateApiKey, value = actor),
                 scope(to = "user:token:w", from = "user:token:w")
             )]
             CreateApiKeySelf,
