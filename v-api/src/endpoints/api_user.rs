@@ -142,6 +142,7 @@ where
     create_api_user_inner(ctx, caller, body).await
 }
 
+#[instrument(skip(ctx, body))]
 pub async fn create_api_user_inner<T, U>(
     ctx: &VContext<T>,
     caller: Caller<T>,
@@ -179,6 +180,7 @@ where
     update_api_user_inner(ctx, caller, path, body).await
 }
 
+#[instrument(skip(ctx, body))]
 pub async fn update_api_user_inner<T, U>(
     ctx: &VContext<T>,
     caller: Caller<T>,
@@ -218,6 +220,7 @@ where
     list_api_user_tokens_inner(ctx, caller, path).await
 }
 
+#[instrument(skip(ctx))]
 pub async fn list_api_user_tokens_inner<T, U>(
     ctx: &VContext<T>,
     caller: Caller<T>,
@@ -279,6 +282,7 @@ where
     create_api_user_token_inner(ctx, caller, path, body).await
 }
 
+#[instrument(skip(ctx, body))]
 pub async fn create_api_user_token_inner<T, U>(
     ctx: &VContext<T>,
     caller: Caller<T>,
@@ -344,6 +348,7 @@ where
     get_api_user_token_inner(ctx, caller, path).await
 }
 
+#[instrument(skip(ctx))]
 pub async fn get_api_user_token_inner<T, U>(
     ctx: &VContext<T>,
     caller: Caller<T>,
@@ -377,6 +382,7 @@ where
     delete_api_user_token_inner(ctx, caller, path).await
 }
 
+#[instrument(skip(ctx))]
 pub async fn delete_api_user_token_inner<T, U>(
     ctx: &VContext<T>,
     caller: Caller<T>,
