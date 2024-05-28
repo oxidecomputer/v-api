@@ -12,6 +12,7 @@ use diesel::{
 };
 use newtype_uuid::{GenericUuid, TypedUuid};
 use std::{collections::BTreeMap, time::Duration};
+use thiserror::Error;
 use tracing::instrument;
 
 use crate::{
@@ -47,8 +48,9 @@ pub struct PostgresStore {
     pub pool: DbPool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum PostgresError {
+    #[error("Database connection failed")]
     Connection(ConnectionError),
 }
 
