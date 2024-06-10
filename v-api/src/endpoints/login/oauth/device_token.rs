@@ -194,22 +194,22 @@ where
 
                     tracing::debug!("Verified and validated OAuth user");
 
-                    let (api_user, api_user_provider) = ctx
+                    let (api_user_info, api_user_provider) = ctx
                         .register_api_user(&ctx.builtin_registration_user(), info)
                         .await?;
 
-                    tracing::info!(api_user_id = ?api_user.id, api_user_provider_id = ?api_user_provider.id, "Retrieved api user to generate device token for");
+                    tracing::info!(api_user_id = ?api_user_info.user.id, api_user_provider_id = ?api_user_provider.id, "Retrieved api user to generate device token for");
 
                     let token = ctx
                         .register_access_token(
                             &ctx.builtin_registration_user(),
-                            &api_user,
+                            &api_user_info.user,
                             &api_user_provider,
                             None,
                         )
                         .await?;
 
-                    tracing::info!(provider = ?path.provider, api_user_id = ?api_user.id, "Generated access token");
+                    tracing::info!(provider = ?path.provider, api_user_id = ?api_user_info.user.id, "Generated access token");
 
                     Ok(Response::builder()
                         .status(StatusCode::OK)

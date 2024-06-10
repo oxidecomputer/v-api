@@ -16,11 +16,12 @@ use uuid::Uuid;
 
 use crate::{
     schema_ext::LoginAttemptState, AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey,
-    ApiKeyId, ApiUser, ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt, LoginAttemptId,
-    Mapper, MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider,
-    NewLinkRequest, NewLoginAttempt, NewMapper, NewOAuthClient, NewOAuthClientRedirectUri,
-    NewOAuthClientSecret, OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret,
-    OAuthRedirectUriId, OAuthSecretId, UserId, UserProviderId,
+    ApiKeyId, ApiUserInfo, ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt,
+    LoginAttemptId, Mapper, MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
+    NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMapper, NewOAuthClient,
+    NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
+    OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId, UserId,
+    UserProviderId,
 };
 
 pub mod postgres;
@@ -85,14 +86,14 @@ pub trait ApiUserStore<T: Send + Sync> {
         &self,
         id: &TypedUuid<UserId>,
         deleted: bool,
-    ) -> Result<Option<ApiUser<T>>, StoreError>;
+    ) -> Result<Option<ApiUserInfo<T>>, StoreError>;
     async fn list(
         &self,
         filter: ApiUserFilter,
         pagination: &ListPagination,
-    ) -> Result<Vec<ApiUser<T>>, StoreError>;
-    async fn upsert(&self, api_user: NewApiUser<T>) -> Result<ApiUser<T>, StoreError>;
-    async fn delete(&self, id: &TypedUuid<UserId>) -> Result<Option<ApiUser<T>>, StoreError>;
+    ) -> Result<Vec<ApiUserInfo<T>>, StoreError>;
+    async fn upsert(&self, api_user: NewApiUser<T>) -> Result<ApiUserInfo<T>, StoreError>;
+    async fn delete(&self, id: &TypedUuid<UserId>) -> Result<Option<ApiUserInfo<T>>, StoreError>;
 }
 
 #[derive(Debug, Default)]

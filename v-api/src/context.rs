@@ -27,12 +27,12 @@ use v_model::{
         OAuthClientFilter, OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore,
         StoreError,
     },
-    AccessGroup, AccessGroupId, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserProvider,
-    InvalidValueError, LinkRequest, LinkRequestId, LoginAttempt, LoginAttemptId, Mapper, MapperId,
-    NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, NewLinkRequest,
-    NewLoginAttempt, NewMapper, NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret,
-    OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId,
-    OAuthSecretId, UserId, UserProviderId,
+    AccessGroup, AccessGroupId, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserInfo,
+    ApiUserProvider, InvalidValueError, LinkRequest, LinkRequestId, LoginAttempt, LoginAttemptId,
+    Mapper, MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider,
+    NewLinkRequest, NewLoginAttempt, NewMapper, NewOAuthClient, NewOAuthClientRedirectUri,
+    NewOAuthClientSecret, OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret,
+    OAuthRedirectUriId, OAuthSecretId, UserId, UserProviderId,
 };
 
 use crate::{
@@ -343,16 +343,16 @@ where
                     .get_api_user(&self.builtin_registration_user(), &api_user_id)
                     .await
                 {
-                    ResourceResult::Ok(user) => {
+                    ResourceResult::Ok(info) => {
                         // The permissions for the caller is the intersection of the user's permissions and the tokens permissions
-                        let user_permissions = self.get_user_permissions(&user).await?;
+                        let user_permissions = self.get_user_permissions(&info.user).await?;
 
                         let combined_permissions = match &base_permissions {
                             BasePermissions::Full => user_permissions.clone(),
                             BasePermissions::Restricted(permissions) => {
                                 let token_permissions = <T as PermissionStorage>::expand(
                                     permissions,
-                                    &user.id,
+                                    &info.user.id,
                                     Some(&user_permissions),
                                 );
                                 token_permissions.intersect(&user_permissions)
@@ -563,7 +563,7 @@ where
         &self,
         caller: &Caller<T>,
         info: UserInfo,
-    ) -> ResourceResult<(ApiUser<T>, ApiUserProvider), ApiError> {
+    ) -> ResourceResult<(ApiUserInfo<T>, ApiUserProvider), ApiError> {
         // Check if we have seen this identity before
         let mut filter = ApiUserProviderFilter::default();
         filter.provider = Some(vec![info.external_id.provider().to_string()]);
@@ -602,7 +602,7 @@ where
                         caller,
                         NewApiUserProvider {
                             id: TypedUuid::new_v4(),
-                            user_id: user.id,
+                            user_id: user.user.id,
                             emails: info.verified_emails,
                             provider: info.external_id.provider().to_string(),
                             provider_id: info.external_id.id().to_string(),
@@ -646,7 +646,7 @@ where
                     .await
                     .map_err(|err| ApiError::from(err))
                     .to_resource_result()?;
-                let mut update: NewApiUser<T> = user.into();
+                let mut update: NewApiUser<T> = user.user.into();
                 update.permissions.append(&mut mapped_permissions);
                 update.groups.append(&mut mapped_groups);
 
@@ -739,11 +739,11 @@ where
         api_user_id: TypedUuid<UserId>,
         mut mapped_permissions: Permissions<T>,
         mut mapped_groups: BTreeSet<TypedUuid<AccessGroupId>>,
-    ) -> ResourceResult<ApiUser<T>, StoreError> {
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
         match self.get_api_user(caller, &api_user_id).await {
-            ResourceResult::Ok(api_user) => {
+            ResourceResult::Ok(info) => {
                 // Ensure that the existing user has "at least" the mapped permissions
-                let mut update: NewApiUser<T> = api_user.into();
+                let mut update: NewApiUser<T> = info.user.into();
                 update.permissions.append(&mut mapped_permissions);
                 update.groups.append(&mut mapped_groups);
 
@@ -804,7 +804,7 @@ where
         &self,
         caller: &Caller<T>,
         id: &TypedUuid<UserId>,
-    ) -> ResourceResult<ApiUser<T>, StoreError> {
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
         if caller.any(&[
             &VPermission::GetApiUser(*id).into(),
             &VPermission::GetApiUsersAll.into(),
@@ -812,10 +812,13 @@ where
             ApiUserStore::get(&*self.storage, id, false)
                 .await
                 .map(|opt| {
-                    opt.map(|mut user| {
-                        user.permissions =
-                            <T as PermissionStorage>::expand(&user.permissions, &user.id, None);
-                        user
+                    opt.map(|mut info| {
+                        info.user.permissions = <T as PermissionStorage>::expand(
+                            &info.user.permissions,
+                            &info.user.id,
+                            None,
+                        );
+                        info
                     })
                 })
                 .opt_to_resource_result()
@@ -829,14 +832,14 @@ where
         caller: &Caller<T>,
         filter: ApiUserFilter,
         pagination: &ListPagination,
-    ) -> ResourceResult<Vec<ApiUser<T>>, StoreError> {
+    ) -> ResourceResult<Vec<ApiUserInfo<T>>, StoreError> {
         let mut users = ApiUserStore::list(&*self.storage, filter, pagination)
             .await
             .to_resource_result()?;
 
-        users.retain(|user| {
+        users.retain(|info| {
             caller.any(&[
-                &VPermission::GetApiUser(user.id).into(),
+                &VPermission::GetApiUser(info.user.id).into(),
                 &VPermission::GetApiUsersAll.into(),
             ])
         });
@@ -850,7 +853,7 @@ where
         caller: &Caller<T>,
         permissions: Permissions<T>,
         groups: BTreeSet<TypedUuid<AccessGroupId>>,
-    ) -> ResourceResult<ApiUser<T>, StoreError> {
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
         if caller.can(&VPermission::CreateApiUser.into()) {
             let mut new_user = NewApiUser {
                 id: TypedUuid::new_v4(),
@@ -871,7 +874,7 @@ where
         &self,
         caller: &Caller<T>,
         mut api_user: NewApiUser<T>,
-    ) -> ResourceResult<ApiUser<T>, StoreError> {
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
         if caller.any(&[
             &VPermission::ManageApiUser(api_user.id).into(),
             &VPermission::ManageApiUsersAll.into(),
@@ -890,14 +893,14 @@ where
         caller: &Caller<T>,
         user_id: &TypedUuid<UserId>,
         new_permissions: Permissions<T>,
-    ) -> ResourceResult<ApiUser<T>, StoreError> {
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
         if caller.any(&[
             &VPermission::ManageApiUser(*user_id).into(),
             &VPermission::ManageApiUsersAll.into(),
         ]) {
-            let user = self.get_api_user(caller, user_id).await?;
+            let info = self.get_api_user(caller, user_id).await?;
 
-            let mut user_update: NewApiUser<T> = user.into();
+            let mut user_update: NewApiUser<T> = info.user.into();
             for permission in new_permissions.into_iter() {
                 tracing::info!(id = ?user_id, ?permission, "Adding permission to user");
                 user_update.permissions.insert(permission);
@@ -1301,7 +1304,7 @@ where
         } else if caller.can(&VPermission::GetGroupsJoined.into()) {
             // If a caller can only view the groups they are a member of then we need to fetch the
             // callers user record to determine what those are
-            let user = self.get_api_user(caller, &caller.id).await?;
+            let user = self.get_api_user(caller, &caller.id).await?.user;
             filter.id = Some(user.groups.into_iter().collect::<Vec<_>>());
         } else {
             // The caller does not have any permissions to view groups
@@ -1370,7 +1373,7 @@ where
         caller: &Caller<T>,
         api_user_id: &TypedUuid<UserId>,
         group_id: &TypedUuid<AccessGroupId>,
-    ) -> ResourceResult<ApiUser<T>, StoreError> {
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
         if caller.any(&[
             &VPermission::ManageGroupMembership(*group_id).into(),
             &VPermission::ManageGroupMembershipsAll.into(),
@@ -1380,11 +1383,11 @@ where
             // underlying connection management while allowing for transactions. Possibly something
             // that takes a closure and passes in a connection that implements all of the expected
             // data store traits
-            let user = ApiUserStore::get(&*self.storage, api_user_id, false)
+            let info = ApiUserStore::get(&*self.storage, api_user_id, false)
                 .await
                 .opt_to_resource_result()?;
 
-            let mut update: NewApiUser<T> = user.into();
+            let mut update: NewApiUser<T> = info.user.into();
             update.groups.insert(*group_id);
 
             ApiUserStore::upsert(&*self.storage, update)
@@ -1400,7 +1403,7 @@ where
         caller: &Caller<T>,
         api_user_id: &TypedUuid<UserId>,
         group_id: &TypedUuid<AccessGroupId>,
-    ) -> ResourceResult<ApiUser<T>, StoreError> {
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
         if caller.any(&[
             &VPermission::ManageGroupMembership(*group_id).into(),
             &VPermission::ManageGroupMembershipsAll.into(),
@@ -1410,11 +1413,11 @@ where
             // underlying connection management while allowing for transactions. Possibly something
             // that takes a closure and passes in a connection that implements all of the expected
             // data store traits
-            let user = ApiUserStore::get(&*self.storage, api_user_id, false)
+            let info = ApiUserStore::get(&*self.storage, api_user_id, false)
                 .await
                 .opt_to_resource_result()?;
 
-            let mut update: NewApiUser<T> = user.into();
+            let mut update: NewApiUser<T> = info.user.into();
             update.groups.retain(|id| id != group_id);
 
             ApiUserStore::upsert(&*self.storage, update)
@@ -1602,7 +1605,7 @@ mod tests {
     use v_model::{
         permissions::Permissions,
         storage::{AccessGroupFilter, ListPagination, MockAccessGroupStore, MockApiUserStore},
-        AccessGroup, ApiUser, ApiUserProvider, UserId,
+        AccessGroup, ApiUser, ApiUserInfo, ApiUserProvider, UserId,
     };
 
     use crate::{
@@ -1692,19 +1695,22 @@ mod tests {
         let user_permissions: Permissions<VPermission> = vec![VPermission::GetMappersAll].into();
         let mut groups = BTreeSet::new();
         groups.insert(group_id);
-        let user = ApiUser {
-            id: user_id,
-            permissions: user_permissions.clone(),
-            groups,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            deleted_at: None,
+        let user = ApiUserInfo {
+            user: ApiUser {
+                id: user_id,
+                permissions: user_permissions.clone(),
+                groups,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                deleted_at: None,
+            },
+            providers: vec![],
         };
 
         let mut user_store = MockApiUserStore::new();
         user_store
             .expect_get()
-            .with(eq(user.id), eq(false))
+            .with(eq(user.user.id), eq(false))
             .returning(move |_, _| Ok(Some(user.clone())));
 
         storage.access_group_store = Some(Arc::new(group_store));
@@ -1839,7 +1845,8 @@ pub(crate) mod test_mocks {
             &self,
             id: &TypedUuid<UserId>,
             deleted: bool,
-        ) -> Result<Option<v_model::ApiUser<VPermission>>, v_model::storage::StoreError> {
+        ) -> Result<Option<v_model::ApiUserInfo<VPermission>>, v_model::storage::StoreError>
+        {
             self.api_user_store.as_ref().unwrap().get(id, deleted).await
         }
 
@@ -1847,7 +1854,7 @@ pub(crate) mod test_mocks {
             &self,
             filter: v_model::storage::ApiUserFilter,
             pagination: &ListPagination,
-        ) -> Result<Vec<v_model::ApiUser<VPermission>>, v_model::storage::StoreError> {
+        ) -> Result<Vec<v_model::ApiUserInfo<VPermission>>, v_model::storage::StoreError> {
             self.api_user_store
                 .as_ref()
                 .unwrap()
@@ -1858,14 +1865,15 @@ pub(crate) mod test_mocks {
         async fn upsert(
             &self,
             api_user: NewApiUser<VPermission>,
-        ) -> Result<v_model::ApiUser<VPermission>, v_model::storage::StoreError> {
+        ) -> Result<v_model::ApiUserInfo<VPermission>, v_model::storage::StoreError> {
             self.api_user_store.as_ref().unwrap().upsert(api_user).await
         }
 
         async fn delete(
             &self,
             id: &TypedUuid<UserId>,
-        ) -> Result<Option<v_model::ApiUser<VPermission>>, v_model::storage::StoreError> {
+        ) -> Result<Option<v_model::ApiUserInfo<VPermission>>, v_model::storage::StoreError>
+        {
             self.api_user_store.as_ref().unwrap().delete(id).await
         }
     }

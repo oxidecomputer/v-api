@@ -82,16 +82,16 @@ where
     let ctx = rqctx.v_ctx();
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
-    let user = ctx.get_api_user(&caller, &caller.id).await?;
+    let info = ctx.get_api_user(&caller, &caller.id).await?;
 
     let mut filter = ApiUserProviderFilter::default();
-    filter.api_user_id = Some(vec![user.id]);
+    filter.api_user_id = Some(vec![info.user.id]);
     let providers = ctx
         .list_api_user_provider(&caller, filter, &ListPagination::default().limit(10))
         .await?;
 
-    tracing::trace!(user = ?serde_json::to_string(&user), "Found user");
-    Ok(HttpResponseOk(GetUserResponse::new(user, providers)))
+    tracing::trace!(user = ?serde_json::to_string(&info.user), "Found user");
+    Ok(HttpResponseOk(GetUserResponse::new(info.user, providers)))
 }
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -107,16 +107,16 @@ where
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
     let path = path.into_inner();
-    let user = ctx.get_api_user(&caller, &path.user_id).await?;
+    let info = ctx.get_api_user(&caller, &path.user_id).await?;
 
     let mut filter = ApiUserProviderFilter::default();
-    filter.api_user_id = Some(vec![user.id]);
+    filter.api_user_id = Some(vec![info.user.id]);
     let providers = ctx
         .list_api_user_provider(&caller, filter, &ListPagination::default().limit(10))
         .await?;
 
-    tracing::trace!(user = ?serde_json::to_string(&user), "Found user");
-    Ok(HttpResponseOk(GetUserResponse::new(user, providers)))
+    tracing::trace!(user = ?serde_json::to_string(&info.user), "Found user");
+    Ok(HttpResponseOk(GetUserResponse::new(info.user, providers)))
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
@@ -152,11 +152,11 @@ where
     T: VAppPermission + JsonSchema + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let user = ctx
+    let info = ctx
         .create_api_user(&caller, body.permissions, body.group_ids)
         .await?;
 
-    Ok(HttpResponseCreated(into_user_response(user)))
+    Ok(HttpResponseCreated(into_user_response(info.user)))
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -191,7 +191,7 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let user = ctx
+    let info = ctx
         .update_api_user(
             &caller,
             NewApiUser {
@@ -202,7 +202,7 @@ where
         )
         .await?;
 
-    Ok(HttpResponseOk(into_user_response(user)))
+    Ok(HttpResponseOk(into_user_response(info.user)))
 }
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -293,7 +293,7 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let api_user = ctx.get_api_user(&caller, &path.user_id).await?;
+    let info = ctx.get_api_user(&caller, &path.user_id).await?;
 
     let key_id = TypedUuid::new_v4();
     let key = RawApiKey::generate::<24>(key_id.as_untyped_uuid())
@@ -311,7 +311,7 @@ where
                 permissions: into_permissions(body.permissions),
                 expires_at: body.expires_at,
             },
-            &api_user.id,
+            &info.user.id,
         )
         .await?;
 
@@ -420,11 +420,11 @@ where
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
 
-    let user = ctx
+    let info = ctx
         .add_api_user_to_group(&caller, &path.user_id, &body.group_id)
         .await?;
 
-    Ok(HttpResponseOk(into_user_response(user)))
+    Ok(HttpResponseOk(into_user_response(info.user)))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -446,11 +446,11 @@ where
     let auth = ctx.authn_token(&rqctx).await?;
     let caller = ctx.get_caller(auth.as_ref()).await?;
 
-    let user = ctx
+    let info = ctx
         .remove_api_user_from_group(&caller, &path.user_id, &path.group_id)
         .await?;
 
-    Ok(HttpResponseOk(into_user_response(user)))
+    Ok(HttpResponseOk(into_user_response(info.user)))
 }
 
 // TODO: Needs to be implemented
@@ -557,7 +557,7 @@ mod tests {
     use v_model::{
         permissions::{Caller, Permissions},
         storage::{ApiKeyFilter, ListPagination, MockApiKeyStore, MockApiUserStore, StoreError},
-        ApiKey, ApiUser, NewApiUser,
+        ApiKey, ApiUser, ApiUserInfo, NewApiUser,
     };
 
     use crate::{
@@ -603,13 +603,16 @@ mod tests {
                 x.permissions.can(&VPermission::CreateApiUser.into())
             })
             .returning(|user| {
-                Ok(ApiUser {
-                    id: user.id,
-                    permissions: user.permissions,
-                    groups: BTreeSet::new(),
-                    created_at: Utc::now(),
-                    updated_at: Utc::now(),
-                    deleted_at: None,
+                Ok(ApiUserInfo {
+                    user: ApiUser {
+                        id: user.id,
+                        permissions: user.permissions,
+                        groups: BTreeSet::new(),
+                        created_at: Utc::now(),
+                        updated_at: Utc::now(),
+                        deleted_at: None,
+                    },
+                    providers: vec![],
                 })
             });
         store
@@ -691,13 +694,16 @@ mod tests {
             .expect_upsert()
             .withf(move |x: &NewApiUser<VPermission>| &x.id == &success_id)
             .returning(|user| {
-                Ok(ApiUser {
-                    id: user.id,
-                    permissions: user.permissions,
-                    groups: BTreeSet::new(),
-                    created_at: Utc::now(),
-                    updated_at: Utc::now(),
-                    deleted_at: None,
+                Ok(ApiUserInfo {
+                    user: ApiUser {
+                        id: user.id,
+                        permissions: user.permissions,
+                        groups: BTreeSet::new(),
+                        created_at: Utc::now(),
+                        updated_at: Utc::now(),
+                        deleted_at: None,
+                    },
+                    providers: vec![],
                 })
             });
         store
@@ -933,7 +939,12 @@ mod tests {
         api_user_store
             .expect_get()
             .with(eq(api_user_path.user_id), eq(false))
-            .returning(move |_, _| Ok(Some(api_user.clone())));
+            .returning(move |_, _| {
+                Ok(Some(ApiUserInfo {
+                    user: api_user.clone(),
+                    providers: vec![],
+                }))
+            });
         api_user_store
             .expect_get()
             .with(eq(failure_api_user_path.user_id), eq(false))

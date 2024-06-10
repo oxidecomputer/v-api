@@ -505,11 +505,11 @@ where
     tracing::debug!("Retrieved user information from remote provider");
 
     // Register this user as an API user if needed
-    let (api_user, api_user_provider) = ctx
+    let (api_user_info, api_user_provider) = ctx
         .register_api_user(&ctx.builtin_registration_user(), info)
         .await?;
 
-    tracing::info!(api_user_id = ?api_user.id, "Retrieved api user to generate access token for");
+    tracing::info!(api_user_id = ?api_user_info.user.id, "Retrieved api user to generate access token for");
 
     let scope = attempt
         .scope
@@ -520,13 +520,13 @@ where
     let token = ctx
         .register_access_token(
             &ctx.builtin_registration_user(),
-            &api_user,
+            &api_user_info.user,
             &api_user_provider,
             Some(scope),
         )
         .await?;
 
-    tracing::info!(provider = ?path.provider, api_user_id = ?api_user.id, "Generated access token");
+    tracing::info!(provider = ?path.provider, api_user_id = ?api_user_info.user.id, "Generated access token");
 
     Ok(HttpResponseOk(OAuthAuthzCodeExchangeResponse {
         token_type: "Bearer".to_string(),

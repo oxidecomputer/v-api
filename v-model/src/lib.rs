@@ -27,6 +27,12 @@ pub mod storage;
 
 pub use {permissions::Permissions, schema_ext::LoginAttemptState};
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ApiUserInfo<T> {
+    pub user: ApiUser<T>,
+    pub providers: Vec<ApiUserProvider>,
+}
+
 #[derive(JsonSchema)]
 pub enum UserId {}
 impl TypedUuidKind for UserId {

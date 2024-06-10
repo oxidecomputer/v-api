@@ -226,7 +226,7 @@ mod tests {
     use v_model::{
         permissions::Caller,
         storage::{MockApiUserStore, MockOAuthClientSecretStore, MockOAuthClientStore},
-        ApiUser, OAuthClient, OAuthClientSecret,
+        ApiUser, ApiUserInfo, OAuthClient, OAuthClientSecret,
     };
 
     use crate::{
@@ -268,15 +268,23 @@ mod tests {
         user_store
             .expect_get()
             .with(eq(user.id), eq(false))
-            .returning(move |_, _| Ok(Some(user.clone())));
+            .returning(move |_, _| {
+                Ok(Some(ApiUserInfo {
+                    user: user.clone(),
+                    providers: vec![],
+                }))
+            });
         user_store.expect_upsert().returning(|user| {
-            Ok(ApiUser {
-                id: user.id,
-                permissions: user.permissions,
-                groups: user.groups,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-                deleted_at: None,
+            Ok(ApiUserInfo {
+                user: ApiUser {
+                    id: user.id,
+                    permissions: user.permissions,
+                    groups: user.groups,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    deleted_at: None,
+                },
+                providers: vec![],
             })
         });
 

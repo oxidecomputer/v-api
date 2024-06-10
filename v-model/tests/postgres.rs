@@ -140,7 +140,7 @@ async fn test_api_user() {
     .unwrap();
 
     // 2. Retrieve the user
-    let api_user_lookup = ApiUserStore::get(&store, &api_user.id, false)
+    let api_user_lookup = ApiUserStore::get(&store, &api_user.user.id, false)
         .await
         .unwrap()
         .unwrap();
@@ -159,7 +159,7 @@ async fn test_api_user() {
     .await
     .unwrap();
 
-    assert_eq!(api_user_id, api_user.id);
+    assert_eq!(api_user_id, api_user.user.id);
 
     // 4. Update the user's permissions
     let api_user = ApiUserStore::<TestPermission>::upsert(
@@ -179,9 +179,11 @@ async fn test_api_user() {
     .unwrap();
 
     assert!(api_user
+        .user
         .permissions
         .can(&TestPermission::GetApiKey(api_user_id).into()));
     assert!(api_user
+        .user
         .permissions
         .can(&TestPermission::DeleteApiKey(api_user_id).into()));
 
@@ -190,7 +192,7 @@ async fn test_api_user() {
         &store,
         NewApiKey {
             id: TypedUuid::new_v4(),
-            user_id: api_user.id,
+            user_id: api_user.user.id,
             key_signature: format!("key-{}", Uuid::new_v4()),
             permissions: Some(vec![TestPermission::GetApiKey(api_user_id).into()].into()),
             expires_at: Utc::now() + TimeDelta::try_seconds(5 * 60).unwrap(),
@@ -204,7 +206,7 @@ async fn test_api_user() {
         &store,
         NewApiKey {
             id: TypedUuid::new_v4(),
-            user_id: api_user.id,
+            user_id: api_user.user.id,
             key_signature: format!("key-{}", Uuid::new_v4()),
             permissions: Some(
                 vec![
@@ -230,7 +232,7 @@ async fn test_api_user() {
         &store,
         NewApiKey {
             id: TypedUuid::new_v4(),
-            user_id: api_user.id,
+            user_id: api_user.user.id,
             key_signature: format!("key-{}", Uuid::new_v4()),
             permissions: Some(
                 vec![
@@ -252,7 +254,7 @@ async fn test_api_user() {
         &store,
         ApiKeyFilter {
             id: None,
-            api_user_id: Some(vec![api_user.id]),
+            api_user_id: Some(vec![api_user.user.id]),
             key_signature: None,
             expired: false,
             deleted: false,
@@ -271,7 +273,7 @@ async fn test_api_user() {
         &store,
         ApiKeyFilter {
             id: None,
-            api_user_id: Some(vec![api_user.id]),
+            api_user_id: Some(vec![api_user.user.id]),
             key_signature: None,
             expired: true,
             deleted: false,
@@ -304,7 +306,7 @@ async fn test_api_user() {
         &store,
         ApiKeyFilter {
             id: None,
-            api_user_id: Some(vec![api_user.id]),
+            api_user_id: Some(vec![api_user.user.id]),
             key_signature: None,
             expired: true,
             deleted: true,
@@ -322,13 +324,13 @@ async fn test_api_user() {
     }
 
     // 13. Delete the user
-    let api_user = ApiUserStore::<TestPermission>::delete(&store, &api_user.id)
+    let api_user = ApiUserStore::<TestPermission>::delete(&store, &api_user.user.id)
         .await
         .unwrap()
         .unwrap();
 
-    assert!(api_user.deleted_at.is_some());
-    assert!(api_user.deleted_at.unwrap() < Utc::now());
+    assert!(api_user.user.deleted_at.is_some());
+    assert!(api_user.user.deleted_at.unwrap() < Utc::now());
     println!("Created api user {:#?}", api_user);
 
     // 14. List the deleted user
@@ -348,7 +350,7 @@ async fn test_api_user() {
     assert!(all_api_users.len() == 1);
 
     for user in all_api_users {
-        assert!(user.deleted_at.is_some());
-        assert!(user.deleted_at.unwrap() < Utc::now());
+        assert!(user.user.deleted_at.is_some());
+        assert!(user.user.deleted_at.unwrap() < Utc::now());
     }
 }

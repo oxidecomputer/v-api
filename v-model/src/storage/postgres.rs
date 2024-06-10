@@ -27,7 +27,7 @@ use crate::{
         login_attempt, mapper, oauth_client, oauth_client_redirect_uri, oauth_client_secret,
     },
     storage::{LinkRequestFilter, LinkRequestStore, StoreError},
-    AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUser,
+    AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUser, ApiUserInfo,
     ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt, LoginAttemptId, Mapper, MapperId,
     NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, NewLinkRequest,
     NewLoginAttempt, NewMapper, NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret,
@@ -82,7 +82,7 @@ where
         &self,
         id: &TypedUuid<UserId>,
         deleted: bool,
-    ) -> Result<Option<ApiUser<T>>, StoreError> {
+    ) -> Result<Option<ApiUserInfo<T>>, StoreError> {
         let user = ApiUserStore::list(
             self,
             ApiUserFilter {
@@ -101,7 +101,7 @@ where
         &self,
         filter: ApiUserFilter,
         pagination: &ListPagination,
-    ) -> Result<Vec<ApiUser<T>>, StoreError> {
+    ) -> Result<Vec<ApiUserInfo<T>>, StoreError> {
         let mut query = api_user::dsl::api_user
             .left_join(api_user_provider::dsl::api_user_provider)
             .into_boxed();
@@ -146,14 +146,29 @@ where
             )
             .await?;
 
-        Ok(results.into_iter().map(|(user, _)| user.into()).collect())
+        let users = results
+            .into_iter()
+            .fold(BTreeMap::new(), |mut acc, (user, provider)| {
+                let (_, providers): &mut (ApiUser<T>, Vec<ApiUserProvider>) =
+                    acc.entry(user.id).or_insert_with(|| (user.into(), vec![]));
+                if let Some(provider) = provider {
+                    providers.push(provider.into());
+                }
+
+                acc
+            })
+            .into_values()
+            .map(|(user, providers)| ApiUserInfo { user, providers })
+            .collect::<Vec<_>>();
+
+        Ok(users)
     }
 
     #[instrument(skip(self), fields(id = ?user.id, permissions = ?user.permissions, groups = ?user.groups))]
-    async fn upsert(&self, user: NewApiUser<T>) -> Result<ApiUser<T>, StoreError> {
+    async fn upsert(&self, user: NewApiUser<T>) -> Result<ApiUserInfo<T>, StoreError> {
         tracing::trace!("Upserting user");
 
-        let user_m: ApiUserModel<T> = insert_into(api_user::dsl::api_user)
+        insert_into(api_user::dsl::api_user)
             .values((
                 api_user::id.eq(user.id.into_untyped_uuid()),
                 api_user::permissions.eq(user.permissions.clone()),
@@ -170,13 +185,13 @@ where
                 api_user::groups.eq(excluded(api_user::groups)),
                 api_user::updated_at.eq(Utc::now()),
             ))
-            .get_result_async(&*self.pool.get().await?)
+            .execute_async(&*self.pool.get().await?)
             .await?;
 
-        Ok(user_m.into())
+        Ok(ApiUserStore::get(self, &user.id, false).await?.unwrap())
     }
 
-    async fn delete(&self, id: &TypedUuid<UserId>) -> Result<Option<ApiUser<T>>, StoreError> {
+    async fn delete(&self, id: &TypedUuid<UserId>) -> Result<Option<ApiUserInfo<T>>, StoreError> {
         let _ = update(api_user::dsl::api_user)
             .filter(api_user::id.eq(id.into_untyped_uuid()))
             .set(api_user::deleted_at.eq(Utc::now()))
