@@ -24,6 +24,7 @@ pub struct GitHubOAuthProvider {
     device_private: Option<OAuthPrivateCredentials>,
     web_public: OAuthPublicCredentials,
     web_private: Option<OAuthPrivateCredentials>,
+    additional_scopes: Vec<String>,
     client: Client,
 }
 
@@ -39,6 +40,7 @@ impl GitHubOAuthProvider {
         device_client_secret: SecretString,
         web_client_id: String,
         web_client_secret: SecretString,
+        additional_scopes: Option<Vec<String>>,
     ) -> Self {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static("v-api"));
@@ -57,6 +59,7 @@ impl GitHubOAuthProvider {
             web_private: Some(OAuthPrivateCredentials {
                 client_secret: web_client_secret,
             }),
+            additional_scopes: additional_scopes.unwrap_or_default(),
             client,
         }
     }
@@ -103,7 +106,9 @@ impl OAuthProvider for GitHubOAuthProvider {
     }
 
     fn scopes(&self) -> Vec<&str> {
-        vec!["user:email"]
+        let mut default = vec!["user:email"];
+        default.extend(self.additional_scopes.iter().map(|s| s.as_str()));
+        default
     }
 
     fn client(&self) -> &reqwest::Client {

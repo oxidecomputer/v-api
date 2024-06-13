@@ -1797,6 +1797,7 @@ pub(crate) mod test_mocks {
                     "google_device_client_secret".to_string().into(),
                     "google_web_client_id".to_string(),
                     "google_web_client_secret".to_string().into(),
+                    None,
                 ))
             }),
         );
