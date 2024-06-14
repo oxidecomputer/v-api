@@ -7,10 +7,12 @@ pub mod config;
 mod context;
 pub mod endpoints;
 pub mod error;
+mod hook;
 pub mod mapper;
 pub mod permissions;
 mod secrets;
 mod util;
 
 pub use context::{ApiContext, SecretContext, VApiStorage, VContext};
+pub use hook::{PostUserRegister, PostUserRegisterAction};
 pub use util::response;

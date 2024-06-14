@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, TimeDelta, Utc};
 use dropshot::{HttpError, RequestContext, ServerContext};
-use http::StatusCode;
+use http::{Extensions, StatusCode};
 use jsonwebtoken::jwk::JwkSet;
 use newtype_uuid::{GenericUuid, TypedUuid};
 use oauth2::CsrfToken;
@@ -55,6 +55,7 @@ use crate::{
         bad_request, client_error, internal_error, resource_error, resource_restricted,
         ResourceError, ResourceResult, ToResourceResult, ToResourceResultOpt,
     },
+    PostUserRegisterAction,
 };
 
 static UNLIMITED: i64 = 9999999;
@@ -104,6 +105,11 @@ pub struct VContext<T> {
     jwt: JwtContext,
     secrets: SecretContext,
     oauth_providers: HashMap<OAuthProviderName, Box<dyn OAuthProviderFn>>,
+    // TODO: Create our own type if we run in to issues. IT seems for now that the Extensions type
+    // from the `http` crate fits what we need
+
+    // Replace with a super simple ArcMap
+    pub actions: Extensions,
 }
 
 pub trait ApiContext: ServerContext {
@@ -277,7 +283,29 @@ where
                 signer: keys[0].as_signer().await?,
             },
             oauth_providers: HashMap::new(),
+            actions: Extensions::new(),
         })
+    }
+
+    pub fn add_actions<A>(&mut self, actions: A)
+    where
+        A: Send + Sync + 'static,
+    {
+        self.actions.insert(Arc::new(actions));
+    }
+
+    pub fn get_actions<A>(&self) -> Option<Arc<A>>
+    where
+        A: Send + Sync + 'static,
+    {
+        self.actions.get::<Arc<A>>().cloned()
+    }
+
+    pub fn remove_actions<A>(mut self)
+    where
+        A: Send + Sync + 'static,
+    {
+        self.actions.remove::<Arc<A>>();
     }
 
     pub fn device_client(&self) -> ClientType {
@@ -583,7 +611,7 @@ where
             .map_err(|err| ApiError::from(err))
             .to_resource_result()?;
 
-        match api_user_providers.len() {
+        let user = match api_user_providers.len() {
             0 => {
                 tracing::info!(
                     ?mapped_permissions,
@@ -670,7 +698,23 @@ where
                     "Multiple providers for external id found".to_string(),
                 )))
             }
+        };
+
+        if let Ok((info, provider)) = &user {
+            let actions = self.get_actions::<PostUserRegisterAction>();
+            if let Some(actions) = actions {
+                for action in &actions.0 {
+                    let user_id = info.user.id;
+                    let provider_id = provider.id;
+                    let action = action.clone();
+                    tokio::spawn(async move {
+                        action.run(&user_id, &provider_id).await;
+                    });
+                }
+            }
         }
+
+        user
     }
 
     async fn get_mapped_fields(
