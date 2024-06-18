@@ -41,7 +41,7 @@ pub mod request {
 pub mod response {
     use dropshot::HttpError;
     use http::StatusCode;
-    use std::error::Error;
+    use std::{error::Error, fmt::Debug};
     use thiserror::Error;
     use tracing::instrument;
 
@@ -86,7 +86,7 @@ pub mod response {
     #[instrument(skip(internal_message))]
     pub fn internal_error<S>(internal_message: S) -> HttpError
     where
-        S: ToString,
+        S: ToString + Debug,
     {
         let internal_message = internal_message.to_string();
         tracing::error!(internal_message, "Request failed");
