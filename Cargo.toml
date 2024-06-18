@@ -1,7 +1,8 @@
 [workspace]
 members = [
   "v-api",
-  "v-api-installer", "v-api-permission-derive",
+  "v-api-installer",
+  "v-api-permission-derive",
   "v-model",
 ]
 resolver = "2"
