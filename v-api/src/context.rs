@@ -256,6 +256,7 @@ where
             unauthenticated_caller: Caller {
                 id: "00000000-0000-4000-8000-000000000000".parse().unwrap(),
                 permissions: vec![].into(),
+                extensions: HashMap::default(),
             },
             registration_caller: Caller {
                 id: "00000000-0000-4000-8000-000000000001".parse().unwrap(),
@@ -271,6 +272,7 @@ where
                     VPermission::CreateAccessToken.into(),
                 ]
                 .into(),
+                extensions: HashMap::default(),
             },
             jwt: JwtContext {
                 default_expiration: jwt.default_expiration,
@@ -395,6 +397,7 @@ where
                                 .into_iter()
                                 .map(|p| p.into())
                                 .collect::<Permissions<T>>(),
+                            extensions: HashMap::default(),
                         };
 
                         tracing::info!(?caller.id, "Resolved caller");
@@ -430,6 +433,7 @@ where
                 .into_iter()
                 .map(|p| p.into())
                 .collect::<Permissions<T>>(),
+            extensions: HashMap::default(),
         }
     }
 
@@ -443,6 +447,7 @@ where
                 .into_iter()
                 .map(|p| p.into())
                 .collect::<Permissions<T>>(),
+            extensions: HashMap::default(),
         }
     }
 

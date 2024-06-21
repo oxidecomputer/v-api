@@ -548,7 +548,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeSet, sync::Arc};
+    use std::{
+        collections::{BTreeSet, HashMap},
+        sync::Arc,
+    };
 
     use chrono::{TimeDelta, Utc};
     use http::StatusCode;
@@ -633,6 +636,7 @@ mod tests {
         let no_permissions = Caller {
             id: user1.id,
             permissions: Permissions::new(),
+            extensions: HashMap::default(),
         };
 
         let resp = create_api_user_inner::<VPermission, VPermissionResponse>(
@@ -651,6 +655,7 @@ mod tests {
         let with_permissions = Caller {
             id: user2.id,
             permissions: vec![VPermission::CreateApiUser].into(),
+            extensions: HashMap::default(),
         };
 
         let resp = create_api_user_inner::<VPermission, VPermissionResponse>(
@@ -729,6 +734,7 @@ mod tests {
         let no_permissions = Caller {
             id: user1.id,
             permissions: Permissions::new(),
+            extensions: HashMap::default(),
         };
 
         let resp = update_api_user_inner::<VPermission, VPermissionResponse>(
@@ -748,6 +754,7 @@ mod tests {
         let with_specific_permissions = Caller {
             id: user2.id,
             permissions: vec![VPermission::ManageApiUser(success_path.user_id)].into(),
+            extensions: HashMap::default(),
         };
 
         let resp = update_api_user_inner::<VPermission, VPermissionResponse>(
@@ -767,6 +774,7 @@ mod tests {
         let with_general_permissions = Caller {
             id: user3.id,
             permissions: vec![VPermission::ManageApiUsersAll].into(),
+            extensions: HashMap::default(),
         };
 
         let resp = update_api_user_inner::<VPermission, VPermissionResponse>(
@@ -829,6 +837,7 @@ mod tests {
         let no_permissions = Caller {
             id: user1.id,
             permissions: Permissions::new(),
+            extensions: HashMap::default(),
         };
 
         let resp = list_api_user_tokens_inner::<VPermission, VPermissionResponse>(
@@ -849,6 +858,7 @@ mod tests {
         let incorrect_permissions = Caller {
             id: user2.id,
             permissions: vec![VPermission::GetApiKey(TypedUuid::new_v4())].into(),
+            extensions: HashMap::default(),
         };
 
         let resp = list_api_user_tokens_inner::<VPermission, VPermissionResponse>(
@@ -869,6 +879,7 @@ mod tests {
         let success_permissions = Caller {
             id: user3.id,
             permissions: vec![VPermission::GetApiKey(TypedUuid::new_v4())].into(),
+            extensions: HashMap::default(),
         };
 
         let resp = list_api_user_tokens_inner::<VPermission, VPermissionResponse>(
@@ -889,6 +900,7 @@ mod tests {
         let failure_permissions = Caller {
             id: user4.id,
             permissions: vec![VPermission::GetApiKey(TypedUuid::new_v4())].into(),
+            extensions: HashMap::default(),
         };
 
         let resp = list_api_user_tokens_inner::<VPermission, VPermissionResponse>(
@@ -983,6 +995,7 @@ mod tests {
         let no_permissions = Caller {
             id: user1.id,
             permissions: Permissions::new(),
+            extensions: HashMap::default(),
         };
 
         let resp = create_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1002,6 +1015,7 @@ mod tests {
         let incorrect_permissions = Caller {
             id: user2.id,
             permissions: vec![VPermission::CreateApiKey(TypedUuid::new_v4())].into(),
+            extensions: HashMap::default(),
         };
 
         let resp = create_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1025,6 +1039,7 @@ mod tests {
                 VPermission::CreateApiKey(unknown_api_user_path.user_id),
             ]
             .into(),
+            extensions: HashMap::default(),
         };
 
         let resp = create_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1048,6 +1063,7 @@ mod tests {
                 VPermission::CreateApiKey(api_user_path.user_id),
             ]
             .into(),
+            extensions: HashMap::default(),
         };
 
         let resp = create_api_user_token_inner(
@@ -1072,6 +1088,7 @@ mod tests {
                 VPermission::CreateApiKey(failure_api_user_path.user_id),
             ]
             .into(),
+            extensions: HashMap::default(),
         };
 
         let resp = create_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1141,6 +1158,7 @@ mod tests {
         let no_permissions = Caller {
             id: user1.id,
             permissions: Permissions::new(),
+            extensions: HashMap::default(),
         };
 
         let resp = get_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1159,6 +1177,7 @@ mod tests {
         let incorrect_permissions = Caller {
             id: user2.id,
             permissions: vec![VPermission::GetApiKey(TypedUuid::new_v4())].into(),
+            extensions: HashMap::default(),
         };
 
         let resp = get_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1180,6 +1199,7 @@ mod tests {
                 unknown_api_user_token_path.api_key_id,
             )]
             .into(),
+            extensions: HashMap::default(),
         };
 
         let resp = get_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1198,6 +1218,7 @@ mod tests {
         let success_permissions = Caller {
             id: user4.id,
             permissions: vec![VPermission::GetApiKey(api_user_token_path.api_key_id)].into(),
+            extensions: HashMap::default(),
         };
 
         let resp = get_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1219,6 +1240,7 @@ mod tests {
                 failure_api_user_token_path.api_key_id,
             )]
             .into(),
+            extensions: HashMap::default(),
         };
 
         let resp = get_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1287,6 +1309,7 @@ mod tests {
         let no_permissions = Caller {
             id: user1.id,
             permissions: Permissions::new(),
+            extensions: HashMap::default(),
         };
 
         let resp = delete_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1305,6 +1328,7 @@ mod tests {
         let incorrect_permissions = Caller {
             id: user2.id,
             permissions: vec![VPermission::ManageApiKey(TypedUuid::new_v4())].into(),
+            extensions: HashMap::default(),
         };
 
         let resp = delete_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1326,6 +1350,7 @@ mod tests {
                 unknown_api_user_token_path.api_key_id,
             )]
             .into(),
+            extensions: HashMap::default(),
         };
 
         let resp = delete_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1344,6 +1369,7 @@ mod tests {
         let success_permissions = Caller {
             id: user4.id,
             permissions: vec![VPermission::ManageApiKey(api_user_token_path.api_key_id)].into(),
+            extensions: HashMap::default(),
         };
 
         let resp = delete_api_user_token_inner::<VPermission, VPermissionResponse>(
@@ -1365,6 +1391,7 @@ mod tests {
                 failure_api_user_token_path.api_key_id,
             )]
             .into(),
+            extensions: HashMap::default(),
         };
 
         let resp = delete_api_user_token_inner::<VPermission, VPermissionResponse>(

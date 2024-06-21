@@ -216,7 +216,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::{
-        collections::BTreeSet,
+        collections::{BTreeSet, HashMap},
         sync::{Arc, Mutex},
     };
 
@@ -262,6 +262,7 @@ mod tests {
         let mut caller = Caller {
             id: user.id,
             permissions: user.permissions.clone(),
+            extensions: HashMap::default(),
         };
 
         let mut user_store = MockApiUserStore::new();

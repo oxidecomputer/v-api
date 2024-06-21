@@ -2,7 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::BTreeSet, fmt::Debug};
+use std::{
+    any::{Any, TypeId},
+    collections::{BTreeSet, HashMap},
+    fmt::Debug,
+    sync::Arc,
+};
 
 use diesel::{
     backend::Backend,
@@ -28,10 +33,13 @@ impl<T> Permission for T where
 {
 }
 
+type ArcMap = HashMap<TypeId, Arc<dyn Any + Send + Sync>>;
+
 #[derive(Debug, Clone)]
 pub struct Caller<T> {
     pub id: TypedUuid<UserId>,
     pub permissions: Permissions<T>,
+    pub extensions: ArcMap,
 }
 
 impl<T> Caller<T>
@@ -54,6 +62,33 @@ where
         let result = self.permissions.can(permission);
         tracing::trace!(?permission, ?result, "Test if caller can");
         result
+    }
+
+    pub fn insert<U>(&mut self, value: U) -> Option<Arc<U>>
+    where
+        U: Send + Sync + 'static,
+    {
+        self.extensions
+            .insert(TypeId::of::<U>(), Arc::new(value))
+            .and_then(|arc| arc.downcast().ok())
+    }
+
+    pub fn get<U>(&self) -> Option<Arc<U>>
+    where
+        U: Send + Sync + 'static,
+    {
+        self.extensions
+            .get(&TypeId::of::<U>())
+            .and_then(|arc| arc.clone().downcast().ok())
+    }
+
+    pub fn remove<U>(&mut self) -> Option<Arc<U>>
+    where
+        U: Send + Sync + 'static,
+    {
+        self.extensions
+            .remove(&TypeId::of::<U>())
+            .and_then(|arc| arc.downcast().ok())
     }
 }
 
