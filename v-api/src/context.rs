@@ -49,7 +49,7 @@ use crate::{
         UserInfo,
     },
     error::{ApiError, AppError},
-    mapper::{MapperRule, Mapping},
+    mapper::{DefaultMappingEngine, MappingEngine},
     permissions::{VAppPermission, VPermission},
     util::response::{
         bad_request, client_error, internal_error, resource_error, resource_restricted,
@@ -105,6 +105,7 @@ pub struct VContext<T> {
     jwt: JwtContext,
     secrets: SecretContext,
     oauth_providers: HashMap<OAuthProviderName, Box<dyn OAuthProviderFn>>,
+    mapping_engine: Box<dyn MappingEngine<T> + Send + Sync>,
     // TODO: Create our own type if we run in to issues. IT seems for now that the Extensions type
     // from the `http` crate fits what we need
 
@@ -285,6 +286,7 @@ where
                 signer: keys[0].as_signer().await?,
             },
             oauth_providers: HashMap::new(),
+            mapping_engine: Box::new(DefaultMappingEngine),
             actions: Extensions::new(),
         })
     }
@@ -322,6 +324,10 @@ where
 
     pub fn set_storage(&mut self, storage: Arc<dyn VApiStorage<T>>) {
         self.storage = storage;
+    }
+
+    pub fn set_mapping_engine(&mut self, engine: Box<dyn MappingEngine<T> + Send + Sync>) {
+        self.mapping_engine = engine;
     }
 
     pub async fn authn_token(
@@ -733,15 +739,25 @@ where
         // We optimistically load mappers here. We do not want to take a lock on the mappers and
         // instead handle mappers that become depleted before we can evaluate them at evaluation
         // time.
-        for mapping in self.get_mappings(caller).await? {
-            let (permissions, groups) = (
-                mapping
-                    .rule
-                    .permissions_for(&self, &info)
-                    .await
-                    .to_resource_result()?,
-                mapping.rule.groups_for(&self, &info).await?,
-            );
+        for mapper in self.get_mappers(caller, false).await? {
+            // Try to transform this mapper into a mapping
+            // let mappings = self.mapping_fns.iter().filter_map(|mapping_fn| mapping_fn(mapper.clone()).ok()).nth(0);
+            let mapping = self.mapping_engine.create_mapping(mapper.clone());
+
+            let (mut permissions, mut groups) = match mapping {
+                Ok(mapping) => (
+                    mapping
+                        .permissions_for(&self, &info)
+                        .await
+                        .to_resource_result()?,
+                    mapping.groups_for(&self, &info).await?,
+                ),
+                Err(err) => {
+                    // Errors here can be expected. They are reported, but not acted upon
+                    tracing::info!(?err, "Not mapping was found for mapper");
+                    (Permissions::new(), BTreeSet::default())
+                }
+            };
 
             // If a rule is set to apply a permission or group to a user, then the rule needs to be
             // checked for usage. If it does not have an activation limit then nothing is needed.
@@ -749,8 +765,8 @@ where
             // consumption works then we add the permissions. If they fail then we do not, but we
             // do not fail the entire mapping process
             let apply = if !permissions.is_empty() || !groups.is_empty() {
-                if mapping.max_activations.is_some() {
-                    match self.consume_mapping_activation(&mapping).await {
+                if mapper.max_activations.is_some() {
+                    match self.consume_mapping_activation(&mapper).await {
                         Ok(_) => true,
                         Err(err) => {
                             // TODO: Inspect the error. We expect to see a conflict error, and
@@ -767,14 +783,8 @@ where
             };
 
             if apply {
-                mapped_permissions.append(
-                    &mut mapping
-                        .rule
-                        .permissions_for(&self, &info)
-                        .await
-                        .to_resource_result()?,
-                );
-                mapped_groups.append(&mut mapping.rule.groups_for(&self, &info).await?);
+                mapped_permissions.append(&mut permissions);
+                mapped_groups.append(&mut groups);
             }
         }
 
@@ -1479,22 +1489,6 @@ where
 
     // Mapper Operations
 
-    async fn get_mappings(
-        &self,
-        caller: &Caller<T>,
-    ) -> ResourceResult<Vec<Mapping<T>>, StoreError> {
-        let mappers = self
-            .get_mappers(caller, false)
-            .await?
-            .into_iter()
-            .filter_map(|mapper| mapper.try_into().ok())
-            .collect::<Vec<_>>();
-
-        tracing::trace!(?mappers, "Fetched list of mappers to test");
-
-        Ok(mappers)
-    }
-
     pub async fn get_mappers(
         &self,
         caller: &Caller<T>,
@@ -1545,29 +1539,18 @@ where
     }
 
     // TODO: Create a permission for this that only the registration user has
-    async fn consume_mapping_activation(&self, mapping: &Mapping<T>) -> Result<(), StoreError> {
+    async fn consume_mapping_activation(&self, mapper: &Mapper) -> Result<(), StoreError> {
         // Activations are only incremented if the rule actually has a max activation value
-        let activations = mapping
+        let activations = mapper
             .max_activations
-            .map(|_| mapping.activations.unwrap_or(0) + 1);
+            .map(|_| mapper.activations.unwrap_or(0) + 1);
 
-        Ok(MapperStore::upsert(
-            &*self.storage,
-            &NewMapper {
-                id: mapping.id,
-                name: mapping.name.clone(),
-                // If a rule fails to serialize, then something critical has gone wrong. Rules should
-                // never be modified after they are created, and rules must be persisted before they
-                // can be used for an activation. So if a rule fails to serialize, then the stored rule
-                // has become corrupted or something in the application has manipulated the rule.
-                rule: serde_json::to_value(&mapping.rule)
-                    .expect("Store rules must be able to be re-serialized"),
-                activations: activations,
-                max_activations: mapping.max_activations,
-            },
-        )
-        .await
-        .map(|_| ())?)
+        let mut update: NewMapper = mapper.clone().into();
+        update.activations = activations;
+
+        Ok(MapperStore::upsert(&*self.storage, &update)
+            .await
+            .map(|_| ())?)
     }
 
     // TODO: Need a permission for this action
