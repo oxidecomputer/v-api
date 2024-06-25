@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use newtype_uuid::TypedUuid;
+use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc};
 use v_model::{
     permissions::Caller,
@@ -45,6 +46,13 @@ where
         let previous = self.engine.take();
         self.engine = engine;
         previous
+    }
+
+    pub fn validate(&self, value: &Value) -> bool {
+        match &self.engine {
+            Some(engine) => engine.validate_mapping_data(value),
+            None => false,
+        }
     }
 
     pub async fn get_mappers(

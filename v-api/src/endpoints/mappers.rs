@@ -6,6 +6,7 @@ use dropshot::{HttpError, HttpResponseCreated, HttpResponseOk, RequestContext};
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tracing::instrument;
 use v_model::{
     permissions::{AsScope, Permission, PermissionStorage},
@@ -14,8 +15,8 @@ use v_model::{
 
 use crate::{
     context::{ApiContext, VContextWithCaller},
-    mapper::MappingRulesData,
     permissions::{VAppPermission, VPermission},
+    response::bad_request,
     util::{
         is_uniqueness_error,
         response::{conflict, ResourceError},
@@ -48,46 +49,49 @@ where
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CreateMapper<T> {
+pub struct CreateMapper {
     name: String,
-    rule: MappingRulesData<T>,
+    rule: Value,
     max_activations: Option<i32>,
 }
 
 #[instrument(skip(rqctx, body), err(Debug))]
-pub async fn create_mapper_op<T, U>(
+pub async fn create_mapper_op<T>(
     rqctx: &RequestContext<T>,
-    body: CreateMapper<U>,
+    body: CreateMapper,
 ) -> Result<HttpResponseCreated<Mapper>, HttpError>
 where
-    T: ApiContext<AppPermissions = U>,
+    T: ApiContext,
     T::AppPermissions: VAppPermission,
 {
     let (ctx, caller) = rqctx.as_ctx().await?;
-    let res = ctx
-        .mapping
-        .add_mapper(
-            &caller,
-            &NewMapper {
-                id: TypedUuid::new_v4(),
-                name: body.name,
-                // This was just unserialized from json, so it can be serialized back to a value
-                rule: serde_json::to_value(body.rule).unwrap(),
-                activations: body.max_activations.map(|_| 0),
-                max_activations: body.max_activations,
-            },
-        )
-        .await;
+    if ctx.mapping.validate(&body.rule) {
+        let res = ctx
+            .mapping
+            .add_mapper(
+                &caller,
+                &NewMapper {
+                    id: TypedUuid::new_v4(),
+                    name: body.name,
+                    rule: body.rule,
+                    activations: body.max_activations.map(|_| 0),
+                    max_activations: body.max_activations,
+                },
+            )
+            .await;
 
-    res.map(HttpResponseCreated).map_err(|err| {
-        if let ResourceError::InternalError(err) = &err {
-            if is_uniqueness_error(&err) {
-                return conflict();
+        res.map(HttpResponseCreated).map_err(|err| {
+            if let ResourceError::InternalError(err) = &err {
+                if is_uniqueness_error(&err) {
+                    return conflict();
+                }
             }
-        }
 
-        HttpError::from(err)
-    })
+            HttpError::from(err)
+        })
+    } else {
+        Err(bad_request("Invalid rule payload"))
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]

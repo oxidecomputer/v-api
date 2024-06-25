@@ -10,6 +10,7 @@ use github_username::GitHubUsernameMapperData;
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{collections::BTreeSet, error::Error as StdError, fmt::Debug};
 use thiserror::Error;
 use v_model::{
@@ -55,6 +56,7 @@ pub enum MappingEngineError {
 
 pub trait MappingEngine<T>: Send + Sync {
     fn create_mapping(&self, value: Mapper) -> Result<Box<dyn MapperRule<T>>, MappingEngineError>;
+    fn validate_mapping_data(&self, value: &Value) -> bool;
 }
 
 pub struct DefaultMappingEngine<T> {
@@ -124,5 +126,9 @@ where
                     res
                 }
             })
+    }
+
+    fn validate_mapping_data(&self, value: &Value) -> bool {
+        serde_json::from_value::<MappingRulesData<T>>(value.clone()).is_ok()
     }
 }
