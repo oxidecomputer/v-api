@@ -60,6 +60,10 @@ impl ListPagination {
         Self::default().limit(1)
     }
 
+    pub fn unlimited() -> ListPagination {
+        ListPagination::default().limit(9999999999)
+    }
+
     pub fn offset(mut self, offset: i64) -> Self {
         self.offset = offset;
         self

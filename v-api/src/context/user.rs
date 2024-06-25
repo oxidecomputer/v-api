@@ -1,0 +1,561 @@
+use newtype_uuid::{GenericUuid, TypedUuid};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+};
+use thiserror::Error;
+use tracing::{info_span, instrument, Instrument};
+use uuid::Uuid;
+use v_model::{
+    permissions::{AsScope, Caller, Permission, PermissionError, PermissionStorage},
+    storage::{
+        AccessGroupFilter, AccessGroupStore, AccessTokenStore, ApiKeyFilter, ApiKeyStore,
+        ApiUserFilter, ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, ListPagination,
+        StoreError,
+    },
+    AccessGroupId, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserInfo, ApiUserProvider,
+    NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, Permissions, UserId, UserProviderId,
+};
+
+use crate::{
+    authn::{
+        jwt::{Claims, JwtSigner},
+        AuthToken, Signer,
+    },
+    error::ApiError,
+    permissions::{VAppPermission, VPermission},
+    response::{
+        resource_restricted, ResourceError, ResourceResult, ToResourceResult, ToResourceResultOpt,
+    },
+    VApiStorage,
+};
+
+#[derive(Debug)]
+enum BasePermissions<T: Permission> {
+    Full,
+    Restricted(Permissions<T>),
+}
+
+#[derive(Debug, Error)]
+pub enum UserContextError {
+    #[error("Failed to authenticate caller")]
+    FailedToAuthenticate,
+    #[error("Supplied API key is invalid")]
+    InvalidKey,
+    #[error("Invalid scope: {0}")]
+    Scope(#[from] PermissionError),
+    #[error("Inner storage failure: {0}")]
+    Storage(#[from] StoreError),
+}
+
+pub struct RegisteredAccessToken {
+    pub access_token: AccessToken,
+    pub signed_token: String,
+}
+
+#[derive(Clone)]
+pub struct UserContext<T> {
+    storage: Arc<dyn VApiStorage<T>>,
+}
+
+impl<T> UserContext<T>
+where
+    T: VAppPermission,
+{
+    pub fn new(storage: Arc<dyn VApiStorage<T>>) -> Self {
+        Self { storage }
+    }
+
+    #[instrument(skip(self, signer, token))]
+    pub async fn get_caller(
+        &self,
+        registration_user: &Caller<T>,
+        signer: &dyn Signer,
+        token: &AuthToken,
+    ) -> Result<Caller<T>, UserContextError> {
+        let (api_user_id, base_permissions) = self
+            .get_base_permissions(registration_user, signer, token)
+            .await?;
+
+        match self.get_api_user(registration_user, &api_user_id).await {
+            ResourceResult::Ok(info) => {
+                // The permissions for the caller is the intersection of the user's permissions and the tokens permissions
+                let user_permissions = self.get_user_permissions(&info.user).await?;
+
+                let combined_permissions = match &base_permissions {
+                    BasePermissions::Full => user_permissions.clone(),
+                    BasePermissions::Restricted(permissions) => {
+                        let token_permissions = <T as PermissionStorage>::expand(
+                            permissions,
+                            &info.user,
+                            Some(&user_permissions),
+                        );
+                        token_permissions.intersect(&user_permissions)
+                    }
+                };
+
+                tracing::trace!(token = ?base_permissions, user = ?user_permissions, combined = ?combined_permissions, "Computed caller permissions");
+
+                let caller: Caller<T> = Caller {
+                    id: api_user_id,
+                    permissions: combined_permissions
+                        .into_iter()
+                        .map(|p| p.into())
+                        .collect::<Permissions<T>>(),
+                    extensions: HashMap::default(),
+                };
+
+                tracing::info!(?caller.id, "Resolved caller");
+                tracing::debug!(?caller.permissions, "Caller permissions");
+
+                Ok(caller)
+            }
+            Err(ResourceError::DoesNotExist) => {
+                tracing::error!("User for verified token does not exist");
+                Err(UserContextError::FailedToAuthenticate)
+            }
+            Err(ResourceError::Restricted) => {
+                tracing::error!("Built in user did not have permission to retrieve caller");
+                Err(UserContextError::FailedToAuthenticate)
+            }
+            Err(ResourceError::InternalError(err)) => {
+                tracing::error!("Failed to lookup caller");
+                Err(UserContextError::Storage(err))
+            }
+        }
+    }
+
+    async fn get_base_permissions(
+        &self,
+        caller: &Caller<T>,
+        signer: &dyn Signer,
+        auth: &AuthToken,
+    ) -> Result<(TypedUuid<UserId>, BasePermissions<T>), UserContextError> {
+        Ok(match auth {
+            AuthToken::ApiKey(api_key) => {
+                async {
+                    tracing::debug!("Attempt to authenticate");
+
+                    let id = TypedUuid::from_untyped_uuid(Uuid::from_slice(api_key.id()).map_err(|err| {
+                        tracing::info!(?err, slice = ?api_key.id(), "Failed to parse id from API key");
+                        UserContextError::InvalidKey
+                    })?);
+
+                    let mut key = if caller.any(&[&VPermission::GetApiKey(id).into(), &VPermission::GetApiKeysAll.into()]) {
+                        Ok(ApiKeyStore::list(
+                            &*self.storage,
+                            ApiKeyFilter {
+                                id: Some(vec![id]),
+                                expired: false,
+                                deleted: false,
+                                ..Default::default()
+                            },
+                            &ListPagination {
+                                offset: 0,
+                                limit: 1,
+                            },
+                        )
+                        .await?)
+                    } else {
+                        tracing::error!("Calling user is not allowed to lookup user permissions");
+                        Err(UserContextError::FailedToAuthenticate)
+                    }?;
+
+                    if let Some(key) = key.pop() {
+                        if let Err(err) =
+                            api_key.verify(signer, key.key_signature.as_bytes())
+                        {
+                            tracing::debug!(?err, "Failed to verify api key");
+                            Err(UserContextError::FailedToAuthenticate)
+                        } else {
+                            tracing::debug!("Verified caller key");
+                            Ok((
+                                key.user_id,
+                                key.permissions
+                                    .map(BasePermissions::Restricted)
+                                    .unwrap_or(BasePermissions::Full),
+                            ))
+                        }
+                    } else {
+                        tracing::debug!("Failed to find matching key");
+                        Err(UserContextError::FailedToAuthenticate)
+                    }
+                }
+                .instrument(info_span!("Test api key"))
+                .await
+            }
+            AuthToken::Jwt(jwt) => {
+                // AuthnToken::Jwt can only be generated from a verified JWT
+                let permissions = match &jwt.claims.scp {
+                    Some(scp) => BasePermissions::Restricted(<T as AsScope>::from_scope(scp.iter())?),
+                    None => BasePermissions::Full,
+                };
+                Ok((jwt.claims.sub, permissions))
+            }
+        }?)
+    }
+
+    #[instrument(skip(self), fields(user_id = ?user.id, groups = ?user.groups))]
+    async fn get_user_permissions(&self, user: &ApiUser<T>) -> Result<Permissions<T>, StoreError> {
+        let mut group_permissions = self.get_user_group_permissions(&user).await?;
+        let mut permissions = user.permissions.clone();
+        permissions.append(&mut group_permissions);
+
+        Ok(permissions)
+    }
+
+    async fn get_user_group_permissions(
+        &self,
+        user: &ApiUser<T>,
+    ) -> Result<Permissions<T>, StoreError> {
+        tracing::trace!("Expanding groups into permissions");
+
+        let groups = AccessGroupStore::list(
+            &*self.storage,
+            AccessGroupFilter {
+                id: Some(user.groups.iter().copied().collect()),
+                ..Default::default()
+            },
+            &ListPagination::unlimited(),
+        )
+        .await?;
+
+        tracing::trace!(?groups, "Found groups to map to permissions");
+
+        let permissions = groups
+            .into_iter()
+            .fold(Permissions::new(), |mut aggregate, group| {
+                let mut expanded = <T as PermissionStorage>::expand(&group.permissions, &user, Some(&user.permissions));
+
+                tracing::trace!(group_id = ?group.id, group_name = ?group.name, permissions = ?expanded, "Transformed group into permission set");
+                aggregate.append(&mut expanded);
+
+                aggregate
+            });
+
+        Ok(permissions)
+    }
+
+    // API User Operations
+
+    pub async fn get_api_user(
+        &self,
+        caller: &Caller<T>,
+        id: &TypedUuid<UserId>,
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
+        if caller.any(&[
+            &VPermission::GetApiUser(*id).into(),
+            &VPermission::GetApiUsersAll.into(),
+        ]) {
+            ApiUserStore::get(&*self.storage, id, false)
+                .await
+                .map(|opt| {
+                    opt.map(|mut info| {
+                        info.user.permissions = <T as PermissionStorage>::expand(
+                            &info.user.permissions,
+                            &info.user,
+                            None,
+                        );
+                        info
+                    })
+                })
+                .opt_to_resource_result()
+        } else {
+            resource_restricted()
+        }
+    }
+
+    pub async fn list_api_user(
+        &self,
+        caller: &Caller<T>,
+        filter: ApiUserFilter,
+        pagination: &ListPagination,
+    ) -> ResourceResult<Vec<ApiUserInfo<T>>, StoreError> {
+        let mut users = ApiUserStore::list(&*self.storage, filter, pagination)
+            .await
+            .to_resource_result()?;
+
+        users.retain(|info| {
+            caller.any(&[
+                &VPermission::GetApiUser(info.user.id).into(),
+                &VPermission::GetApiUsersAll.into(),
+            ])
+        });
+
+        Ok(users)
+    }
+
+    #[instrument(skip(self))]
+    pub async fn create_api_user(
+        &self,
+        caller: &Caller<T>,
+        permissions: Permissions<T>,
+        groups: BTreeSet<TypedUuid<AccessGroupId>>,
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
+        if caller.can(&VPermission::CreateApiUser.into()) {
+            let mut new_user = NewApiUser {
+                id: TypedUuid::new_v4(),
+                permissions: permissions,
+                groups: groups,
+            };
+            new_user.permissions = <T as PermissionStorage>::contract(&new_user.permissions);
+            ApiUserStore::upsert(&*self.storage, new_user)
+                .await
+                .to_resource_result()
+        } else {
+            resource_restricted()
+        }
+    }
+
+    #[instrument(skip(self))]
+    pub async fn update_api_user(
+        &self,
+        caller: &Caller<T>,
+        mut api_user: NewApiUser<T>,
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
+        if caller.any(&[
+            &VPermission::ManageApiUser(api_user.id).into(),
+            &VPermission::ManageApiUsersAll.into(),
+        ]) {
+            api_user.permissions = <T as PermissionStorage>::contract(&api_user.permissions);
+            ApiUserStore::upsert(&*self.storage, api_user)
+                .await
+                .to_resource_result()
+        } else {
+            resource_restricted()
+        }
+    }
+
+    pub async fn add_permissions_to_user(
+        &self,
+        caller: &Caller<T>,
+        user_id: &TypedUuid<UserId>,
+        new_permissions: Permissions<T>,
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
+        if caller.any(&[
+            &VPermission::ManageApiUser(*user_id).into(),
+            &VPermission::ManageApiUsersAll.into(),
+        ]) {
+            let info = self.get_api_user(caller, user_id).await?;
+
+            let mut user_update: NewApiUser<T> = info.user.into();
+            for permission in new_permissions.into_iter() {
+                tracing::info!(id = ?user_id, ?permission, "Adding permission to user");
+                user_update.permissions.insert(permission);
+            }
+
+            self.update_api_user(caller, user_update).await
+        } else {
+            resource_restricted()
+        }
+    }
+
+    pub async fn create_api_user_token(
+        &self,
+        caller: &Caller<T>,
+        token: NewApiKey<T>,
+        api_user_id: &TypedUuid<UserId>,
+    ) -> ResourceResult<ApiKey<T>, StoreError> {
+        if caller.any(&[
+            &VPermission::CreateApiKey(*api_user_id).into(),
+            &VPermission::CreateApiKeyAll.into(),
+        ]) {
+            ApiKeyStore::upsert(&*self.storage, token)
+                .await
+                .to_resource_result()
+        } else {
+            resource_restricted()
+        }
+    }
+
+    pub async fn get_api_user_token(
+        &self,
+        caller: &Caller<T>,
+        api_key_id: &TypedUuid<ApiKeyId>,
+    ) -> ResourceResult<ApiKey<T>, StoreError> {
+        if caller.any(&[
+            &VPermission::GetApiKey(*api_key_id).into(),
+            &VPermission::GetApiKeysAll.into(),
+        ]) {
+            ApiKeyStore::get(&*self.storage, api_key_id, false)
+                .await
+                .opt_to_resource_result()
+        } else {
+            resource_restricted()
+        }
+    }
+
+    pub async fn get_api_user_tokens(
+        &self,
+        caller: &Caller<T>,
+        api_user_id: &TypedUuid<UserId>,
+        pagination: &ListPagination,
+    ) -> ResourceResult<Vec<ApiKey<T>>, StoreError> {
+        let mut tokens = ApiKeyStore::list(
+            &*self.storage,
+            ApiKeyFilter {
+                api_user_id: Some(vec![*api_user_id]),
+                expired: true,
+                deleted: false,
+                ..Default::default()
+            },
+            pagination,
+        )
+        .await
+        .to_resource_result()?;
+
+        tokens.retain(|token| {
+            caller.any(&[
+                &VPermission::GetApiKey(token.id).into(),
+                &VPermission::GetApiKeysAll.into(),
+            ])
+        });
+
+        Ok(tokens)
+    }
+
+    pub async fn get_api_user_provider(
+        &self,
+        caller: &Caller<T>,
+        user_id: &TypedUuid<UserId>,
+        provider_id: &TypedUuid<UserProviderId>,
+    ) -> ResourceResult<ApiUserProvider, StoreError> {
+        if caller.any(&[
+            &VPermission::GetApiUser(*user_id).into(),
+            &VPermission::GetApiUsersAll.into(),
+        ]) {
+            ApiUserProviderStore::get(&*self.storage, provider_id, false)
+                .await
+                .opt_to_resource_result()
+        } else {
+            resource_restricted()
+        }
+    }
+
+    pub async fn list_api_user_provider(
+        &self,
+        caller: &Caller<T>,
+        filter: ApiUserProviderFilter,
+        pagination: &ListPagination,
+    ) -> ResourceResult<Vec<ApiUserProvider>, StoreError> {
+        let mut providers = ApiUserProviderStore::list(&*self.storage, filter, pagination)
+            .await
+            .to_resource_result()?;
+
+        providers.retain(|provider| {
+            caller.any(&[
+                &VPermission::GetApiUser(provider.user_id).into(),
+                &VPermission::GetApiUsersAll.into(),
+            ])
+        });
+
+        Ok(providers)
+    }
+
+    pub async fn update_api_user_provider(
+        &self,
+        caller: &Caller<T>,
+        api_user_provider: NewApiUserProvider,
+    ) -> ResourceResult<ApiUserProvider, StoreError> {
+        if caller.any(&[
+            &VPermission::ManageApiUser(api_user_provider.user_id).into(),
+            &VPermission::ManageApiUsersAll.into(),
+        ]) {
+            ApiUserProviderStore::upsert(&*self.storage, api_user_provider)
+                .await
+                .to_resource_result()
+        } else {
+            resource_restricted()
+        }
+    }
+
+    pub async fn delete_api_user_token(
+        &self,
+        caller: &Caller<T>,
+        id: &TypedUuid<ApiKeyId>,
+    ) -> ResourceResult<ApiKey<T>, StoreError> {
+        if caller.any(&[
+            &VPermission::ManageApiKey(*id).into(),
+            &VPermission::ManageApiKeysAll.into(),
+        ]) {
+            ApiKeyStore::delete(&*self.storage, id)
+                .await
+                .opt_to_resource_result()
+        } else {
+            resource_restricted()
+        }
+    }
+
+    pub async fn create_access_token(
+        &self,
+        caller: &Caller<T>,
+        access_token: NewAccessToken,
+    ) -> ResourceResult<AccessToken, StoreError> {
+        if caller.can(&VPermission::CreateAccessToken.into()) {
+            AccessTokenStore::upsert(&*self.storage, access_token)
+                .await
+                .to_resource_result()
+        } else {
+            resource_restricted()
+        }
+    }
+
+    #[instrument(skip(self), err(Debug))]
+    async fn ensure_api_user(
+        &self,
+        caller: &Caller<T>,
+        api_user_id: TypedUuid<UserId>,
+        mut mapped_permissions: Permissions<T>,
+        mut mapped_groups: BTreeSet<TypedUuid<AccessGroupId>>,
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
+        match self.get_api_user(caller, &api_user_id).await {
+            ResourceResult::Ok(info) => {
+                // Ensure that the existing user has "at least" the mapped permissions
+                let mut update: NewApiUser<T> = info.user.into();
+                update.permissions.append(&mut mapped_permissions);
+                update.groups.append(&mut mapped_groups);
+
+                self.update_api_user(caller, update).await
+            }
+            ResourceResult::Err(ResourceError::DoesNotExist) => {
+                // TODO: Seems weird this is not a create call, indicates an issue higher up in
+                // the call chain
+                self.update_api_user(
+                    caller,
+                    NewApiUser {
+                        id: api_user_id,
+                        permissions: mapped_permissions,
+                        groups: mapped_groups,
+                    },
+                )
+                .await
+            }
+            other => other,
+        }
+    }
+
+    pub async fn register_access_token(
+        &self,
+        caller: &Caller<T>,
+        signer: &JwtSigner,
+        api_user: &TypedUuid<UserId>,
+        claims: &Claims,
+    ) -> Result<RegisteredAccessToken, ApiError> {
+        let token = self
+            .create_access_token(
+                caller,
+                NewAccessToken {
+                    id: claims.jti,
+                    user_id: *api_user,
+                    revoked_at: None,
+                },
+            )
+            .await?;
+
+        let signed = signer.sign(&claims).await?;
+        Ok(RegisteredAccessToken {
+            access_token: token,
+            signed_token: signed,
+        })
+    }
+}

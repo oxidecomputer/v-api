@@ -31,7 +31,7 @@ where
     T: VAppPermission + PermissionStorage,
 {
     let (ctx, caller) = rqctx.as_ctx().await?;
-    Ok(HttpResponseOk(ctx.list_oauth_clients(&caller).await?))
+    Ok(HttpResponseOk(ctx.oauth.list_oauth_clients(&caller).await?))
 }
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -54,19 +54,20 @@ where
     T: VAppPermission + From<VPermission> + PermissionStorage,
 {
     // Create the new client
-    let client = ctx.create_oauth_client(&caller).await?;
+    let client = ctx.oauth.create_oauth_client(&caller).await?;
 
     // Give the caller permission to perform actions on the client
-    ctx.add_permissions_to_user(
-        &caller,
-        &caller.id,
-        vec![
-            VPermission::GetOAuthClient(client.id),
-            VPermission::ManageOAuthClient(client.id),
-        ]
-        .into(),
-    )
-    .await?;
+    ctx.user
+        .add_permissions_to_user(
+            &caller,
+            &caller.id,
+            vec![
+                VPermission::GetOAuthClient(client.id),
+                VPermission::ManageOAuthClient(client.id),
+            ]
+            .into(),
+        )
+        .await?;
 
     Ok(HttpResponseCreated(client))
 }
@@ -87,7 +88,7 @@ where
     let (ctx, caller) = rqctx.as_ctx().await?;
     let path = path.into_inner();
     Ok(HttpResponseOk(
-        ctx.get_oauth_client(&caller, &path.client_id).await?,
+        ctx.oauth.get_oauth_client(&caller, &path.client_id).await?,
     ))
 }
 
@@ -131,6 +132,7 @@ where
         .await
         .map_err(to_internal_error)?;
     let client_secret = ctx
+        .oauth
         .add_oauth_secret(&caller, &id, client_id, secret.signature())
         .await?;
 
@@ -158,7 +160,8 @@ where
     let (ctx, caller) = rqctx.as_ctx().await?;
     let path = path.into_inner();
     Ok(HttpResponseOk(
-        ctx.delete_oauth_secret(&caller, &path.secret_id, &path.client_id)
+        ctx.oauth
+            .delete_oauth_secret(&caller, &path.secret_id, &path.client_id)
             .await?,
     ))
 }
@@ -186,7 +189,8 @@ where
     let path = path.into_inner();
     let body = body.into_inner();
     Ok(HttpResponseOk(
-        ctx.add_oauth_redirect_uri(&caller, &path.client_id, &body.redirect_uri)
+        ctx.oauth
+            .add_oauth_redirect_uri(&caller, &path.client_id, &body.redirect_uri)
             .await?,
     ))
 }
@@ -208,7 +212,8 @@ where
     let (ctx, caller) = rqctx.as_ctx().await?;
     let path = path.into_inner();
     Ok(HttpResponseOk(
-        ctx.delete_oauth_redirect_uri(&caller, &path.redirect_uri_id, &path.client_id)
+        ctx.oauth
+            .delete_oauth_redirect_uri(&caller, &path.redirect_uri_id, &path.client_id)
             .await?,
     ))
 }

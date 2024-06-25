@@ -19,7 +19,7 @@ use rsa::traits::PublicKeyParts;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::instrument;
-use v_model::{AccessTokenId, ApiUser, ApiUserProvider, UserId, UserProviderId};
+use v_model::{AccessTokenId, UserId, UserProviderId};
 
 use crate::{config::AsymmetricKey, context::VContext, permissions::VAppPermission};
 
@@ -61,8 +61,8 @@ pub struct Claims {
 impl Claims {
     pub fn new<T>(
         ctx: &VContext<T>,
-        user: &ApiUser<T>,
-        provider: &ApiUserProvider,
+        user: &TypedUuid<UserId>,
+        provider: &TypedUuid<UserProviderId>,
         scope: Option<Vec<String>>,
         expires_at: DateTime<Utc>,
     ) -> Self
@@ -72,8 +72,8 @@ impl Claims {
         Claims {
             iss: ctx.public_url().to_string(),
             aud: ctx.public_url().to_string(),
-            sub: user.id,
-            prv: provider.id,
+            sub: *user,
+            prv: *provider,
             scp: scope,
             exp: expires_at.timestamp(),
             nbf: Utc::now().timestamp(),

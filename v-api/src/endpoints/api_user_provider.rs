@@ -9,7 +9,11 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use v_model::{permissions::PermissionStorage, UserId, UserProviderId};
 
-use crate::{context::ApiContext, permissions::VAppPermission, secrets::OpenApiSecretString};
+use crate::{
+    context::{ApiContext, VContextWithCaller},
+    permissions::VAppPermission,
+    secrets::OpenApiSecretString,
+};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ApiUserProviderPath {
@@ -36,18 +40,24 @@ pub async fn create_link_token_op<T>(
 where
     T: VAppPermission + PermissionStorage,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
+    let (ctx, caller) = rqctx.as_ctx().await?;
     let path = path.into_inner();
     let body = body.into_inner();
 
     let provider = ctx
+        .user
         .get_api_user_provider(&caller, &caller.id, &path.provider_id)
         .await?;
 
     let token = ctx
-        .create_link_request_token(&caller, &provider.id, &caller.id, &body.user_id)
+        .link
+        .create_link_request_token(
+            &caller,
+            ctx.signer(),
+            &provider.id,
+            &caller.id,
+            &body.user_id,
+        )
         .await?;
 
     Ok(HttpResponseOk(ApiUserLinkRequestResponse {

@@ -92,7 +92,7 @@ impl AccessTokenExchange {
 pub struct ProxyTokenResponse {
     access_token: String,
     token_type: String,
-    expires_in: Option<u32>,
+    expires_in: Option<i64>,
     refresh_token: Option<String>,
     scopes: Option<Vec<String>>,
 }
@@ -200,12 +200,15 @@ where
 
                     tracing::info!(api_user_id = ?api_user_info.user.id, api_user_provider_id = ?api_user_provider.id, "Retrieved api user to generate device token for");
 
+                    let claims =
+                        ctx.generate_claims(&api_user_info.user.id, &api_user_provider.id, None);
                     let token = ctx
+                        .user
                         .register_access_token(
                             &ctx.builtin_registration_user(),
-                            &api_user_info.user,
-                            &api_user_provider,
-                            None,
+                            ctx.jwt_signer(),
+                            &api_user_info.user.id,
+                            &claims,
                         )
                         .await?;
 
@@ -218,12 +221,7 @@ where
                             serde_json::to_string(&ProxyTokenResponse {
                                 access_token: token.signed_token,
                                 token_type: "Bearer".to_string(),
-                                expires_in: Some(
-                                    (token.expires_at - Utc::now())
-                                        .num_seconds()
-                                        .try_into()
-                                        .unwrap_or(0),
-                                ),
+                                expires_in: Some(claims.exp - Utc::now().timestamp()),
                                 refresh_token: None,
                                 scopes: None,
                             })

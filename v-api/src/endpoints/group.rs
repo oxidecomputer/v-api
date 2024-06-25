@@ -2,19 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::fmt::Debug;
-
 use dropshot::{HttpError, HttpResponseCreated, HttpResponseOk, RequestContext};
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::fmt::Debug;
 use tracing::instrument;
 use v_model::{
     permissions::{Permission, PermissionStorage, Permissions},
     AccessGroup, AccessGroupId, NewAccessGroup,
 };
 
-use crate::{context::ApiContext, permissions::VAppPermission};
+use crate::{
+    context::{ApiContext, VContextWithCaller},
+    permissions::VAppPermission,
+};
 
 fn into_group_response<T, U>(group: AccessGroup<T>) -> AccessGroup<U>
 where
@@ -43,12 +45,10 @@ where
     T: VAppPermission + PermissionStorage,
     U: From<T> + Permission + JsonSchema,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
-
+    let (ctx, caller) = rqctx.as_ctx().await?;
     Ok(HttpResponseOk(
-        ctx.get_groups(&caller)
+        ctx.group
+            .get_groups(&caller)
             .await?
             .into_iter()
             .map(into_group_response)
@@ -71,21 +71,19 @@ where
     T: VAppPermission + PermissionStorage,
     U: From<T> + Permission + JsonSchema,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
-
+    let (ctx, caller) = rqctx.as_ctx().await?;
     Ok(HttpResponseCreated(
-        ctx.create_group(
-            &caller,
-            NewAccessGroup {
-                id: TypedUuid::new_v4(),
-                name: body.name,
-                permissions: body.permissions,
-            },
-        )
-        .await
-        .map(into_group_response)?,
+        ctx.group
+            .create_group(
+                &caller,
+                NewAccessGroup {
+                    id: TypedUuid::new_v4(),
+                    name: body.name,
+                    permissions: body.permissions,
+                },
+            )
+            .await
+            .map(into_group_response)?,
     ))
 }
 
@@ -104,21 +102,19 @@ where
     T: VAppPermission + PermissionStorage,
     U: From<T> + Permission + JsonSchema,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
-
+    let (ctx, caller) = rqctx.as_ctx().await?;
     Ok(HttpResponseOk(
-        ctx.update_group(
-            &caller,
-            NewAccessGroup {
-                id: path.group_id,
-                name: body.name,
-                permissions: body.permissions,
-            },
-        )
-        .await
-        .map(into_group_response)?,
+        ctx.group
+            .update_group(
+                &caller,
+                NewAccessGroup {
+                    id: path.group_id,
+                    name: body.name,
+                    permissions: body.permissions,
+                },
+            )
+            .await
+            .map(into_group_response)?,
     ))
 }
 
@@ -131,12 +127,10 @@ where
     T: VAppPermission + PermissionStorage,
     U: From<T> + Permission + JsonSchema,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
-
+    let (ctx, caller) = rqctx.as_ctx().await?;
     Ok(HttpResponseOk(
-        ctx.delete_group(&caller, &path.group_id)
+        ctx.group
+            .delete_group(&caller, &path.group_id)
             .await
             .map(into_group_response)?,
     ))

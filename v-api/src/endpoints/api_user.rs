@@ -24,7 +24,7 @@ use v_model::{
 
 use crate::{
     authn::key::RawApiKey,
-    context::ApiContext,
+    context::{ApiContext, VContextWithCaller},
     error::ApiError,
     permissions::{VAppPermission, VAppPermissionResponse},
     secrets::OpenApiSecretString,
@@ -79,14 +79,13 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
-    let info = ctx.get_api_user(&caller, &caller.id).await?;
+    let (ctx, caller) = rqctx.as_ctx().await?;
+    let info = ctx.user.get_api_user(&caller, &caller.id).await?;
 
     let mut filter = ApiUserProviderFilter::default();
     filter.api_user_id = Some(vec![info.user.id]);
     let providers = ctx
+        .user
         .list_api_user_provider(&caller, filter, &ListPagination::default().limit(10))
         .await?;
 
@@ -103,15 +102,14 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
+    let (ctx, caller) = rqctx.as_ctx().await?;
     let path = path.into_inner();
-    let info = ctx.get_api_user(&caller, &path.user_id).await?;
+    let info = ctx.user.get_api_user(&caller, &path.user_id).await?;
 
     let mut filter = ApiUserProviderFilter::default();
     filter.api_user_id = Some(vec![info.user.id]);
     let providers = ctx
+        .user
         .list_api_user_provider(&caller, filter, &ListPagination::default().limit(10))
         .await?;
 
@@ -134,9 +132,7 @@ where
     T: VAppPermission + JsonSchema + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
+    let (ctx, caller) = rqctx.as_ctx().await?;
     let body = body.into_inner();
 
     create_api_user_inner(ctx, caller, body).await
@@ -153,6 +149,7 @@ where
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let info = ctx
+        .user
         .create_api_user(&caller, body.permissions, body.group_ids)
         .await?;
 
@@ -174,9 +171,7 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
+    let (ctx, caller) = rqctx.as_ctx().await?;
     update_api_user_inner(ctx, caller, path, body).await
 }
 
@@ -192,6 +187,7 @@ where
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let info = ctx
+        .user
         .update_api_user(
             &caller,
             NewApiUser {
@@ -214,9 +210,7 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
+    let (ctx, caller) = rqctx.as_ctx().await?;
     list_api_user_tokens_inner(ctx, caller, path).await
 }
 
@@ -233,6 +227,7 @@ where
     tracing::info!("Fetch token list");
 
     let tokens = ctx
+        .user
         .get_api_user_tokens(&caller, &path.user_id, &ListPagination::default())
         .await?;
 
@@ -276,9 +271,7 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
+    let (ctx, caller) = rqctx.as_ctx().await?;
     create_api_user_token_inner(ctx, caller, path, body).await
 }
 
@@ -293,8 +286,7 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let info = ctx.get_api_user(&caller, &path.user_id).await?;
-
+    let info = ctx.user.get_api_user(&caller, &path.user_id).await?;
     let key_id = TypedUuid::new_v4();
     let key = RawApiKey::generate::<24>(key_id.as_untyped_uuid())
         .sign(ctx.signer())
@@ -302,6 +294,7 @@ where
         .map_err(to_internal_error)?;
 
     let user_key = ctx
+        .user
         .create_api_user_token(
             &caller,
             NewApiKey {
@@ -342,9 +335,7 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
+    let (ctx, caller) = rqctx.as_ctx().await?;
     get_api_user_token_inner(ctx, caller, path).await
 }
 
@@ -358,8 +349,10 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let token = ctx.get_api_user_token(&caller, &path.api_key_id).await?;
-
+    let token = ctx
+        .user
+        .get_api_user_token(&caller, &path.api_key_id)
+        .await?;
     Ok(HttpResponseOk(ApiKeyResponse {
         id: token.id,
         permissions: into_permissions_response(token.permissions),
@@ -376,9 +369,7 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
+    let (ctx, caller) = rqctx.as_ctx().await?;
     delete_api_user_token_inner(ctx, caller, path).await
 }
 
@@ -392,8 +383,10 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let token = ctx.delete_api_user_token(&caller, &path.api_key_id).await?;
-
+    let token = ctx
+        .user
+        .delete_api_user_token(&caller, &path.api_key_id)
+        .await?;
     Ok(HttpResponseOk(ApiKeyResponse {
         id: token.id,
         permissions: into_permissions_response(token.permissions),
@@ -416,10 +409,7 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
-
+    let (ctx, caller) = rqctx.as_ctx().await?;
     let info = ctx
         .add_api_user_to_group(&caller, &path.user_id, &body.group_id)
         .await?;
@@ -442,10 +432,7 @@ where
     T: VAppPermission + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
-
+    let (ctx, caller) = rqctx.as_ctx().await?;
     let info = ctx
         .remove_api_user_from_group(&caller, &path.user_id, &path.group_id)
         .await?;
@@ -469,9 +456,7 @@ pub async fn link_provider_op<T>(
 where
     T: VAppPermission + PermissionStorage,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
+    let (ctx, caller) = rqctx.as_ctx().await?;
 
     // TODO: This permission check indicates that the permission modeling for this functionality
     // is not sufficient. Need to rethink it
@@ -491,6 +476,7 @@ where
 
         // TODO: We need an actual permission for reading a LinkRequest
         let link_request = ctx
+            .link
             .get_link_request(&link_request_id)
             .await
             .map_err(ApiError::Storage)?

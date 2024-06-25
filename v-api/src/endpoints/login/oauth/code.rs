@@ -120,6 +120,7 @@ where
     T: VAppPermission + PermissionStorage,
 {
     let client = ctx
+        .oauth
         .get_oauth_client(&ctx.builtin_registration_user(), &client_id)
         .await
         .map_err(|err| {
@@ -220,6 +221,7 @@ where
 
     // Store the generated attempt
     let attempt = ctx
+        .login
         .create_login_attempt(attempt)
         .await
         .map_err(to_internal_error)?;
@@ -378,6 +380,7 @@ where
     // We have now verified the attempt id and can use it to look up the rest of the login attempt
     // material to try and complete the flow
     let mut attempt = ctx
+        .login
         .get_login_attempt(&attempt_id)
         .await
         .map_err(to_internal_error)?
@@ -400,7 +403,8 @@ where
 
             // Store the authorization code returned by the underlying OAuth provider and transition the
             // attempt to the awaiting state
-            ctx.set_login_provider_authz_code(attempt, code.to_string())
+            ctx.login
+                .set_login_provider_authz_code(attempt, code.to_string())
                 .await
                 .map_err(to_internal_error)?
         }
@@ -420,7 +424,8 @@ where
             };
 
             // TODO: Specialize the returned error
-            ctx.fail_login_attempt(attempt, Some(error_message), error.as_deref())
+            ctx.login
+                .fail_login_attempt(attempt, Some(error_message), error.as_deref())
                 .await
                 .map_err(to_internal_error)?
         }
@@ -478,6 +483,7 @@ where
 
     // Lookup the request assigned to this code
     let attempt = ctx
+        .login
         .get_login_attempt_for_code(&body.code)
         .await
         .map_err(to_internal_error)?
@@ -517,12 +523,14 @@ where
         .map(|s| s.to_string())
         .collect::<Vec<_>>();
 
+    let claims = ctx.generate_claims(&api_user_info.user.id, &api_user_provider.id, Some(scope));
     let token = ctx
+        .user
         .register_access_token(
             &ctx.builtin_registration_user(),
-            &api_user_info.user,
-            &api_user_provider,
-            Some(scope),
+            ctx.jwt_signer(),
+            &api_user_info.user.id,
+            &claims,
         )
         .await?;
 
@@ -531,7 +539,7 @@ where
     Ok(HttpResponseOk(OAuthAuthzCodeExchangeResponse {
         token_type: "Bearer".to_string(),
         access_token: token.signed_token,
-        expires_in: token.expires_at.timestamp() - Utc::now().timestamp(),
+        expires_in: claims.exp - Utc::now().timestamp(),
     }))
 }
 

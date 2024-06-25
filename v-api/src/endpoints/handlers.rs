@@ -95,7 +95,7 @@ mod macros {
             ) -> Result<HttpResponseOk<OAuthClient>, HttpError> {
                 get_oauth_client_op(&rqctx, path).await
             }
-    
+
             /// Add an OAuth client secret
             #[endpoint {
                 method = POST,
@@ -107,7 +107,7 @@ mod macros {
             ) -> Result<HttpResponseOk<InitialOAuthClientSecretResponse>, HttpError> {
                 create_oauth_client_secret_op(&rqctx, path).await
             }
-    
+
             /// Delete an OAuth client secret
             #[endpoint {
                 method = DELETE,
@@ -119,7 +119,7 @@ mod macros {
             ) -> Result<HttpResponseOk<OAuthClientSecret>, HttpError> {
                 delete_oauth_client_secret_op(&rqctx, path).await
             }
-    
+
             /// Add an OAuth client redirect uri
             #[endpoint {
                 method = POST,
@@ -132,7 +132,7 @@ mod macros {
             ) -> Result<HttpResponseOk<OAuthClientRedirectUri>, HttpError> {
                 create_oauth_client_redirect_uri_op(&rqctx, path, body).await
             }
-    
+
             /// Delete an OAuth client redirect uri
             #[endpoint {
                 method = DELETE,
@@ -144,9 +144,9 @@ mod macros {
             ) -> Result<HttpResponseOk<OAuthClientRedirectUri>, HttpError> {
                 delete_oauth_client_redirect_uri_op(&rqctx, path).await
             }
-    
+
             // AUTHZ CODE
-    
+
             /// Generate the remote provider login url and redirect the user
             #[endpoint {
                 method = GET,
@@ -159,7 +159,7 @@ mod macros {
             ) -> Result<Response<Body>, HttpError> {
                 authz_code_redirect_op(&rqctx, path, query).await
             }
-    
+
             /// Handle return calls from a remote OAuth provider
             #[endpoint {
                 method = GET,
@@ -172,7 +172,7 @@ mod macros {
             ) -> Result<HttpResponseTemporaryRedirect, HttpError> {
                 authz_code_callback_op(&rqctx, path, query).await
             }
-    
+
             /// Exchange an authorization code for an access token
             #[endpoint {
                 method = POST,
@@ -186,9 +186,9 @@ mod macros {
             ) -> Result<HttpResponseOk<OAuthAuthzCodeExchangeResponse>, HttpError> {
                 authz_code_exchange_op(&rqctx, path, body).await
             }
-    
+
             // DEVICE CODE
-    
+
             // Get the metadata about an OAuth provider necessary to begin a device code exchange
             #[endpoint {
                 method = GET,
@@ -200,7 +200,7 @@ mod macros {
             ) -> Result<HttpResponseOk<OAuthProviderInfo>, HttpError> {
                 get_device_provider_op(&rqctx, path).await
             }
-    
+
             #[endpoint {
                 method = POST,
                 path = "/login/oauth/{provider}/device/exchange",
@@ -213,9 +213,9 @@ mod macros {
             ) -> Result<Response<Body>, HttpError> {
                 exchange_device_token_op(&rqctx, path, body).await
             }
-    
+
             // WELL KNOWN
-    
+
             #[endpoint {
                 method = GET,
                 path = "/.well-known/openid-configuration",
@@ -225,7 +225,7 @@ mod macros {
             ) -> Result<HttpResponseOk<OpenIdConfiguration>, HttpError> {
                 openid_configuration_op(&rqctx).await
             }
-    
+
             #[endpoint {
                 method = GET,
                 path = "/.well-known/jwks.json",
@@ -235,9 +235,9 @@ mod macros {
             ) -> Result<HttpResponseOk<Jwks>, HttpError> {
                 jwks_json_op(&rqctx).await
             }
-    
+
             // API USER PROVIDER
-    
+
             /// Create a new link token for linking this provider to a different api user
             #[endpoint {
                 method = POST,
@@ -250,9 +250,9 @@ mod macros {
             ) -> Result<HttpResponseOk<ApiUserLinkRequestResponse>, HttpError> {
                 create_link_token_op(&rqctx, path, body).await
             }
-    
+
             // API USER
-    
+
             /// Retrieve the user information of the calling user
             #[endpoint {
                 method = GET,
@@ -263,7 +263,7 @@ mod macros {
             ) -> Result<HttpResponseOk<GetUserResponse<$permission_type>>, HttpError> {
                 get_self_op(&rqctx).await
             }
-    
+
             /// Get user information for a given user id
             #[endpoint {
                 method = GET,
@@ -275,7 +275,7 @@ mod macros {
             ) -> Result<HttpResponseOk<GetUserResponse<$permission_type>>, HttpError> {
                 get_api_user_op(&rqctx, path).await
             }
-    
+
             /// Create a new user with a given set of permissions
             #[endpoint {
                 method = POST,
@@ -287,7 +287,7 @@ mod macros {
             ) -> Result<HttpResponseCreated<ApiUser<$permission_type>>, HttpError> {
                 create_api_user_op(&rqctx, body).await
             }
-    
+
             /// Update the permissions assigned to a given user
             #[endpoint {
                 method = POST,
@@ -300,7 +300,7 @@ mod macros {
             ) -> Result<HttpResponseOk<ApiUser<$permission_type>>, HttpError> {
                 update_api_user_op(&rqctx, path.into_inner(), body.into_inner()).await
             }
-    
+
             /// List the active and expired API tokens for a given user
             #[endpoint {
                 method = GET,
@@ -312,7 +312,7 @@ mod macros {
             ) -> Result<HttpResponseOk<Vec<ApiKeyResponse<$permission_type>>>, HttpError> {
                 list_api_user_tokens_op(&rqctx, path.into_inner()).await
             }
-    
+
             // Create a new API token for a given user with a specific set of permissions and expiration. This
             // is the only time that the returned token will be accessible
             #[endpoint {
@@ -326,7 +326,7 @@ mod macros {
             ) -> Result<HttpResponseCreated<InitialApiKeyResponse<$permission_type>>, HttpError> {
                 create_api_user_token_op(&rqctx, path.into_inner(), body.into_inner()).await
             }
-    
+
             // Get details for a specific API token
             #[endpoint {
                 method = GET,
@@ -338,7 +338,7 @@ mod macros {
             ) -> Result<HttpResponseOk<ApiKeyResponse<$permission_type>>, HttpError> {
                 get_api_user_token_op(&rqctx, path.into_inner()).await
             }
-    
+
             // Revoke a specific API token so it can no longer be used
             #[endpoint {
                 method = DELETE,
@@ -350,7 +350,7 @@ mod macros {
             ) -> Result<HttpResponseOk<ApiKeyResponse<$permission_type>>, HttpError> {
                 delete_api_user_token_op(&rqctx, path.into_inner()).await
             }
-    
+
             #[endpoint {
                 method = POST,
                 path = "/api-user/{user_id}/group",
@@ -362,7 +362,7 @@ mod macros {
             ) -> Result<HttpResponseOk<ApiUser<$permission_type>>, HttpError> {
                 add_api_user_to_group_op(&rqctx, path.into_inner(), body.into_inner()).await
             }
-    
+
             #[endpoint {
                 method = DELETE,
                 path = "/api-user/{user_id}/group/{group_id}",
@@ -373,7 +373,7 @@ mod macros {
             ) -> Result<HttpResponseOk<ApiUser<$permission_type>>, HttpError> {
                 remove_api_user_from_group_op(&rqctx, path.into_inner()).await
             }
-    
+
             /// Link an existing login provider to this user
             #[endpoint {
                 method = POST,
@@ -386,9 +386,9 @@ mod macros {
             ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
                 link_provider_op(&rqctx, path.into_inner(), body.into_inner()).await
             }
-    
+
             // GROUPS
-    
+
             #[endpoint {
                 method = GET,
                 path = "/group",
@@ -398,7 +398,7 @@ mod macros {
             ) -> Result<HttpResponseOk<Vec<AccessGroup<$permission_type>>>, HttpError> {
                 get_groups_op(&rqctx).await
             }
-    
+
             #[endpoint {
                 method = POST,
                 path = "/group",
@@ -409,7 +409,7 @@ mod macros {
             ) -> Result<HttpResponseCreated<AccessGroup<$permission_type>>, HttpError> {
                 create_group_op(&rqctx, body.into_inner()).await
             }
-    
+
             #[endpoint {
                 method = PUT,
                 path = "/group/{group_id}",
@@ -421,7 +421,7 @@ mod macros {
             ) -> Result<HttpResponseOk<AccessGroup<$permission_type>>, HttpError> {
                 update_group_op(&rqctx, path.into_inner(), body.into_inner()).await
             }
-    
+
             #[endpoint {
                 method = DELETE,
                 path = "/group/{group_id}",
@@ -432,9 +432,9 @@ mod macros {
             ) -> Result<HttpResponseOk<AccessGroup<$permission_type>>, HttpError> {
                 delete_group_op(&rqctx, path.into_inner()).await
             }
-    
+
             // MAPPERS
-    
+
             #[endpoint {
                 method = GET,
                 path = "/mapper",
@@ -445,7 +445,7 @@ mod macros {
             ) -> Result<HttpResponseOk<Vec<Mapper>>, HttpError> {
                 get_mappers_op(&rqctx, query.into_inner()).await
             }
-    
+
             #[endpoint {
                 method = POST,
                 path = "/mapper",
@@ -456,7 +456,7 @@ mod macros {
             ) -> Result<HttpResponseCreated<Mapper>, HttpError> {
                 create_mapper_op(&rqctx, body.into_inner()).await
             }
-    
+
             #[endpoint {
                 method = DELETE,
                 path = "/mapper/{mapper_id}",
@@ -469,7 +469,7 @@ mod macros {
             }
         };
     }
-    
+
     #[macro_export]
     macro_rules! inject_endpoints {
         ($api:ident) => {
@@ -478,7 +478,7 @@ mod macros {
                 .expect("Failed to register endpoint");
             $api.register(jwks_json)
                 .expect("Failed to register endpoint");
-    
+
             // User Management
             $api.register(get_self)
                 .expect("Failed to register endpoint");
@@ -504,7 +504,7 @@ mod macros {
                 .expect("Failed to register endpoint");
             $api.register(create_link_token)
                 .expect("Failed to register endpoint");
-    
+
             // Group Management
             $api.register(get_groups)
                 .expect("Failed to register endpoint");
@@ -514,7 +514,7 @@ mod macros {
                 .expect("Failed to register endpoint");
             $api.register(delete_group)
                 .expect("Failed to register endpoint");
-    
+
             // Mapper Management
             $api.register(get_mappers)
                 .expect("Failed to register endpoint");
@@ -522,7 +522,7 @@ mod macros {
                 .expect("Failed to register endpoint");
             $api.register(delete_mapper)
                 .expect("Failed to register endpoint");
-    
+
             // OAuth Client Management
             $api.register(list_oauth_clients)
                 .expect("Failed to register endpoint");
@@ -538,7 +538,7 @@ mod macros {
                 .expect("Failed to register endpoint");
             $api.register(delete_oauth_client_redirect_uri)
                 .expect("Failed to register endpoint");
-    
+
             // OAuth Authorization Login
             $api.register(authz_code_redirect)
                 .expect("Failed to register endpoint");
@@ -546,7 +546,7 @@ mod macros {
                 .expect("Failed to register endpoint");
             $api.register(authz_code_exchange)
                 .expect("Failed to register endpoint");
-    
+
             // OAuth Device Login
             $api.register(get_device_provider)
                 .expect("Failed to register endpoint");

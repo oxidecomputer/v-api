@@ -22,7 +22,7 @@ use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::UserId;
+use crate::{ApiUser, UserId};
 
 pub trait Permission:
     Clone + Debug + Serialize + DeserializeOwned + PartialEq + Send + Sync + 'static
@@ -250,7 +250,7 @@ pub trait PermissionStorage {
         Self: Sized;
     fn expand(
         collection: &Permissions<Self>,
-        actor: &TypedUuid<UserId>,
+        actor: &ApiUser<Self>,
         actor_permissions: Option<&Permissions<Self>>,
     ) -> Permissions<Self>
     where

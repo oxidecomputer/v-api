@@ -13,8 +13,8 @@ use v_model::{
 };
 
 use crate::{
-    context::ApiContext,
-    mapper::MappingRules,
+    context::{ApiContext, VContextWithCaller},
+    mapper::MappingRulesData,
     permissions::{VAppPermission, VPermission},
     util::{
         is_uniqueness_error,
@@ -38,11 +38,11 @@ where
     T::AppPermissions: Permission + From<VPermission> + AsScope + PermissionStorage,
 {
     let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
+    let caller = ctx.get_caller(&rqctx).await?;
 
     Ok(HttpResponseOk(
-        ctx.get_mappers(&caller, query.include_depleted.unwrap_or(false))
+        ctx.mapping
+            .get_mappers(&caller, query.include_depleted.unwrap_or(false))
             .await?,
     ))
 }
@@ -50,7 +50,7 @@ where
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct CreateMapper<T> {
     name: String,
-    rule: MappingRules<T>,
+    rule: MappingRulesData<T>,
     max_activations: Option<i32>,
 }
 
@@ -63,11 +63,9 @@ where
     T: ApiContext<AppPermissions = U>,
     T::AppPermissions: VAppPermission,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
-
+    let (ctx, caller) = rqctx.as_ctx().await?;
     let res = ctx
+        .mapping
         .add_mapper(
             &caller,
             &NewMapper {
@@ -106,11 +104,8 @@ where
     T: ApiContext,
     T::AppPermissions: Permission + From<VPermission> + AsScope + PermissionStorage,
 {
-    let ctx = rqctx.v_ctx();
-    let auth = ctx.authn_token(&rqctx).await?;
-    let caller = ctx.get_caller(auth.as_ref()).await?;
-
+    let (ctx, caller) = rqctx.as_ctx().await?;
     Ok(HttpResponseOk(
-        ctx.remove_mapper(&caller, &path.mapper_id).await?,
+        ctx.mapping.remove_mapper(&caller, &path.mapper_id).await?,
     ))
 }

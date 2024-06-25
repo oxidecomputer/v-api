@@ -2,27 +2,46 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeSet;
-
 use async_trait::async_trait;
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use v_model::{permissions::Permissions, storage::StoreError, AccessGroupId};
+use std::collections::BTreeSet;
+use v_model::{
+    permissions::{Caller, Permissions},
+    storage::StoreError,
+    AccessGroupId,
+};
 
 use crate::{
-    context::VContext, endpoints::login::UserInfo, permissions::VAppPermission,
+    context::group::GroupContext, endpoints::login::UserInfo, permissions::VAppPermission,
     util::response::ResourceResult,
 };
 
 use super::MapperRule;
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct EmailDomainMapper<T> {
+    caller: Caller<T>,
+    group: GroupContext<T>,
+    data: EmailDomainMapperData<T>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EmailDomainMapperData<T> {
     domain: String,
     permissions: Option<Permissions<T>>,
     #[serde(default)]
     groups: Vec<String>,
+}
+
+impl<T> EmailDomainMapper<T> {
+    pub fn new(caller: Caller<T>, group: GroupContext<T>, data: EmailDomainMapperData<T>) -> Self {
+        Self {
+            caller,
+            group,
+            data,
+        }
+    }
 }
 
 #[async_trait]
@@ -30,31 +49,26 @@ impl<T> MapperRule<T> for EmailDomainMapper<T>
 where
     T: VAppPermission,
 {
-    async fn permissions_for(
-        &self,
-        _ctx: &VContext<T>,
-        _user: &UserInfo,
-    ) -> Result<Permissions<T>, StoreError> {
+    async fn permissions_for(&self, _user: &UserInfo) -> Result<Permissions<T>, StoreError> {
         Ok(Permissions::new())
     }
 
     async fn groups_for(
         &self,
-        ctx: &VContext<T>,
         user: &UserInfo,
     ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError> {
-        let has_email_in_domain = user
-            .verified_emails
-            .iter()
-            .fold(false, |found, email| found || email.ends_with(&self.domain));
+        let has_email_in_domain = user.verified_emails.iter().fold(false, |found, email| {
+            found || email.ends_with(&self.data.domain)
+        });
 
         if has_email_in_domain {
-            let groups = ctx
-                .get_groups(&ctx.builtin_registration_user())
+            let groups = self
+                .group
+                .get_groups(&self.caller)
                 .await?
                 .into_iter()
                 .filter_map(|group| {
-                    if self.groups.contains(&group.name) {
+                    if self.data.groups.contains(&group.name) {
                         Some(group.id)
                     } else {
                         None

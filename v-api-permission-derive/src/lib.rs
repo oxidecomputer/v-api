@@ -58,9 +58,10 @@ struct ContractSettings {
     variant: Ident,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 enum ContractKind {
     Append,
+    Drop,
     Extend,
 }
 
@@ -68,13 +69,36 @@ enum ContractKind {
 struct ExpandSettings {
     kind: ExpandKind,
     variant: Ident,
-    value: Option<Ident>,
     source: Option<ExternalSource>,
+    field: Option<ExternalField>,
 }
 
 #[derive(Clone, Debug)]
 enum ExternalSource {
     Actor,
+}
+
+impl ExternalSource {
+    fn to_ident(&self) -> Ident {
+        match self {
+            Self::Actor => format_ident!("actor"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum ExternalField {
+    Id,
+    Groups,
+}
+
+impl ExternalField {
+    fn to_ident(&self) -> Ident {
+        match self {
+            Self::Id => format_ident!("id"),
+            Self::Groups => format_ident!("groups"),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -145,8 +169,9 @@ impl Parse for ContractSettings {
         Ok(ContractSettings {
             kind: match kind.value.to_string().as_str() {
                 "append" => ContractKind::Append,
+                "drop" => ContractKind::Drop,
                 "extend" => ContractKind::Extend,
-                _ => return Err(Error::new(span, "Unexpected expand kind")),
+                _ => return Err(Error::new(span, "Unexpected contract kind")),
             },
             variant: settings
                 .pop()
@@ -186,14 +211,17 @@ impl Parse for ExpandSettings {
                 .find(|s| s.name == "variant")
                 .expect("Expand must contain a \"variant\" setting")
                 .value,
-            value: settings
-                .iter()
-                .find(|s| s.name == "value")
-                .map(|s| s.value.clone()),
             source: settings.iter().find(|s| s.name == "source").map(|s| {
                 match s.value.to_string().as_str() {
                     "actor" => ExternalSource::Actor,
                     _ => panic!("Unexpected source value"),
+                }
+            }),
+            field: settings.iter().find(|s| s.name == "field").map(|s| {
+                match s.value.to_string().as_str() {
+                    "id" => ExternalField::Id,
+                    "groups" => ExternalField::Groups,
+                    _ => panic!("Unexpected field value"),
                 }
             }),
         })
@@ -357,6 +385,7 @@ fn from_system_permission_tokens(
                         VPermission::ManageApiKeysAll => Self::ManageApiKeysAll,
                         VPermission::CreateUserApiProviderLinkToken => Self::CreateUserApiProviderLinkToken,
                         VPermission::CreateGroup => Self::CreateGroup,
+                        VPermission::GetGroup(inner) => Self::GetGroup(inner),
                         VPermission::GetGroupsJoined => Self::GetGroupsJoined,
                         VPermission::GetGroupsAll => Self::GetGroupsAll,
                         VPermission::ManageGroup(inner) => Self::ManageGroup(inner),
@@ -429,7 +458,7 @@ fn system_permission_tokens() -> TokenStream {
             )]
             GetApiUsers(BTreeSet<newtype_uuid::TypedUuid<v_model::UserId>>),
             #[v_api(
-                expand(kind = replace, variant = GetApiUser, value = actor)
+                expand(kind = replace, variant = GetApiUser, source = actor, field = id)
                 scope(to = "user:info:r", from = "user:info:r")
             )]
             GetApiUserSelf,
@@ -463,7 +492,7 @@ fn system_permission_tokens() -> TokenStream {
             #[v_api(scope(to = "user:token:w"))]
             CreateApiKey(newtype_uuid::TypedUuid<v_model::UserId>),
             #[v_api(
-                expand(kind = replace, variant = CreateApiKey, value = actor),
+                expand(kind = replace, variant = CreateApiKey, source = actor, field = id),
                 scope(to = "user:token:w", from = "user:token:w")
             )]
             CreateApiKeySelf,
@@ -511,7 +540,15 @@ fn system_permission_tokens() -> TokenStream {
             CreateUserApiProviderLinkToken,
             #[v_api(scope(to = "group:info:w", from = "group:info:w"))]
             CreateGroup,
-            #[v_api(scope(to = "group:info:r", from = "group:info:r"))]
+            #[v_api(
+                contract(kind = drop, variant = GetGroupsJoined),
+                scope(to = "group:info:r")
+            )]
+            GetGroup(newtype_uuid::TypedUuid<v_model::AccessGroupId>),
+            #[v_api(
+                expand(kind = iter, variant = GetGroup, source = actor, field = groups)
+                scope(to = "group:info:r", from = "group:info:r")
+            )]
             GetGroupsJoined,
             #[v_api(scope(to = "group:info:r", from = "group:info:r"))]
             GetGroupsAll,
@@ -730,9 +767,12 @@ fn permission_storage_contract_tokens(
         let variant_ident = variant.ident;
         let target_variant_ident = setting.variant;
         let set_name = format_ident!("{}", target_variant_ident.to_string().to_snake_case());
-        sets.insert(target_variant_ident.clone(), set_name.clone());
+        sets.insert(
+            target_variant_ident.clone(),
+            (setting.kind != ContractKind::Drop).then(|| set_name.clone()),
+        );
 
-        let fields = if variant.fields.len() > 0 {
+        let fields = if variant.fields.len() > 0 && setting.kind != ContractKind::Drop {
             let mut fields = quote! {};
             variant
                 .fields
@@ -747,21 +787,24 @@ fn permission_storage_contract_tokens(
             quote! {}
         };
 
-        branches.push(match setting.kind {
-            ContractKind::Append => quote! {
+        match setting.kind {
+            ContractKind::Append => branches.push(quote! {
                 #permission_type::#variant_ident(#fields) => {
                     #set_name.insert(*#fields);
                 }
-            },
-            ContractKind::Extend => quote! {
+            }),
+            ContractKind::Drop => {
+                // We are dropping the specific permission value
+            }
+            ContractKind::Extend => branches.push(quote! {
                 #permission_type::#variant_ident(#fields) => {
                     #set_name.extend(#fields);
                 }
-            },
-        });
+            }),
+        }
     }
 
-    let collections = sets.values().collect::<Vec<_>>();
+    let collections = sets.values().filter_map(|v| v.as_ref()).collect::<Vec<_>>();
 
     // TODO: This should support arbitrary collection types as defined by the collecting variant.
     // This similarly has need for a global read only store of variants and their properties
@@ -769,12 +812,15 @@ fn permission_storage_contract_tokens(
         #(let mut #collections = BTreeSet::new();)*
     };
 
-    let collections_add = sets.into_iter().fold(quote! {}, |tokens, (key, value)| {
-        quote! {
-            #tokens
-            contracted.push(#permission_type::#key(#value));
-        }
-    });
+    let collections_add = sets
+        .into_iter()
+        .fold(quote! {}, |tokens, (key, value)| match value {
+            Some(value) => quote! {
+                #tokens
+                contracted.push(#permission_type::#key(#value));
+            },
+            None => quote! { #tokens },
+        });
 
     quote! {
         fn contract(collection: &v_model::Permissions<Self>) -> v_model::Permissions<Self> {
@@ -836,19 +882,43 @@ fn permission_storage_expand_tokens(
             }
             ExpandKind::Iter => {
                 let target_variant = setting.variant;
-                quote! {
-                    #permission_type::#variant_ident(field) => {
-                        for f0 in field {
-                            expanded.push(#permission_type::#target_variant(*f0))
+                match (setting.source, setting.field) {
+                    (Some(source), Some(field)) => {
+                        let source = source.to_ident();
+                        let field = field.to_ident();
+
+                        quote! {
+                            #permission_type::#variant_ident => {
+                                for f0 in &#source.#field {
+                                    expanded.push(#permission_type::#target_variant(*f0))
+                                }
+                            }
+                        }
+                    },
+                    (Some(_), None) => panic!("Iter expansions must define field if a source is defined"),
+                    (None, Some(_)) => panic!("Iter expansions must define a source if a field is defined"),
+                    _ => {
+                        quote! {
+                            #permission_type::#variant_ident(field) => {
+                                for f0 in field {
+                                    expanded.push(#permission_type::#target_variant(*f0))
+                                }
+                            }
                         }
                     }
                 }
             }
             ExpandKind::Replace => {
                 let target_variant = setting.variant;
-                let value = setting.value.expect("Replace expansions must always have a value defined");
-                quote! {
-                    #permission_type::#variant_ident => expanded.push(#permission_type::#target_variant(*#value)),
+                match (setting.source, setting.field) {
+                    (Some(source), Some(field)) => {
+                        let source = source.to_ident();
+                        let field = field.to_ident();
+                        quote! {
+                            #permission_type::#variant_ident => expanded.push(#permission_type::#target_variant(#source.#field)),
+                        }
+                    },
+                    _ => panic!("Replace expansions must define a value source and field")
                 }
             }
         });
@@ -857,7 +927,7 @@ fn permission_storage_expand_tokens(
     quote! {
         fn expand(
             collection: &v_model::Permissions<Self>,
-            actor: &newtype_uuid::TypedUuid<v_model::UserId>,
+            actor: &v_model::ApiUser<Self>,
             actor_permissions: Option<&v_model::Permissions<Self>>,
         ) -> v_model::Permissions<Self> {
             let mut expanded = Vec::new();
