@@ -14,7 +14,7 @@ base64 = "0.22"
 bb8 = "0.8.3"
 chrono = "0.4.38"
 cookie = { version = "0.18.1" }
-crc32c = "0.6.5"
+crc32c = "0.6.8"
 diesel = { version = "2.1.6", features = ["postgres"] }
 diesel_migrations = { version = "2.2.0" }
 dropshot = "0.10.1"
