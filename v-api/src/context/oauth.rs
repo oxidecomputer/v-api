@@ -33,6 +33,10 @@ where
         Self { storage }
     }
 
+    pub fn set_storage(&mut self, storage: Arc<dyn VApiStorage<T>>) {
+        self.storage = storage;
+    }
+
     pub async fn create_oauth_client(
         &self,
         caller: &Caller<T>,

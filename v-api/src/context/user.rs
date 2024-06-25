@@ -70,6 +70,10 @@ where
         Self { storage }
     }
 
+    pub fn set_storage(&mut self, storage: Arc<dyn VApiStorage<T>>) {
+        self.storage = storage;
+    }
+
     #[instrument(skip(self, signer, token))]
     pub async fn get_caller(
         &self,

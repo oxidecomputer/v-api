@@ -34,6 +34,10 @@ where
         }
     }
 
+    pub fn set_storage(&mut self, storage: Arc<dyn VApiStorage<T>>) {
+        self.storage = storage;
+    }
+
     pub fn set_engine(
         &mut self,
         engine: Option<Arc<dyn MappingEngine<T>>>,

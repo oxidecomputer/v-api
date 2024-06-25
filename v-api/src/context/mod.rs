@@ -233,6 +233,12 @@ where
 
     pub fn set_storage(&mut self, storage: Arc<dyn VApiStorage<T>>) {
         self.storage = storage;
+        self.group.set_storage(self.storage.clone());
+        self.link.set_storage(self.storage.clone());
+        self.login.set_storage(self.storage.clone());
+        self.mapping.set_storage(self.storage.clone());
+        self.oauth.set_storage(self.storage.clone());
+        self.user.set_storage(self.storage.clone());
     }
 
     pub async fn jwks(&self) -> &JwkSet {

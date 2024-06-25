@@ -34,6 +34,10 @@ where
         Self { storage }
     }
 
+    pub fn set_storage(&mut self, storage: Arc<dyn VApiStorage<T>>) {
+        self.storage = storage;
+    }
+
     // TODO: Need a permission for this action
     pub async fn get_link_request(
         &self,
