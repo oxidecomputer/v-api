@@ -452,7 +452,7 @@ mod macros {
             }]
             pub async fn create_mapper(
                 rqctx: RequestContext<$context_type>,
-                body: TypedBody<CreateMapper<$permission_type>>,
+                body: TypedBody<CreateMapper>,
             ) -> Result<HttpResponseCreated<Mapper>, HttpError> {
                 create_mapper_op(&rqctx, body.into_inner()).await
             }
