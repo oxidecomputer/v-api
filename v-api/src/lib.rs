@@ -12,5 +12,8 @@ pub mod permissions;
 mod secrets;
 mod util;
 
-pub use context::{auth::SecretContext, ApiContext, VApiStorage, VContext};
+pub use context::{
+    auth::SecretContext, ApiContext, GroupContext, LinkContext, LoginContext, MappingContext,
+    OAuthContext, UserContext, VApiStorage, VContext,
+};
 pub use util::response;

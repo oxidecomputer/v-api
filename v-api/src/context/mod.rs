@@ -5,18 +5,13 @@
 use auth::AuthContext;
 use chrono::{TimeDelta, Utc};
 use dropshot::{HttpError, RequestContext, ServerContext};
-use group::GroupContext;
 use http::StatusCode;
 use jsonwebtoken::jwk::JwkSet;
-use link::LinkContext;
-use login::LoginContext;
-use mapping::MappingContext;
 use newtype_uuid::TypedUuid;
-use oauth::OAuthContext;
 use std::{fmt::Debug, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
-use user::{RegisteredAccessToken, UserContext, UserContextError};
+use user::{RegisteredAccessToken, UserContextError};
 use v_model::{
     permissions::{Caller, Permission},
     storage::{
@@ -51,11 +46,17 @@ use crate::{
 
 pub mod auth;
 pub mod group;
+pub use group::GroupContext;
 pub mod link;
+pub use link::LinkContext;
 pub mod login;
+pub use login::LoginContext;
 pub mod mapping;
+pub use mapping::MappingContext;
 pub mod oauth;
+pub use oauth::OAuthContext;
 pub mod user;
+pub use user::UserContext;
 
 pub trait VApiStorage<P: Send + Sync>:
     ApiUserStore<P>
