@@ -22,7 +22,7 @@ google-cloudkms1 = { git = "https://github.com/Byron/google-apis-rs.git", ref = 
 heck = "0.5.0"
 hex = "0.4.3"
 http = "0.2.12"
-hyper = "0.14.28"
+hyper = "0.14.29"
 hyper-rustls = "0.24.2"
 jsonwebtoken = "9.3.0"
 mockall = "0.12.1"
