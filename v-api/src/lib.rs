@@ -14,6 +14,6 @@ mod util;
 
 pub use context::{
     auth::SecretContext, ApiContext, GroupContext, LinkContext, LoginContext, MappingContext,
-    OAuthContext, UserContext, VApiStorage, VContext,
+    OAuthContext, UserContext, VApiStorage, VContext, VContextWithCaller,
 };
 pub use util::response;
