@@ -51,7 +51,7 @@ pub enum MappingEngineError {
     #[error("Not mapping rules have been configured")]
     NotRulesConfigured,
     #[error("Mapping engine failed to create mapping")]
-    Other(Box<dyn StdError>),
+    Other(Box<dyn StdError + Send + Sync + 'static>),
 }
 
 pub trait MappingEngine<T>: Send + Sync + 'static {
