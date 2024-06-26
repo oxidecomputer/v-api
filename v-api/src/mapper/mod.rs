@@ -54,7 +54,7 @@ pub enum MappingEngineError {
     Other(Box<dyn StdError>),
 }
 
-pub trait MappingEngine<T>: Send + Sync {
+pub trait MappingEngine<T>: Send + Sync + 'static {
     fn create_mapping(&self, value: Mapper) -> Result<Box<dyn MapperRule<T>>, MappingEngineError>;
     fn validate_mapping_data(&self, value: &Value) -> bool;
 }
