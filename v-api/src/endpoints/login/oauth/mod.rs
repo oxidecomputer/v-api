@@ -3,13 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use async_trait::async_trait;
-use dropshot::Method;
-use http::header;
-use hyper::{body::Bytes, Body};
+use hyper::body::Bytes;
 use oauth2::{
     basic::BasicClient, url::ParseError, AuthUrl, ClientId, ClientSecret, RedirectUrl,
     RevocationUrl, TokenUrl,
 };
+use reqwest::{Method, header};
 use schemars::JsonSchema;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
@@ -139,7 +138,6 @@ where
             let request = client
                 .request(Method::GET, endpoint)
                 .header(header::AUTHORIZATION, format!("Bearer {}", token))
-                .body(Body::empty())
                 .build()?;
 
             let response = client.execute(request).await?;

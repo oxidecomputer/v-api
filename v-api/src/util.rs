@@ -225,6 +225,7 @@ pub async fn cloud_kms_client() -> Result<CloudKMS<HttpsConnector<HttpConnector>
         hyper::Client::builder().build(
             hyper_rustls::HttpsConnectorBuilder::new()
                 .with_native_roots()
+                .unwrap()
                 .https_only()
                 .enable_http2()
                 .build(),

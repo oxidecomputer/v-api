@@ -149,6 +149,7 @@ where
         let client = hyper::Client::builder().build(
             HttpsConnectorBuilder::new()
                 .with_native_roots()
+                .unwrap()
                 .https_only()
                 .enable_http1()
                 .build(),

@@ -2,13 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::fmt;
-
-use http::{header::USER_AGENT, HeaderMap, HeaderValue};
 use hyper::body::Bytes;
-use reqwest::Client;
+use reqwest::{Client, header::{USER_AGENT, HeaderMap, HeaderValue}};
 use secrecy::SecretString;
 use serde::Deserialize;
+use std::fmt;
 
 use crate::endpoints::login::{ExternalUserId, UserInfo, UserInfoError};
 
