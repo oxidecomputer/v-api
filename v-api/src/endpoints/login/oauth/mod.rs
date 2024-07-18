@@ -8,7 +8,7 @@ use oauth2::{
     basic::BasicClient, url::ParseError, AuthUrl, ClientId, ClientSecret, RedirectUrl,
     RevocationUrl, TokenUrl,
 };
-use reqwest::{Method, header};
+use reqwest::{header, Method};
 use schemars::JsonSchema;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};

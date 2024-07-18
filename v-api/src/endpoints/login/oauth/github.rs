@@ -3,7 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use hyper::body::Bytes;
-use reqwest::{Client, header::{USER_AGENT, HeaderMap, HeaderValue}};
+use reqwest::{
+    header::{HeaderMap, HeaderValue, USER_AGENT},
+    Client,
+};
 use secrecy::SecretString;
 use serde::Deserialize;
 use std::fmt;
