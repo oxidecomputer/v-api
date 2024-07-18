@@ -9,7 +9,7 @@ resolver = "2"
 
 [workspace.dependencies]
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel" }
-async-trait = "0.1.80"
+async-trait = "0.1.81"
 base64 = "0.22"
 bb8 = "0.8.5"
 chrono = "0.4.38"
@@ -37,7 +37,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 rsa = "0.9.6"
 schemars = "0.8.21"
 secrecy = "0.8.0"
-serde = "1.0.203"
+serde = "1.0.204"
 serde_json = "1"
 serde_urlencoded = "0.7.1"
 sha2 = "0.10.8"
