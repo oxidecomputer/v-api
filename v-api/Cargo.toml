@@ -25,7 +25,6 @@ newtype-uuid = { workspace = true }
 partial-struct = { workspace = true }
 rand = { workspace = true, features = ["std"] }
 rand_core = { workspace = true, features = ["std"] }
-reqwest = { workspace = true }
 rsa = { workspace = true, features = ["sha2"] }
 schemars = { workspace = true, features = ["chrono"] }
 secrecy = { workspace = true, features = ["serde"] }

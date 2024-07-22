@@ -3,12 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use async_trait::async_trait;
-use hyper::body::Bytes;
+use http::Method;
+use hyper::{body::{Bytes, to_bytes}, client::HttpConnector, Client, header::HeaderValue, header::AUTHORIZATION, Request, Body};
+use hyper_rustls::HttpsConnector;
 use oauth2::{
     basic::BasicClient, url::ParseError, AuthUrl, ClientId, ClientSecret, RedirectUrl,
     RevocationUrl, TokenUrl,
 };
-use reqwest::{header, Method};
 use schemars::JsonSchema;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
@@ -50,7 +51,8 @@ pub struct OAuthPrivateCredentials {
 pub trait OAuthProvider: ExtractUserInfo + Debug + Send + Sync {
     fn name(&self) -> OAuthProviderName;
     fn scopes(&self) -> Vec<&str>;
-    fn client(&self) -> &reqwest::Client;
+    fn start_request(&self) -> Request<Body>;
+    fn client(&self) -> &Client<HttpsConnector<HttpConnector>>;
     fn client_id(&self, client_type: &ClientType) -> &str;
     fn client_secret(&self, client_type: &ClientType) -> Option<&SecretString>;
 
@@ -124,10 +126,9 @@ impl<T> UserInfoProvider for T
 where
     T: OAuthProvider + ExtractUserInfo + Send + Sync + ?Sized,
 {
-    #[instrument(skip(client, token))]
+    #[instrument(skip(token))]
     async fn get_user_info(
         &self,
-        client: &reqwest::Client,
         token: &str,
     ) -> Result<UserInfo, UserInfoError> {
         tracing::trace!("Requesting user information from OAuth provider");
@@ -135,16 +136,21 @@ where
         let mut responses = vec![];
 
         for endpoint in self.user_info_endpoints() {
-            let request = client
-                .request(Method::GET, endpoint)
-                .header(header::AUTHORIZATION, format!("Bearer {}", token))
-                .build()?;
+            let mut request = self.start_request();
+            *request.method_mut() = Method::GET;
+            *request.uri_mut() = endpoint.parse().unwrap();
 
-            let response = client.execute(request).await?;
+            let headers = request.headers_mut();
+            headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", token)).unwrap());
+
+            let response = self
+                .client()
+                .request(request)
+                .await?;
 
             tracing::trace!(status = ?response.status(), "Received response from OAuth provider");
 
-            let bytes = response.bytes().await?;
+            let bytes = to_bytes(response.into_body()).await?;
             responses.push(bytes);
         }
 

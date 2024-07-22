@@ -186,7 +186,7 @@ where
             match parsed {
                 Ok(parsed) => {
                     let info = provider
-                        .get_user_info(provider.client(), parsed.access_token().secret())
+                        .get_user_info(parsed.access_token().secret())
                         .await
                         .map_err(LoginError::UserInfo)
                         .tap_err(|err| {

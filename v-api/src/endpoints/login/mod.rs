@@ -150,8 +150,6 @@ pub enum UserInfoError {
     Deserialize(#[from] serde_json::Error),
     #[error("Failed to create user info request {0}")]
     Http(#[from] http::Error),
-    #[error(transparent)]
-    Inner(#[from] reqwest::Error),
     #[error("Failed to send user info request {0}")]
     Hyper(#[from] hyper::Error),
     #[error("User information is missing")]
@@ -162,7 +160,6 @@ pub enum UserInfoError {
 pub trait UserInfoProvider {
     async fn get_user_info(
         &self,
-        client: &reqwest::Client,
         token: &str,
     ) -> Result<UserInfo, UserInfoError>;
 }
