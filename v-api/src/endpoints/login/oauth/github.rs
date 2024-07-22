@@ -64,6 +64,11 @@ impl GitHubOAuthProvider {
             client,
         }
     }
+
+    pub fn with_client(&mut self, client: Client) -> &mut Self {
+        self.client = client;
+        self
+    }
 }
 
 #[derive(Debug, Deserialize)]
