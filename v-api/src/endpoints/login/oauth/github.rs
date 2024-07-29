@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use http::{header::USER_AGENT, HeaderMap, HeaderValue};
-use hyper::{body::Bytes, Client, client::HttpConnector, Request, Body};
+use hyper::{body::Bytes, client::HttpConnector, Body, Client, Request};
 use hyper_rustls::HttpsConnector;
 use secrecy::SecretString;
 use serde::Deserialize;

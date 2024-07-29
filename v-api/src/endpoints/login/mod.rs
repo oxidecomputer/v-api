@@ -158,8 +158,5 @@ pub enum UserInfoError {
 
 #[async_trait]
 pub trait UserInfoProvider {
-    async fn get_user_info(
-        &self,
-        token: &str,
-    ) -> Result<UserInfo, UserInfoError>;
+    async fn get_user_info(&self, token: &str) -> Result<UserInfo, UserInfoError>;
 }

@@ -4,7 +4,13 @@
 
 use async_trait::async_trait;
 use http::Method;
-use hyper::{body::{Bytes, to_bytes}, client::HttpConnector, Client, header::HeaderValue, header::AUTHORIZATION, Request, Body};
+use hyper::{
+    body::{to_bytes, Bytes},
+    client::HttpConnector,
+    header::HeaderValue,
+    header::AUTHORIZATION,
+    Body, Client, Request,
+};
 use hyper_rustls::HttpsConnector;
 use oauth2::{
     basic::BasicClient, url::ParseError, AuthUrl, ClientId, ClientSecret, RedirectUrl,
@@ -127,10 +133,7 @@ where
     T: OAuthProvider + ExtractUserInfo + Send + Sync + ?Sized,
 {
     #[instrument(skip(token))]
-    async fn get_user_info(
-        &self,
-        token: &str,
-    ) -> Result<UserInfo, UserInfoError> {
+    async fn get_user_info(&self, token: &str) -> Result<UserInfo, UserInfoError> {
         tracing::trace!("Requesting user information from OAuth provider");
 
         let mut responses = vec![];
@@ -141,12 +144,12 @@ where
             *request.uri_mut() = endpoint.parse().unwrap();
 
             let headers = request.headers_mut();
-            headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", token)).unwrap());
+            headers.insert(
+                AUTHORIZATION,
+                HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+            );
 
-            let response = self
-                .client()
-                .request(request)
-                .await?;
+            let response = self.client().request(request).await?;
 
             tracing::trace!(status = ?response.status(), "Received response from OAuth provider");
 

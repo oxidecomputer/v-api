@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use hyper::{body::Bytes, client::HttpConnector, Client, Request, Body};
+use hyper::{body::Bytes, client::HttpConnector, Body, Client, Request};
 use hyper_rustls::HttpsConnector;
 use secrecy::SecretString;
 use serde::Deserialize;
