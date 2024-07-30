@@ -27,7 +27,7 @@ hyper-rustls = "0.25"
 jsonwebtoken = "9.3.0"
 mockall = "0.12.1"
 newtype-uuid = { version = "1.1.0", features = ["schemars08", "serde", "v4"] }
-oauth2 = "4.4.2"
+oauth2 = { version = "4.4.2", default-features = false, features = ["rustls-tls"] }
 partial-struct = { git = "https://github.com/oxidecomputer/partial-struct" }
 proc-macro2 = "1"
 quote = "1"
