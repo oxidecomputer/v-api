@@ -15,11 +15,14 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    schema_ext::LoginAttemptState, AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey,
-    ApiKeyId, ApiUserInfo, ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt,
-    LoginAttemptId, Mapper, MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
-    NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMapper, NewOAuthClient,
-    NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
+    schema_ext::{LoginAttemptState, MagicLinkAttemptState},
+    AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserInfo,
+    ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt, LoginAttemptId, MagicLink,
+    MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri,
+    MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, Mapper, MapperId, NewAccessGroup,
+    NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, NewLinkRequest, NewLoginAttempt,
+    NewMagicLink, NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper,
+    NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
     OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId, UserId,
     UserProviderId,
 };
@@ -252,6 +255,85 @@ pub trait OAuthClientRedirectUriStore {
         &self,
         id: &TypedUuid<OAuthRedirectUriId>,
     ) -> Result<Option<OAuthClientRedirectUri>, StoreError>;
+}
+
+#[derive(Default)]
+pub struct MagicLinkFilter {
+    pub id: Option<Vec<TypedUuid<MagicLinkId>>>,
+    pub signature: Option<Vec<String>>,
+    pub redirect_uri: Option<Vec<String>>,
+    pub deleted: bool,
+}
+
+#[cfg_attr(feature = "mock", automock)]
+#[async_trait]
+pub trait MagicLinkStore {
+    async fn get(
+        &self,
+        id: &TypedUuid<MagicLinkId>,
+        deleted: bool,
+    ) -> Result<Option<MagicLink>, StoreError>;
+    async fn list(
+        &self,
+        filter: MagicLinkFilter,
+        pagination: &ListPagination,
+    ) -> Result<Vec<MagicLink>, StoreError>;
+    async fn upsert(&self, client: NewMagicLink) -> Result<MagicLink, StoreError>;
+    async fn delete(&self, id: &TypedUuid<MagicLinkId>) -> Result<Option<MagicLink>, StoreError>;
+}
+
+#[cfg_attr(feature = "mock", automock)]
+#[async_trait]
+pub trait MagicLinkSecretStore {
+    async fn upsert(&self, secret: NewMagicLinkSecret) -> Result<MagicLinkSecret, StoreError>;
+    async fn delete(
+        &self,
+        id: &TypedUuid<MagicLinkSecretId>,
+    ) -> Result<Option<MagicLinkSecret>, StoreError>;
+}
+
+#[cfg_attr(feature = "mock", automock)]
+#[async_trait]
+pub trait MagicLinkRedirectUriStore {
+    async fn upsert(
+        &self,
+        redirect_uri: NewMagicLinkRedirectUri,
+    ) -> Result<MagicLinkRedirectUri, StoreError>;
+    async fn delete(
+        &self,
+        id: &TypedUuid<MagicLinkRedirectUriId>,
+    ) -> Result<Option<MagicLinkRedirectUri>, StoreError>;
+}
+
+#[derive(Debug, Default)]
+pub struct MagicLinkAttemptFilter {
+    pub id: Option<Vec<TypedUuid<MagicLinkAttemptId>>>,
+    pub client_id: Option<Vec<TypedUuid<OAuthClientId>>>,
+    pub attempt_state: Option<Vec<MagicLinkAttemptState>>,
+    pub medium: Option<Vec<String>>,
+    pub signature: Option<Vec<String>>,
+}
+
+#[cfg_attr(feature = "mock", automock)]
+#[async_trait]
+pub trait MagicLinkAttemptStore {
+    async fn get(
+        &self,
+        id: &TypedUuid<MagicLinkAttemptId>,
+    ) -> Result<Option<MagicLinkAttempt>, StoreError>;
+    async fn list(
+        &self,
+        filter: MagicLinkAttemptFilter,
+        pagination: &ListPagination,
+    ) -> Result<Vec<MagicLinkAttempt>, StoreError>;
+    async fn upsert(&self, attempt: NewMagicLinkAttempt) -> Result<MagicLinkAttempt, StoreError>;
+    async fn transition(
+        &self,
+        id: &TypedUuid<MagicLinkAttemptId>,
+        signature: &str,
+        from: MagicLinkAttemptState,
+        to: MagicLinkAttemptState,
+    ) -> Result<Option<MagicLinkAttempt>, StoreError>;
 }
 
 #[derive(Debug, Default, PartialEq)]

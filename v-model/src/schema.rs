@@ -1,13 +1,13 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
-
 // @generated automatically by Diesel CLI.
 
 pub mod sql_types {
     #[derive(diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "attempt_state"))]
     pub struct AttemptState;
+
+    #[derive(diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "mlink_attempt_state"))]
+    pub struct MlinkAttemptState;
 }
 
 diesel::table! {
@@ -70,23 +70,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    chat (id) {
-        id -> Uuid,
-        owner_id -> Uuid,
-        external_id -> Varchar,
-        external_name -> Varchar,
-        external_created -> Timestamptz,
-        external_modified -> Timestamptz,
-        shared -> Bool,
-        downloadable -> Bool,
-        indexed -> Bool,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-        deleted_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
     link_request (id) {
         id -> Uuid,
         source_provider_id -> Uuid,
@@ -121,6 +104,53 @@ diesel::table! {
         provider_error -> Nullable<Varchar>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::MlinkAttemptState;
+
+    magic_link_attempt (id) {
+        id -> Uuid,
+        attempt_state -> MlinkAttemptState,
+        magic_link_client_id -> Uuid,
+        medium -> Varchar,
+        recipient -> Varchar,
+        redirect_uri -> Varchar,
+        scope -> Varchar,
+        nonce_signature -> Varchar,
+        expiration -> Timestamptz,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    magic_link_client (id) {
+        id -> Uuid,
+        created_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    magic_link_client_redirect_uri (id) {
+        id -> Uuid,
+        magic_link_client_id -> Uuid,
+        redirect_uri -> Varchar,
+        created_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
+    magic_link_client_secret (id) {
+        id -> Uuid,
+        magic_link_client_id -> Uuid,
+        secret_signature -> Varchar,
+        created_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
     }
 }
 
@@ -165,57 +195,14 @@ diesel::table! {
     }
 }
 
-diesel::table! {
-    owner (id) {
-        id -> Uuid,
-        subject -> Varchar,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-        deleted_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    recording (id) {
-        id -> Uuid,
-        owner_id -> Uuid,
-        external_id -> Varchar,
-        external_name -> Varchar,
-        external_created -> Timestamptz,
-        external_modified -> Timestamptz,
-        shared -> Bool,
-        downloadable -> Bool,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-        deleted_at -> Nullable<Timestamptz>,
-    }
-}
-
-diesel::table! {
-    transcript (id) {
-        id -> Uuid,
-        owner_id -> Uuid,
-        external_id -> Varchar,
-        external_name -> Varchar,
-        external_created -> Timestamptz,
-        external_modified -> Timestamptz,
-        shared -> Bool,
-        downloadable -> Bool,
-        indexed -> Bool,
-        created_at -> Timestamptz,
-        updated_at -> Timestamptz,
-        deleted_at -> Nullable<Timestamptz>,
-    }
-}
-
 diesel::joinable!(api_key -> api_user (api_user_id));
 diesel::joinable!(api_user_access_token -> api_user (api_user_id));
 diesel::joinable!(api_user_provider -> api_user (api_user_id));
-diesel::joinable!(chat -> owner (owner_id));
+diesel::joinable!(magic_link_attempt -> magic_link_client (magic_link_client_id));
+diesel::joinable!(magic_link_client_redirect_uri -> magic_link_client (magic_link_client_id));
+diesel::joinable!(magic_link_client_secret -> magic_link_client (magic_link_client_id));
 diesel::joinable!(oauth_client_redirect_uri -> oauth_client (oauth_client_id));
 diesel::joinable!(oauth_client_secret -> oauth_client (oauth_client_id));
-diesel::joinable!(recording -> owner (owner_id));
-diesel::joinable!(transcript -> owner (owner_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     access_groups,
@@ -223,14 +210,14 @@ diesel::allow_tables_to_appear_in_same_query!(
     api_user,
     api_user_access_token,
     api_user_provider,
-    chat,
     link_request,
     login_attempt,
+    magic_link_attempt,
+    magic_link_client,
+    magic_link_client_redirect_uri,
+    magic_link_client_secret,
     mapper,
     oauth_client,
     oauth_client_redirect_uri,
     oauth_client_secret,
-    owner,
-    recording,
-    transcript,
 );

@@ -17,6 +17,7 @@ use v_model::{
     storage::{
         AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserProviderFilter,
         ApiUserProviderStore, ApiUserStore, LinkRequestStore, ListPagination, LoginAttemptStore,
+        MagicLinkAttemptStore, MagicLinkRedirectUriStore, MagicLinkSecretStore, MagicLinkStore,
         MapperStore, OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore,
         StoreError,
     },
@@ -51,6 +52,8 @@ pub mod link;
 pub use link::LinkContext;
 pub mod login;
 pub use login::LoginContext;
+pub mod magic_link;
+pub use magic_link::MagicLinkContext;
 pub mod mapping;
 pub use mapping::MappingContext;
 pub mod oauth;
@@ -70,6 +73,10 @@ pub trait VApiStorage<P: Send + Sync>:
     + AccessGroupStore<P>
     + MapperStore
     + LinkRequestStore
+    + MagicLinkStore
+    + MagicLinkSecretStore
+    + MagicLinkRedirectUriStore
+    + MagicLinkAttemptStore
     + Send
     + Sync
     + 'static
@@ -89,6 +96,10 @@ where
         + AccessGroupStore<P>
         + MapperStore
         + LinkRequestStore
+        + MagicLinkStore
+        + MagicLinkSecretStore
+        + MagicLinkRedirectUriStore
+        + MagicLinkAttemptStore
         + Send
         + Sync
         + 'static,
@@ -102,6 +113,7 @@ pub struct VContext<T> {
     pub group: GroupContext<T>,
     pub link: LinkContext<T>,
     pub login: LoginContext<T>,
+    pub magic_link: MagicLinkContext<T>,
     pub mapping: MappingContext<T>,
     pub oauth: OAuthContext<T>,
     pub user: UserContext<T>,
@@ -216,6 +228,7 @@ where
             group: GroupContext::new(storage.clone()),
             link: LinkContext::new(storage.clone()),
             login: LoginContext::new(storage.clone()),
+            magic_link: MagicLinkContext::new(storage.clone()),
             mapping: MappingContext::new(storage.clone()),
             oauth: OAuthContext::new(storage.clone()),
             user: UserContext::new(storage.clone()),
@@ -712,19 +725,25 @@ pub(crate) mod test_mocks {
     use newtype_uuid::TypedUuid;
     use std::sync::Arc;
     use v_model::{
-        permissions::Caller,
+        schema_ext::MagicLinkAttemptState,
         storage::{
             AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserProviderStore, ApiUserStore,
-            LinkRequestStore, ListPagination, LoginAttemptStore, MapperStore, MockAccessGroupStore,
+            LinkRequestStore, ListPagination, LoginAttemptStore, MagicLinkAttemptFilter,
+            MagicLinkAttemptStore, MagicLinkFilter, MagicLinkRedirectUriStore,
+            MagicLinkSecretStore, MagicLinkStore, MapperStore, MockAccessGroupStore,
             MockAccessTokenStore, MockApiKeyStore, MockApiUserProviderStore, MockApiUserStore,
-            MockLinkRequestStore, MockLoginAttemptStore, MockMapperStore,
-            MockOAuthClientRedirectUriStore, MockOAuthClientSecretStore, MockOAuthClientStore,
-            OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore,
+            MockLinkRequestStore, MockLoginAttemptStore, MockMagicLinkAttemptStore,
+            MockMagicLinkRedirectUriStore, MockMagicLinkSecretStore, MockMagicLinkStore,
+            MockMapperStore, MockOAuthClientRedirectUriStore, MockOAuthClientSecretStore,
+            MockOAuthClientStore, OAuthClientRedirectUriStore, OAuthClientSecretStore,
+            OAuthClientStore, StoreError,
         },
         AccessGroupId, AccessTokenId, ApiKey, ApiKeyId, ApiUserProvider, LinkRequestId,
-        LoginAttemptId, MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
-        NewApiUserProvider, NewLoginAttempt, NewMapper, OAuthClientId, OAuthRedirectUriId,
-        OAuthSecretId, UserId, UserProviderId,
+        LoginAttemptId, MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId,
+        MagicLinkRedirectUri, MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, MapperId,
+        NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, NewLoginAttempt,
+        NewMagicLink, NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper,
+        OAuthClientId, OAuthRedirectUriId, OAuthSecretId, UserId, UserProviderId,
     };
 
     use crate::{
@@ -775,7 +794,6 @@ pub(crate) mod test_mocks {
 
     // Construct a mock storage engine that can be wrapped in an ApiContext for testing
     pub struct MockStorage {
-        pub caller: Option<Caller<VPermission>>,
         pub api_user_store: Option<Arc<MockApiUserStore<VPermission>>>,
         pub api_user_token_store: Option<Arc<MockApiKeyStore<VPermission>>>,
         pub api_user_provider_store: Option<Arc<MockApiUserProviderStore>>,
@@ -787,12 +805,15 @@ pub(crate) mod test_mocks {
         pub access_group_store: Option<Arc<MockAccessGroupStore<VPermission>>>,
         pub mapper_store: Option<Arc<MockMapperStore>>,
         pub link_request_store: Option<Arc<MockLinkRequestStore>>,
+        pub magic_link_store: Option<Arc<MockMagicLinkStore>>,
+        pub magic_link_secret_store: Option<Arc<MockMagicLinkSecretStore>>,
+        pub magic_link_redirect_store: Option<Arc<MockMagicLinkRedirectUriStore>>,
+        pub magic_link_attempt_store: Option<Arc<MockMagicLinkAttemptStore>>,
     }
 
     impl MockStorage {
         pub fn new() -> Self {
             Self {
-                caller: None,
                 api_user_store: None,
                 api_user_token_store: None,
                 api_user_provider_store: None,
@@ -804,6 +825,10 @@ pub(crate) mod test_mocks {
                 access_group_store: None,
                 mapper_store: None,
                 link_request_store: None,
+                magic_link_store: None,
+                magic_link_secret_store: None,
+                magic_link_redirect_store: None,
+                magic_link_attempt_store: None,
             }
         }
     }
@@ -1243,6 +1268,134 @@ pub(crate) mod test_mocks {
                 .as_ref()
                 .unwrap()
                 .upsert(request)
+                .await
+        }
+    }
+
+    #[async_trait]
+    impl MagicLinkStore for MockStorage {
+        async fn get(
+            &self,
+            id: &TypedUuid<MagicLinkId>,
+            deleted: bool,
+        ) -> Result<Option<MagicLink>, StoreError> {
+            self.magic_link_store
+                .as_ref()
+                .unwrap()
+                .get(id, deleted)
+                .await
+        }
+        async fn list(
+            &self,
+            filter: MagicLinkFilter,
+            pagination: &ListPagination,
+        ) -> Result<Vec<MagicLink>, StoreError> {
+            self.magic_link_store
+                .as_ref()
+                .unwrap()
+                .list(filter, pagination)
+                .await
+        }
+        async fn upsert(&self, client: NewMagicLink) -> Result<MagicLink, StoreError> {
+            self.magic_link_store.as_ref().unwrap().upsert(client).await
+        }
+        async fn delete(
+            &self,
+            id: &TypedUuid<MagicLinkId>,
+        ) -> Result<Option<MagicLink>, StoreError> {
+            self.magic_link_store.as_ref().unwrap().delete(id).await
+        }
+    }
+
+    #[async_trait]
+    impl MagicLinkRedirectUriStore for MockStorage {
+        async fn upsert(
+            &self,
+            redirect_uri: NewMagicLinkRedirectUri,
+        ) -> Result<MagicLinkRedirectUri, StoreError> {
+            self.magic_link_redirect_store
+                .as_ref()
+                .unwrap()
+                .upsert(redirect_uri)
+                .await
+        }
+        async fn delete(
+            &self,
+            id: &TypedUuid<MagicLinkRedirectUriId>,
+        ) -> Result<Option<MagicLinkRedirectUri>, StoreError> {
+            self.magic_link_redirect_store
+                .as_ref()
+                .unwrap()
+                .delete(id)
+                .await
+        }
+    }
+
+    #[async_trait]
+    impl MagicLinkSecretStore for MockStorage {
+        async fn upsert(&self, secret: NewMagicLinkSecret) -> Result<MagicLinkSecret, StoreError> {
+            self.magic_link_secret_store
+                .as_ref()
+                .unwrap()
+                .upsert(secret)
+                .await
+        }
+        async fn delete(
+            &self,
+            id: &TypedUuid<MagicLinkSecretId>,
+        ) -> Result<Option<MagicLinkSecret>, StoreError> {
+            self.magic_link_secret_store
+                .as_ref()
+                .unwrap()
+                .delete(id)
+                .await
+        }
+    }
+
+    #[async_trait]
+    impl MagicLinkAttemptStore for MockStorage {
+        async fn get(
+            &self,
+            id: &TypedUuid<MagicLinkAttemptId>,
+        ) -> Result<Option<MagicLinkAttempt>, StoreError> {
+            self.magic_link_attempt_store
+                .as_ref()
+                .unwrap()
+                .get(id)
+                .await
+        }
+        async fn list(
+            &self,
+            filter: MagicLinkAttemptFilter,
+            pagination: &ListPagination,
+        ) -> Result<Vec<MagicLinkAttempt>, StoreError> {
+            self.magic_link_attempt_store
+                .as_ref()
+                .unwrap()
+                .list(filter, pagination)
+                .await
+        }
+        async fn upsert(
+            &self,
+            attempt: NewMagicLinkAttempt,
+        ) -> Result<MagicLinkAttempt, StoreError> {
+            self.magic_link_attempt_store
+                .as_ref()
+                .unwrap()
+                .upsert(attempt)
+                .await
+        }
+        async fn transition(
+            &self,
+            id: &TypedUuid<MagicLinkAttemptId>,
+            signature: &str,
+            from: MagicLinkAttemptState,
+            to: MagicLinkAttemptState,
+        ) -> Result<Option<MagicLinkAttempt>, StoreError> {
+            self.magic_link_attempt_store
+                .as_ref()
+                .unwrap()
+                .transition(id, signature, from, to)
                 .await
         }
     }

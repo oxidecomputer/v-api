@@ -12,9 +12,11 @@ use crate::{
     permissions::Permissions,
     schema::{
         access_groups, api_key, api_user, api_user_access_token, api_user_provider, link_request,
-        login_attempt, mapper, oauth_client, oauth_client_redirect_uri, oauth_client_secret,
+        login_attempt, magic_link_attempt, magic_link_client, magic_link_client_redirect_uri,
+        magic_link_client_secret, mapper, oauth_client, oauth_client_redirect_uri,
+        oauth_client_secret,
     },
-    schema_ext::LoginAttemptState,
+    schema_ext::{LoginAttemptState, MagicLinkAttemptState},
 };
 
 #[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
@@ -113,6 +115,51 @@ pub struct OAuthClientRedirectUriModel {
     pub redirect_uri: String,
     pub created_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
+#[diesel(table_name = magic_link_client)]
+pub struct MagicLinkModel {
+    pub id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
+#[diesel(table_name = magic_link_client_secret)]
+pub struct MagicLinkSecretModel {
+    pub id: Uuid,
+    pub magic_link_client_id: Uuid,
+    pub secret_signature: String,
+    pub created_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
+#[diesel(table_name = magic_link_client_redirect_uri)]
+pub struct MagicLinkRedirectUriModel {
+    pub id: Uuid,
+    pub magic_link_client_id: Uuid,
+    pub redirect_uri: String,
+    pub created_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
+#[diesel(table_name = magic_link_attempt)]
+pub struct MagicLinkAttemptModel {
+    pub id: Uuid,
+    pub attempt_state: MagicLinkAttemptState,
+    pub magic_link_client_id: Uuid,
+    // TODO: This needs to be the MagicLinkMedium enum
+    pub recipient: String,
+    pub medium: String,
+    pub redirect_uri: String,
+    pub scope: String,
+    pub nonce_signature: String,
+    pub expiration: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]

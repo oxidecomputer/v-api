@@ -33,7 +33,7 @@ use v_model::{
 
 use super::{OAuthProvider, OAuthProviderNameParam, UserInfoProvider};
 use crate::{
-    authn::key::RawApiKey,
+    authn::key::RawKey,
     context::{ApiContext, VContext},
     endpoints::login::{
         oauth::{CheckOAuthClient, ClientType},
@@ -565,7 +565,7 @@ where
         });
     }
 
-    let client_secret = RawApiKey::try_from(client_secret).map_err(|err| {
+    let client_secret = RawKey::try_from(client_secret).map_err(|err| {
         tracing::warn!(?err, "Failed to parse OAuth client secret");
 
         OAuthError {
@@ -732,7 +732,7 @@ mod tests {
     };
 
     use crate::{
-        authn::key::RawApiKey,
+        authn::key::RawKey,
         context::{
             test_mocks::{mock_context, MockStorage},
             VContext,
@@ -752,7 +752,7 @@ mod tests {
     async fn mock_client() -> (VContext<VPermission>, OAuthClient, SecretString) {
         let ctx = mock_context(MockStorage::new()).await;
         let client_id = TypedUuid::new_v4();
-        let key = RawApiKey::generate::<8>(&Uuid::new_v4())
+        let key = RawKey::generate::<8>(&Uuid::new_v4())
             .sign(&*ctx.signer())
             .await
             .unwrap();
@@ -1330,7 +1330,7 @@ mod tests {
 
         ctx.set_storage(Arc::new(storage));
 
-        let invalid_secret = RawApiKey::generate::<8>(&Uuid::new_v4())
+        let invalid_secret = RawKey::generate::<8>(&Uuid::new_v4())
             .sign(&*ctx.signer())
             .await
             .unwrap()

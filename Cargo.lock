@@ -2530,6 +2530,7 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "url 2.5.2",
  "uuid",
  "v-api-permission-derive",
  "v-model",
