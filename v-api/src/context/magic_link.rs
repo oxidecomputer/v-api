@@ -4,8 +4,10 @@
 
 use chrono::{DateTime, Utc};
 use newtype_uuid::TypedUuid;
-use std::sync::Arc;
+use secrecy::ExposeSecret;
+use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
+use url::Url;
 use uuid::Uuid;
 use v_model::{
     schema_ext::{MagicLinkAttemptState, MagicLinkMedium},
@@ -17,7 +19,11 @@ use v_model::{
 };
 
 use crate::{
-    authn::{key::RawKey, Signer},
+    authn::{
+        key::{ApiKeyError, RawKey},
+        Signer, SigningKeyError,
+    },
+    messenger::{Message, Messenger, MessengerError},
     response::{ResourceResult, ToResourceResult, ToResourceResultOpt},
 };
 
@@ -25,6 +31,16 @@ use super::VApiStorage;
 
 #[derive(Debug, Error)]
 pub enum MagicLinkSendError {
+    #[error(transparent)]
+    ApiKey(#[from] ApiKeyError),
+    #[error("No message builder has been registered for the {0} medium")]
+    NoMessageBuilder(MagicLinkMedium),
+    #[error("No message sender has been registered for the {0} medium")]
+    NoMessageSender(MagicLinkMedium),
+    #[error(transparent)]
+    Send(#[from] MessengerError),
+    #[error(transparent)]
+    Signing(#[from] SigningKeyError),
     #[error(transparent)]
     Storage(#[from] StoreError),
 }
@@ -44,18 +60,24 @@ pub enum MagicLinkTransitionError {
 }
 
 pub struct MagicLinkContext<T> {
+    message_builders: HashMap<MagicLinkMedium, Box<dyn MagicLinkMessage>>,
+    messengers: HashMap<MagicLinkMedium, Box<dyn Messenger>>,
     storage: Arc<dyn VApiStorage<T>>,
 }
 
 impl<T> MagicLinkContext<T> {
     pub fn new(storage: Arc<dyn VApiStorage<T>>) -> Self {
-        Self { storage }
+        Self {
+            message_builders: HashMap::new(),
+            messengers: HashMap::new(),
+            storage,
+        }
     }
 
     pub async fn find_client(
         &self,
         signature: &str,
-        redirect_uri: &str,
+        redirect_uri: &Url,
     ) -> ResourceResult<MagicLink, StoreError> {
         let filter = MagicLinkFilter {
             signature: Some(vec![signature.to_string()]),
@@ -85,26 +107,49 @@ impl<T> MagicLinkContext<T> {
         &self,
         signer: &dyn Signer,
         client_id: TypedUuid<MagicLinkId>,
-        redirect_uri: &str,
+        redirect_uri: &Url,
         medium: MagicLinkMedium,
         scope: &str,
         expiration: DateTime<Utc>,
         recipient: &str,
     ) -> ResourceResult<MagicLinkAttempt, MagicLinkSendError> {
         let key_id = Uuid::new_v4();
-        let key = RawKey::generate::<8>(&key_id).sign(signer).await.unwrap();
+        let key = RawKey::generate::<24>(&key_id)
+            .sign(signer)
+            .await
+            .map_err(|err| err.into())
+            .to_resource_result()?;
         let (signature, key) = (key.signature().to_string(), key.key());
 
         let recipient_signature = signer
             .sign(recipient.as_bytes())
             .await
             .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-            .unwrap();
-        // .map_err(to_internal_error)?;
+            .map_err(|err| err.into())
+            .to_resource_result()?;
 
-        // TODO: Construct the url to send
+        // Construct the url to send to the recipient
+        let mut url = redirect_uri.clone();
+        url.query_pairs_mut()
+            .append_pair("code", key.expose_secret());
 
-        // TODO: Perform a send
+        // Construct the message to be sent
+        let message = self
+            .message_builders
+            .get(&medium)
+            .ok_or_else(|| MagicLinkSendError::NoMessageBuilder(medium))
+            .to_resource_result()?
+            .create_message(recipient, &url);
+
+        // Send the message
+        self.messengers
+            .get(&medium)
+            .ok_or_else(|| MagicLinkSendError::NoMessageSender(medium))
+            .to_resource_result()?
+            .send(message)
+            .await
+            .to_resource_result()
+            .map_err(|err| err.inner_into())?;
 
         MagicLinkAttemptStore::upsert(
             &*self.storage,
@@ -144,11 +189,7 @@ impl<T> MagicLinkContext<T> {
         // If the transition did not return a model then we need to inspect the model and determine
         // why it failed
         match attempt {
-            Some(attempt) => {
-                // TODO: How do we do all of the login stuff here?
-
-                Ok(attempt)
-            }
+            Some(attempt) => Ok(attempt),
             None => {
                 let attempt = MagicLinkAttemptStore::get(&*self.storage, &attempt_id)
                     .await
@@ -176,4 +217,8 @@ impl<T> MagicLinkContext<T> {
             Err(MagicLinkTransitionError::Unknown).to_resource_result()
         }
     }
+}
+
+trait MagicLinkMessage: Send + Sync {
+    fn create_message(&self, recipient: &str, url: &Url) -> Message;
 }

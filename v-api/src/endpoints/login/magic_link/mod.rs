@@ -10,6 +10,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::ops::Add;
 use tracing::instrument;
+use url::Url;
 use v_model::{permissions::PermissionStorage, schema_ext::MagicLinkMedium, MagicLinkAttemptId};
 
 use crate::{
@@ -32,7 +33,7 @@ struct MagicLinkPath {
 struct MagicLinkSendRequest {
     secret: String,
     recipient: String,
-    redirect_uri: String,
+    redirect_uri: Url,
     expires_in: i64,
 }
 
@@ -94,6 +95,17 @@ where
 impl From<MagicLinkSendError> for HttpError {
     fn from(value: MagicLinkSendError) -> Self {
         match value {
+            MagicLinkSendError::ApiKey(err) => ResourceError::InternalError(err).into(),
+            MagicLinkSendError::NoMessageBuilder(_) => {
+                unimplemented!()
+            }
+            MagicLinkSendError::NoMessageSender(_) => {
+                unimplemented!()
+            }
+            MagicLinkSendError::Send(_) => {
+                unimplemented!()
+            }
+            MagicLinkSendError::Signing(err) => ResourceError::InternalError(err).into(),
             MagicLinkSendError::Storage(err) => ResourceError::InternalError(err).into(),
         }
     }
