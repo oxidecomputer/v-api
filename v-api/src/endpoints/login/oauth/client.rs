@@ -330,7 +330,7 @@ mod tests {
         storage.oauth_client_store = Some(Arc::new(store));
         storage.oauth_client_secret_store = Some(Arc::new(secret_store));
 
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let mut client = create_oauth_client_inner(&ctx, caller.clone())
             .await

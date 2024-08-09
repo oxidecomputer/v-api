@@ -114,7 +114,7 @@ impl<T> MagicLinkContext<T> {
         recipient: &str,
     ) -> ResourceResult<MagicLinkAttempt, MagicLinkSendError> {
         let key_id = Uuid::new_v4();
-        let key = RawKey::generate::<24>(&key_id)
+        let key = RawKey::generate::<8>(&key_id)
             .sign(signer)
             .await
             .map_err(|err| err.into())
@@ -221,4 +221,309 @@ impl<T> MagicLinkContext<T> {
 
 trait MagicLinkMessage: Send + Sync {
     fn create_message(&self, recipient: &str, url: &Url) -> Message;
+}
+
+#[cfg(test)]
+mod tests {
+    use async_trait::async_trait;
+    use chrono::{Duration, Utc};
+    use newtype_uuid::TypedUuid;
+    use std::{
+        ops::Add,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc, RwLock,
+        },
+    };
+    use url::Url;
+    use uuid::Uuid;
+    use v_model::{
+        schema_ext::{MagicLinkAttemptState, MagicLinkMedium},
+        storage::MockMagicLinkAttemptStore,
+        MagicLinkAttempt,
+    };
+
+    use super::{MagicLinkContext, MagicLinkMessage};
+    use crate::{
+        authn::key::RawKey,
+        context::test_mocks::{mock_context, MockStorage},
+        messenger::{Message, Messenger, MessengerError},
+        permissions::VPermission,
+        response::ResourceError,
+    };
+
+    struct TestMessageBuilder {}
+    impl MagicLinkMessage for TestMessageBuilder {
+        fn create_message(&self, recipient: &str, url: &Url) -> Message {
+            Message {
+                recipient: recipient.to_string(),
+                subject: None,
+                text: url.to_string(),
+                html: None,
+            }
+        }
+    }
+
+    struct TestMessenger {}
+
+    #[async_trait]
+    impl Messenger for TestMessenger {
+        async fn send(&self, _message: Message) -> Result<(), MessengerError> {
+            Ok(())
+        }
+    }
+
+    fn mock_mlink_context(storage: Arc<MockStorage>) -> MagicLinkContext<VPermission> {
+        let message_builders = [(
+            MagicLinkMedium::Email,
+            Box::new(TestMessageBuilder {}) as Box<dyn MagicLinkMessage>,
+        )]
+        .into_iter()
+        .collect();
+        let messengers = [(
+            MagicLinkMedium::Email,
+            Box::new(TestMessenger {}) as Box<dyn Messenger>,
+        )]
+        .into_iter()
+        .collect();
+
+        MagicLinkContext {
+            message_builders,
+            messengers,
+            storage,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_send_adds_magic_link_attempt() {
+        let mut storage = MockStorage::new();
+        let mut attempt_store = MockMagicLinkAttemptStore::new();
+        attempt_store.expect_upsert().returning(move |arg| {
+            Ok(MagicLinkAttempt {
+                id: arg.id,
+                attempt_state: arg.attempt_state,
+                magic_link_client_id: arg.magic_link_client_id,
+                recipient: arg.recipient,
+                medium: arg.medium,
+                redirect_uri: arg.redirect_uri,
+                scope: arg.scope,
+                nonce_signature: arg.nonce_signature,
+                expiration: arg.expiration,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            })
+        });
+        storage.magic_link_attempt_store = Some(Arc::new(attempt_store));
+
+        let storage = Arc::new(storage);
+        let ctx = mock_context(storage.clone()).await;
+        let mlink_ctx = mock_mlink_context(storage);
+        let attempt = mlink_ctx
+            .send_login_attempt(
+                ctx.signer(),
+                TypedUuid::new_v4(),
+                &Url::parse("http://127.0.0.1").unwrap(),
+                MagicLinkMedium::Email,
+                "",
+                Utc::now().add(Duration::seconds(60)),
+                "ducks@oxidecomputer.com",
+            )
+            .await;
+
+        assert!(attempt.is_ok())
+    }
+
+    #[tokio::test]
+    async fn test_send_sends_message() {
+        let mut storage = MockStorage::new();
+        let mut attempt_store = MockMagicLinkAttemptStore::new();
+        attempt_store.expect_upsert().returning(move |arg| {
+            Ok(MagicLinkAttempt {
+                id: arg.id,
+                attempt_state: arg.attempt_state,
+                magic_link_client_id: arg.magic_link_client_id,
+                recipient: arg.recipient,
+                medium: arg.medium,
+                redirect_uri: arg.redirect_uri,
+                scope: arg.scope,
+                nonce_signature: arg.nonce_signature,
+                expiration: arg.expiration,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            })
+        });
+        storage.magic_link_attempt_store = Some(Arc::new(attempt_store));
+
+        let storage = Arc::new(storage);
+        let ctx = mock_context(storage.clone()).await;
+        let mut mlink_ctx = mock_mlink_context(storage);
+
+        struct SendMonitor {
+            pub sent: Arc<AtomicBool>,
+        }
+        #[async_trait]
+        impl Messenger for SendMonitor {
+            async fn send(&self, _message: Message) -> Result<(), MessengerError> {
+                self.sent.store(true, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        let sent = Arc::new(AtomicBool::new(false));
+        mlink_ctx.messengers = [(
+            MagicLinkMedium::Email,
+            Box::new(SendMonitor { sent: sent.clone() }) as Box<dyn Messenger>,
+        )]
+        .into_iter()
+        .collect();
+
+        mlink_ctx
+            .send_login_attempt(
+                ctx.signer(),
+                TypedUuid::new_v4(),
+                &Url::parse("http://127.0.0.1").unwrap(),
+                MagicLinkMedium::Email,
+                "",
+                Utc::now().add(Duration::seconds(60)),
+                "ducks@oxidecomputer.com",
+            )
+            .await
+            .expect("Magic link attempt created");
+
+        assert!(sent.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn test_send_appends_code_to_uri() {
+        let mut storage = MockStorage::new();
+        let mut attempt_store = MockMagicLinkAttemptStore::new();
+        attempt_store.expect_upsert().returning(move |arg| {
+            Ok(MagicLinkAttempt {
+                id: arg.id,
+                attempt_state: arg.attempt_state,
+                magic_link_client_id: arg.magic_link_client_id,
+                recipient: arg.recipient,
+                medium: arg.medium,
+                redirect_uri: arg.redirect_uri,
+                scope: arg.scope,
+                nonce_signature: arg.nonce_signature,
+                expiration: arg.expiration,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            })
+        });
+        storage.magic_link_attempt_store = Some(Arc::new(attempt_store));
+
+        let storage = Arc::new(storage);
+        let ctx = mock_context(storage.clone()).await;
+        let mut mlink_ctx = mock_mlink_context(storage);
+
+        struct MessageMonitor {
+            pub message: Arc<RwLock<String>>,
+        }
+        #[async_trait]
+        impl Messenger for MessageMonitor {
+            async fn send(&self, message: Message) -> Result<(), MessengerError> {
+                *self.message.write().unwrap() = message.text;
+                Ok(())
+            }
+        }
+
+        let message = Arc::new(RwLock::new(String::new()));
+        mlink_ctx.messengers = [(
+            MagicLinkMedium::Email,
+            Box::new(MessageMonitor {
+                message: message.clone(),
+            }) as Box<dyn Messenger>,
+        )]
+        .into_iter()
+        .collect();
+
+        mlink_ctx
+            .send_login_attempt(
+                ctx.signer(),
+                TypedUuid::new_v4(),
+                &Url::parse("http://127.0.0.1").unwrap(),
+                MagicLinkMedium::Email,
+                "",
+                Utc::now().add(Duration::seconds(60)),
+                "ducks@oxidecomputer.com",
+            )
+            .await
+            .expect("Magic link attempt created");
+
+        assert!(message.read().unwrap().contains("?code="));
+    }
+
+    #[tokio::test]
+    async fn test_complete_transitions_attempt() {
+        let storage = Arc::new(MockStorage::new());
+        let ctx = mock_context(storage.clone()).await;
+        let signer = ctx.signer();
+
+        let mut storage = MockStorage::new();
+        let mut attempt_store = MockMagicLinkAttemptStore::new();
+        let key_id = Uuid::new_v4();
+        let key = RawKey::generate::<8>(&key_id).sign(signer).await.unwrap();
+        let (signature, _key) = (key.signature().to_string(), key.key());
+        let attempt = MagicLinkAttempt {
+            id: TypedUuid::new_v4(),
+            attempt_state: MagicLinkAttemptState::Sent,
+            magic_link_client_id: TypedUuid::new_v4(),
+            recipient: String::new(),
+            medium: String::new(),
+            redirect_uri: String::new(),
+            scope: String::new(),
+            nonce_signature: signature,
+            expiration: Utc::now(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        let attempt_transition = attempt.clone();
+        attempt_store
+            .expect_transition()
+            .returning(move |id, signature, from, _to| {
+                if &attempt_transition.id == id
+                    && &attempt_transition.nonce_signature == signature
+                    && attempt_transition.attempt_state == from
+                {
+                    Ok(Some(MagicLinkAttempt {
+                        attempt_state: MagicLinkAttemptState::Complete,
+                        ..attempt_transition.clone()
+                    }))
+                } else {
+                    Ok(None)
+                }
+            });
+        let attempt_get = attempt.clone();
+        attempt_store.expect_get().returning(move |id| {
+            if &attempt_get.id == id {
+                Ok(Some(attempt_get.clone()))
+            } else {
+                Ok(None)
+            }
+        });
+        storage.magic_link_attempt_store = Some(Arc::new(attempt_store));
+
+        let mlink_ctx = mock_mlink_context(Arc::new(storage));
+
+        let error = mlink_ctx
+            .complete_login_attempt(TypedUuid::new_v4(), &attempt.nonce_signature)
+            .await
+            .unwrap_err();
+        assert!(match error {
+            ResourceError::DoesNotExist => true,
+            _ => false,
+        });
+
+        let transitioned_attempt = mlink_ctx
+            .complete_login_attempt(attempt.id, &attempt.nonce_signature)
+            .await
+            .unwrap();
+        assert_eq!(
+            MagicLinkAttemptState::Complete,
+            transitioned_attempt.attempt_state
+        );
+    }
 }

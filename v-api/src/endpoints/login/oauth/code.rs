@@ -523,23 +523,19 @@ where
         .map(|s| s.to_string())
         .collect::<Vec<_>>();
 
-    let claims = ctx.generate_claims(&api_user_info.user.id, &api_user_provider.id, Some(scope));
     let token = ctx
-        .user
-        .register_access_token(
+        .generate_access_token(
             &ctx.builtin_registration_user(),
-            ctx.jwt_signer(),
             &api_user_info.user.id,
-            &claims,
+            &api_user_provider.id,
+            Some(scope),
         )
         .await?;
-
-    tracing::info!(provider = ?path.provider, api_user_id = ?api_user_info.user.id, "Generated access token");
 
     Ok(HttpResponseOk(OAuthAuthzCodeExchangeResponse {
         token_type: "Bearer".to_string(),
         access_token: token.signed_token,
-        expires_in: claims.exp - Utc::now().timestamp(),
+        expires_in: token.expires_in,
     }))
 }
 
@@ -750,7 +746,7 @@ mod tests {
     use super::{authorize_code_exchange, get_oauth_client, oauth_redirect_response};
 
     async fn mock_client() -> (VContext<VPermission>, OAuthClient, SecretString) {
-        let ctx = mock_context(MockStorage::new()).await;
+        let ctx = mock_context(Arc::new(MockStorage::new())).await;
         let client_id = TypedUuid::new_v4();
         let key = RawKey::generate::<8>(&Uuid::new_v4())
             .sign(&*ctx.signer())
@@ -810,7 +806,7 @@ mod tests {
 
         let mut storage = MockStorage::new();
         storage.oauth_client_store = Some(Arc::new(client_store));
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let failure = get_oauth_client(&ctx, &client_id, "https://not-test.oxeng.dev/callback")
             .await
@@ -828,7 +824,7 @@ mod tests {
     #[tokio::test]
     async fn test_remote_provider_redirect_url() {
         let storage = MockStorage::new();
-        let mut ctx = mock_context(storage).await;
+        let mut ctx = mock_context(Arc::new(storage)).await;
         ctx.with_public_url("https://api.oxeng.dev");
 
         let (challenge, _) = PkceCodeChallenge::new_random_sha256();
@@ -1003,7 +999,7 @@ mod tests {
                 .returning(move |_| Ok(Some(attempt.clone())));
             storage.login_attempt_store = Some(Arc::new(attempt_store));
 
-            let ctx = mock_context(storage).await;
+            let ctx = mock_context(Arc::new(storage)).await;
             let err = authz_code_callback_op_inner(
                 &ctx,
                 &attempt_id,
@@ -1059,7 +1055,7 @@ mod tests {
 
         let mut storage = MockStorage::new();
         storage.login_attempt_store = Some(Arc::new(attempt_store));
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let location = authz_code_callback_op_inner(
             &ctx,
@@ -1119,7 +1115,7 @@ mod tests {
 
         let mut storage = MockStorage::new();
         storage.login_attempt_store = Some(Arc::new(attempt_store));
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let location = authz_code_callback_op_inner(
             &ctx,
@@ -1181,7 +1177,7 @@ mod tests {
 
         let mut storage = MockStorage::new();
         storage.login_attempt_store = Some(Arc::new(attempt_store));
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let location =
             authz_code_callback_op_inner(&ctx, &attempt_id, Some("remote-code".to_string()), None)

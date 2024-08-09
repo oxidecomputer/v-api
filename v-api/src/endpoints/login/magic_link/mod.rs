@@ -21,7 +21,7 @@ use crate::{
     endpoints::login::{ExternalUserId, UserInfo},
     permissions::VAppPermission,
     response::{to_internal_error, ResourceError},
-    ApiContext,
+    ApiContext, VContext,
 };
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -56,18 +56,43 @@ where
     T: VAppPermission + PermissionStorage,
 {
     let (ctx, _) = rqctx.as_ctx().await?;
+    let path = path.into_inner();
     let body = body.into_inner();
 
+    Ok(HttpResponseOk(
+        magic_link_send_op_inner(
+            ctx,
+            path.medium,
+            body.secret,
+            body.recipient,
+            body.redirect_uri,
+            body.expires_in,
+        )
+        .await?,
+    ))
+}
+
+async fn magic_link_send_op_inner<T>(
+    ctx: &VContext<T>,
+    medium: MagicLinkMedium,
+    secret: String,
+    recipient: String,
+    redirect_uri: Url,
+    expires_in: i64,
+) -> Result<MagicLinkSendResponse, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+{
     // Any caller may create a magic link attempt by supplying the clients secret
     let secret_signature = ctx
         .signer()
-        .sign(body.secret.as_bytes())
+        .sign(secret.as_bytes())
         .await
         .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
         .map_err(to_internal_error)?;
     let client = ctx
         .magic_link
-        .find_client(&secret_signature, &body.redirect_uri)
+        .find_client(&secret_signature, &redirect_uri)
         .await?;
 
     let attempt = ctx
@@ -75,18 +100,18 @@ where
         .send_login_attempt(
             ctx.signer(),
             client.id,
-            &body.redirect_uri,
-            path.into_inner().medium,
+            &redirect_uri,
+            medium,
             "",
-            Utc::now().add(Duration::seconds(body.expires_in)),
-            &body.recipient,
+            Utc::now().add(Duration::seconds(expires_in)),
+            &recipient,
         )
         .await;
 
     match attempt {
-        Ok(attempt) => Ok(HttpResponseOk(MagicLinkSendResponse {
+        Ok(attempt) => Ok(MagicLinkSendResponse {
             attempt_id: attempt.id,
-        })),
+        }),
         Err(ResourceError::InternalError(err)) => Err(err.into()),
         Err(err) => Err(err.into()),
     }
@@ -132,14 +157,12 @@ struct MagicLinkExchangeResponse {
 #[instrument(skip(rqctx), err(Debug))]
 pub async fn magic_link_exchange_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
-    path: Path<MagicLinkPath>,
     body: TypedBody<MagicLinkExchangeRequest>,
 ) -> Result<HttpResponseOk<MagicLinkExchangeResponse>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
 {
     let (ctx, _) = rqctx.as_ctx().await?;
-    let path = path.into_inner();
     let body = body.into_inner();
 
     // Any caller may consume a magic link by supplying the attempt secret
@@ -182,23 +205,19 @@ where
         .map(|s| s.to_string())
         .collect::<Vec<_>>();
 
-    let claims = ctx.generate_claims(&api_user_info.user.id, &api_user_provider.id, Some(scope));
     let token = ctx
-        .user
-        .register_access_token(
+        .generate_access_token(
             &ctx.builtin_registration_user(),
-            ctx.jwt_signer(),
             &api_user_info.user.id,
-            &claims,
+            &api_user_provider.id,
+            Some(scope),
         )
         .await?;
-
-    tracing::info!(medium = ?path.medium, api_user_id = ?api_user_info.user.id, "Generated access token");
 
     Ok(HttpResponseOk(MagicLinkExchangeResponse {
         token_type: "Bearer".to_string(),
         access_token: token.signed_token,
-        expires_in: claims.exp - Utc::now().timestamp(),
+        expires_in: token.expires_in,
     }))
 }
 

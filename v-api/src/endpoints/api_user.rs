@@ -614,7 +614,7 @@ mod tests {
         let mut storage = MockStorage::new();
         storage.api_user_store = Some(Arc::new(store));
 
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let user1 = mock_user();
 
@@ -705,7 +705,7 @@ mod tests {
         let mut storage = MockStorage::new();
         storage.api_user_store = Some(Arc::new(store));
 
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let success_path = ApiUserPath {
             user_id: success_id,
@@ -815,7 +815,7 @@ mod tests {
         let mut storage = MockStorage::new();
         storage.api_user_token_store = Some(Arc::new(store));
 
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let user1 = mock_user();
 
@@ -973,7 +973,7 @@ mod tests {
         storage.api_user_store = Some(Arc::new(api_user_store));
         storage.api_user_token_store = Some(Arc::new(token_store));
 
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let user1 = mock_user();
 
@@ -1136,7 +1136,7 @@ mod tests {
         let mut storage = MockStorage::new();
         storage.api_user_token_store = Some(Arc::new(token_store));
 
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let user1 = mock_user();
 
@@ -1287,7 +1287,7 @@ mod tests {
         let mut storage = MockStorage::new();
         storage.api_user_token_store = Some(Arc::new(token_store));
 
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let user1 = mock_user();
 

@@ -456,20 +456,23 @@ where
         user
     }
 
-    pub async fn register_access_token(
+    pub async fn generate_access_token(
         &self,
         caller: &Caller<T>,
         api_user: &TypedUuid<UserId>,
         api_user_provider: &TypedUuid<UserProviderId>,
         scope: Option<Vec<String>>,
     ) -> ResourceResult<RegisteredAccessToken, ApiError> {
-        let expires_at =
-            Utc::now() + TimeDelta::try_seconds(self.auth.default_jwt_expiration()).unwrap();
-        let claims = Claims::new(self, &api_user, &api_user_provider, scope, expires_at);
-        self.user
-            .register_access_token(caller, self.auth.jwt_signer(), api_user, &claims)
+        let claims = self.generate_claims(&api_user, &api_user_provider, scope);
+        let token = self
+            .user
+            .register_access_token(caller, self.jwt_signer(), &api_user, &claims)
             .await
-            .to_resource_result()
+            .to_resource_result()?;
+
+        tracing::info!(api_user_id = ?api_user, "Generated access token");
+
+        Ok(token)
     }
 
     pub async fn add_api_user_to_group(
@@ -686,7 +689,7 @@ mod tests {
 
         storage.access_group_store = Some(Arc::new(group_store));
         storage.api_user_store = Some(Arc::new(user_store));
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let token_with_no_scope = create_token(&ctx, user_id, vec![]).await;
         let permissions = ctx
@@ -757,10 +760,10 @@ pub(crate) mod test_mocks {
     use super::VContext;
 
     // Construct a mock context that can be used in tests
-    pub async fn mock_context(storage: MockStorage) -> VContext<VPermission> {
+    pub async fn mock_context(storage: Arc<MockStorage>) -> VContext<VPermission> {
         let mut ctx = VContext::new(
             "".to_string(),
-            Arc::new(storage),
+            storage,
             JwtConfig::default(),
             vec![
                 // We are in the context of a test and do not care about the key leaking
