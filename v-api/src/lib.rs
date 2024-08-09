@@ -8,6 +8,7 @@ mod context;
 pub mod endpoints;
 pub mod error;
 pub mod mapper;
+pub mod messenger;
 pub mod permissions;
 mod secrets;
 mod util;

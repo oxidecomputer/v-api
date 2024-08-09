@@ -23,7 +23,7 @@ use v_model::{
 };
 
 use crate::{
-    authn::key::RawApiKey,
+    authn::key::RawKey,
     context::{ApiContext, VContextWithCaller},
     error::ApiError,
     permissions::{VAppPermission, VAppPermissionResponse},
@@ -288,7 +288,7 @@ where
 {
     let info = ctx.user.get_api_user(&caller, &path.user_id).await?;
     let key_id = TypedUuid::new_v4();
-    let key = RawApiKey::generate::<24>(key_id.as_untyped_uuid())
+    let key = RawKey::generate::<24>(key_id.as_untyped_uuid())
         .sign(ctx.signer())
         .await
         .map_err(to_internal_error)?;
@@ -464,7 +464,7 @@ where
     // This endpoint can only be called by the user themselves, it can not be performed on behalf
     // of a user
     if path.user_id == caller.id {
-        let secret = RawApiKey::try_from(body.token.as_str()).map_err(|err| {
+        let secret = RawKey::try_from(body.token.as_str()).map_err(|err| {
             tracing::debug!(?err, "Invalid link request token");
             bad_request("Malformed link request token")
         })?;
@@ -614,7 +614,7 @@ mod tests {
         let mut storage = MockStorage::new();
         storage.api_user_store = Some(Arc::new(store));
 
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let user1 = mock_user();
 
@@ -705,7 +705,7 @@ mod tests {
         let mut storage = MockStorage::new();
         storage.api_user_store = Some(Arc::new(store));
 
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let success_path = ApiUserPath {
             user_id: success_id,
@@ -815,7 +815,7 @@ mod tests {
         let mut storage = MockStorage::new();
         storage.api_user_token_store = Some(Arc::new(store));
 
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let user1 = mock_user();
 
@@ -973,7 +973,7 @@ mod tests {
         storage.api_user_store = Some(Arc::new(api_user_store));
         storage.api_user_token_store = Some(Arc::new(token_store));
 
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let user1 = mock_user();
 
@@ -1136,7 +1136,7 @@ mod tests {
         let mut storage = MockStorage::new();
         storage.api_user_token_store = Some(Arc::new(token_store));
 
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let user1 = mock_user();
 
@@ -1287,7 +1287,7 @@ mod tests {
         let mut storage = MockStorage::new();
         storage.api_user_token_store = Some(Arc::new(token_store));
 
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let user1 = mock_user();
 

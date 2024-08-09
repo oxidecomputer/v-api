@@ -16,6 +16,7 @@ use crate::{
     util::response::{bad_request, internal_error},
 };
 
+pub mod magic_link;
 pub mod oauth;
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -57,6 +58,7 @@ impl From<LoginError> for HttpError {
 pub enum ExternalUserId {
     GitHub(String),
     Google(String),
+    MagicLink(String),
 }
 
 impl ExternalUserId {
@@ -64,6 +66,7 @@ impl ExternalUserId {
         match self {
             Self::GitHub(id) => id,
             Self::Google(id) => id,
+            Self::MagicLink(id) => id,
         }
     }
 
@@ -71,6 +74,7 @@ impl ExternalUserId {
         match self {
             Self::GitHub(_) => "github",
             Self::Google(_) => "google",
+            Self::MagicLink(_) => "magic-link",
         }
     }
 }
@@ -91,6 +95,9 @@ impl Serialize for ExternalUserId {
         match self {
             ExternalUserId::GitHub(id) => serializer.serialize_str(&format!("github-{}", id)),
             ExternalUserId::Google(id) => serializer.serialize_str(&format!("google-{}", id)),
+            ExternalUserId::MagicLink(id) => {
+                serializer.serialize_str(&format!("magic-link-{}", id))
+            }
         }
     }
 }
@@ -122,6 +129,12 @@ impl<'de> Deserialize<'de> for ExternalUserId {
                 } else if let Some(("", id)) = value.split_once("google-") {
                     if !id.is_empty() {
                         Ok(ExternalUserId::Google(id.to_string()))
+                    } else {
+                        Err(de::Error::custom(ExternalUserIdDeserializeError::Empty))
+                    }
+                } else if let Some(("", id)) = value.split_once("magic-link-") {
+                    if !id.is_empty() {
+                        Ok(ExternalUserId::MagicLink(id.to_string()))
                     } else {
                         Err(de::Error::custom(ExternalUserIdDeserializeError::Empty))
                     }

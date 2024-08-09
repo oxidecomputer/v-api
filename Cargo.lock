@@ -1790,6 +1790,7 @@ dependencies = [
  "schemars_derive",
  "serde",
  "serde_json",
+ "url 2.5.2",
  "uuid",
 ]
 
@@ -2530,6 +2531,7 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "url 2.5.2",
  "uuid",
  "v-api-permission-derive",
  "v-model",

@@ -13,7 +13,7 @@ use v_model::{
 
 use crate::{
     authn::{
-        key::{RawApiKey, SignedApiKey},
+        key::{RawKey, SignedKey},
         Signer,
     },
     permissions::{VAppPermission, VPermission},
@@ -53,10 +53,10 @@ where
         source_provider: &TypedUuid<UserProviderId>,
         source_user: &TypedUuid<UserId>,
         target: &TypedUuid<UserId>,
-    ) -> ResourceResult<SignedApiKey, StoreError> {
+    ) -> ResourceResult<SignedKey, StoreError> {
         if caller.can(&VPermission::CreateUserApiProviderLinkToken.into()) {
             let link_id = TypedUuid::new_v4();
-            let secret = RawApiKey::generate::<8>(link_id.as_untyped_uuid());
+            let secret = RawKey::generate::<8>(link_id.as_untyped_uuid());
             let signed = secret.sign(signer).await.unwrap();
 
             LinkRequestStore::upsert(

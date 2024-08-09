@@ -24,7 +24,7 @@ use tracing::instrument;
 use v_model::permissions::PermissionStorage;
 
 use crate::{
-    authn::key::RawApiKey,
+    authn::key::RawKey,
     config::AsymmetricKey,
     context::ApiContext,
     permissions::VAppPermission,
@@ -46,7 +46,7 @@ pub enum AuthError {
 
 // A token that provides authentication and optionally (JWT) authorization claims
 pub enum AuthToken {
-    ApiKey(RawApiKey),
+    ApiKey(RawKey),
     Jwt(Jwt),
 }
 
@@ -88,7 +88,7 @@ impl AuthToken {
                 tracing::debug!(?err, ?token, "Token is not a JWT, falling back to API key");
 
                 Ok(AuthToken::ApiKey(
-                    RawApiKey::try_from(token.as_str()).map_err(|err| {
+                    RawKey::try_from(token.as_str()).map_err(|err| {
                         tracing::info!(?err, "Failed to parse API key");
                         AuthError::FailedToExtract
                     })?,

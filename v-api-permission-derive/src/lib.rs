@@ -371,6 +371,7 @@ fn from_system_permission_tokens(
                         VPermission::ManageApiUsers(inner) => Self::ManageApiUsers(inner),
                         VPermission::ManageApiUsersAssigned => Self::ManageApiUsersAssigned,
                         VPermission::ManageApiUsersAll => Self::ManageApiUsersAll,
+
                         VPermission::CreateApiKey(inner) => Self::CreateApiKey(inner),
                         VPermission::CreateApiKeySelf => Self::CreateApiKeySelf,
                         VPermission::CreateApiKeyAssigned => Self::CreateApiKeyAssigned,
@@ -383,7 +384,9 @@ fn from_system_permission_tokens(
                         VPermission::ManageApiKeys(inner) => Self::ManageApiKeys(inner),
                         VPermission::ManageApiKeysAssigned => Self::ManageApiKeysAssigned,
                         VPermission::ManageApiKeysAll => Self::ManageApiKeysAll,
+
                         VPermission::CreateUserApiProviderLinkToken => Self::CreateUserApiProviderLinkToken,
+
                         VPermission::CreateGroup => Self::CreateGroup,
                         VPermission::GetGroup(inner) => Self::GetGroup(inner),
                         VPermission::GetGroupsJoined => Self::GetGroupsJoined,
@@ -392,16 +395,19 @@ fn from_system_permission_tokens(
                         VPermission::ManageGroups(inner) => Self::ManageGroups(inner),
                         VPermission::ManageGroupsAssigned => Self::ManageGroupsAssigned,
                         VPermission::ManageGroupsAll => Self::ManageGroupsAll,
+
                         VPermission::ManageGroupMembership(inner) => Self::ManageGroupMembership(inner),
                         VPermission::ManageGroupMemberships(inner) => Self::ManageGroupMemberships(inner),
                         VPermission::ManageGroupMembershipsAssigned => Self::ManageGroupMembershipsAssigned,
                         VPermission::ManageGroupMembershipsAll => Self::ManageGroupMembershipsAll,
+
                         VPermission::CreateMapper => Self::CreateMapper,
                         VPermission::GetMappersAll => Self::GetMappersAll,
                         VPermission::ManageMapper(inner) => Self::ManageMapper(inner),
                         VPermission::ManageMappers(inner) => Self::ManageMappers(inner),
                         VPermission::ManageMappersAssigned => Self::ManageMappersAssigned,
                         VPermission::ManageMappersAll => Self::ManageMappersAll,
+
                         VPermission::CreateOAuthClient => Self::CreateOAuthClient,
                         VPermission::GetOAuthClient(inner) => Self::GetOAuthClient(inner),
                         VPermission::GetOAuthClients(inner) => Self::GetOAuthClients(inner),
@@ -411,6 +417,17 @@ fn from_system_permission_tokens(
                         VPermission::ManageOAuthClients(inner) => Self::ManageOAuthClients(inner),
                         VPermission::ManageOAuthClientsAssigned => Self::ManageOAuthClientsAssigned,
                         VPermission::ManageOAuthClientsAll => Self::ManageOAuthClientsAll,
+
+                        VPermission::CreateMagicLinkClient => Self::CreateMagicLinkClient,
+                        VPermission::GetMagicLinkClient(inner) => Self::GetMagicLinkClient(inner),
+                        VPermission::GetMagicLinkClients(inner) => Self::GetMagicLinkClients(inner),
+                        VPermission::GetMagicLinkClientsAssigned => Self::GetMagicLinkClientsAssigned,
+                        VPermission::GetMagicLinkClientsAll => Self::GetMagicLinkClientsAll,
+                        VPermission::ManageMagicLinkClient(inner) => Self::ManageMagicLinkClient(inner),
+                        VPermission::ManageMagicLinkClients(inner) => Self::ManageMagicLinkClients(inner),
+                        VPermission::ManageMagicLinkClientsAssigned => Self::ManageMagicLinkClientsAssigned,
+                        VPermission::ManageMagicLinkClientsAll => Self::ManageMagicLinkClientsAll,
+
                         VPermission::CreateAccessToken => Self::CreateAccessToken,
                         VPermission::Removed => Self::Removed,
                     }
@@ -650,6 +667,45 @@ fn system_permission_tokens() -> TokenStream {
             ManageOAuthClientsAssigned,
             #[v_api(scope(to = "oauth:client:w", from = "oauth:client:w"))]
             ManageOAuthClientsAll,
+
+            #[v_api(scope(to = "mlink:client:w", from = "mlink:client:w"))]
+            CreateMagicLinkClient,
+            #[v_api(
+                contract(kind = append, variant = GetMagicLinkClients),
+                scope(to = "mlink:client:r")
+            )]
+            GetMagicLinkClient(newtype_uuid::TypedUuid<v_model::MagicLinkId>),
+            #[v_api(
+                contract(kind = extend, variant = GetMagicLinkClients),
+                expand(kind = iter, variant = GetMagicLinkClient),
+                scope(to = "mlink:client:r")
+            )]
+            GetMagicLinkClients(BTreeSet<newtype_uuid::TypedUuid<v_model::MagicLinkId>>),
+            #[v_api(
+                expand(kind = alias, variant = GetMagicLinkClient, source = actor),
+                scope(to = "mlink:client:r", from = "mlink:client:r")
+            )]
+            GetMagicLinkClientsAssigned,
+            #[v_api(scope(to = "mlink:client:r", from = "mlink:client:r"))]
+            GetMagicLinkClientsAll,
+            #[v_api(
+                contract(kind = append, variant = ManageMagicLinkClients),
+                scope(to = "mlink:client:w")
+            )]
+            ManageMagicLinkClient(newtype_uuid::TypedUuid<v_model::MagicLinkId>),
+            #[v_api(
+                contract(kind = extend, variant = ManageMagicLinkClients),
+                expand(kind = iter, variant = ManageMagicLinkClient),
+                scope(to = "mlink:client:w")
+            )]
+            ManageMagicLinkClients(BTreeSet<newtype_uuid::TypedUuid<v_model::MagicLinkId>>),
+            #[v_api(
+                expand(kind = alias, variant = ManageMagicLinkClient, source = actor),
+                scope(to = "mlink:client:w", from = "mlink:client:w")
+            )]
+            ManageMagicLinkClientsAssigned,
+            #[v_api(scope(to = "mlink:client:w", from = "mlink:client:w"))]
+            ManageMagicLinkClientsAll,
 
             CreateAccessToken,
 

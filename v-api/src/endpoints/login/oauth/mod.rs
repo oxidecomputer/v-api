@@ -24,7 +24,7 @@ use thiserror::Error;
 use tracing::instrument;
 use v_model::OAuthClient;
 
-use crate::authn::{key::RawApiKey, Signer};
+use crate::authn::{key::RawKey, Signer};
 
 use super::{UserInfo, UserInfoError, UserInfoProvider};
 
@@ -194,12 +194,12 @@ pub struct OAuthProviderNameParam {
 }
 
 pub trait CheckOAuthClient {
-    fn is_secret_valid(&self, key: &RawApiKey, signer: &dyn Signer) -> bool;
+    fn is_secret_valid(&self, key: &RawKey, signer: &dyn Signer) -> bool;
     fn is_redirect_uri_valid(&self, redirect_uri: &str) -> bool;
 }
 
 impl CheckOAuthClient for OAuthClient {
-    fn is_secret_valid(&self, key: &RawApiKey, signer: &dyn Signer) -> bool {
+    fn is_secret_valid(&self, key: &RawKey, signer: &dyn Signer) -> bool {
         for secret in &self.secrets {
             match key.verify(signer, secret.secret_signature.as_bytes()) {
                 Ok(_) => return true,

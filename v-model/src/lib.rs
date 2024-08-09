@@ -5,11 +5,13 @@
 use chrono::{DateTime, Utc};
 use db::{
     AccessGroupModel, ApiKeyModel, ApiUserAccessTokenModel, ApiUserModel, ApiUserProviderModel,
-    LinkRequestModel, LoginAttemptModel, MapperModel, OAuthClientModel,
+    LinkRequestModel, LoginAttemptModel, MagicLinkAttemptModel, MagicLinkModel,
+    MagicLinkRedirectUriModel, MagicLinkSecretModel, MapperModel, OAuthClientModel,
     OAuthClientRedirectUriModel, OAuthClientSecretModel,
 };
 use newtype_uuid::{GenericUuid, TypedUuid, TypedUuidKind, TypedUuidTag};
 use partial_struct::partial;
+use schema_ext::MagicLinkAttemptState;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -423,6 +425,168 @@ impl From<OAuthClientRedirectUriModel> for OAuthClientRedirectUri {
             redirect_uri: value.redirect_uri,
             created_at: value.created_at,
             deleted_at: value.deleted_at,
+        }
+    }
+}
+
+#[derive(JsonSchema)]
+pub enum MagicLinkId {}
+impl TypedUuidKind for MagicLinkId {
+    fn tag() -> TypedUuidTag {
+        const TAG: TypedUuidTag = TypedUuidTag::new("magic-link");
+        TAG
+    }
+}
+
+#[partial(NewMagicLink)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MagicLink {
+    pub id: TypedUuid<MagicLinkId>,
+    #[partial(NewMagicLink(skip))]
+    pub secrets: Vec<MagicLinkSecret>,
+    #[partial(NewMagicLink(skip))]
+    pub redirect_uris: Vec<MagicLinkRedirectUri>,
+    #[partial(NewMagicLink(skip))]
+    pub created_at: DateTime<Utc>,
+    #[partial(NewMagicLink(skip))]
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+impl MagicLink {
+    pub fn new(
+        client: MagicLinkModel,
+        secrets: Vec<MagicLinkSecret>,
+        redirect_uris: Vec<MagicLinkRedirectUri>,
+    ) -> Self {
+        MagicLink {
+            id: TypedUuid::from_untyped_uuid(client.id),
+            secrets,
+            redirect_uris,
+            created_at: client.created_at,
+            deleted_at: client.deleted_at,
+        }
+    }
+}
+
+impl From<MagicLinkModel> for MagicLink {
+    fn from(value: MagicLinkModel) -> Self {
+        MagicLink {
+            id: TypedUuid::from_untyped_uuid(value.id),
+            secrets: vec![],
+            redirect_uris: vec![],
+            created_at: value.created_at,
+            deleted_at: value.deleted_at,
+        }
+    }
+}
+
+#[derive(JsonSchema)]
+pub enum MagicLinkSecretId {}
+impl TypedUuidKind for MagicLinkSecretId {
+    fn tag() -> TypedUuidTag {
+        const TAG: TypedUuidTag = TypedUuidTag::new("magic-link-secret");
+        TAG
+    }
+}
+
+#[partial(NewMagicLinkSecret)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MagicLinkSecret {
+    pub id: TypedUuid<MagicLinkSecretId>,
+    pub magic_link_client_id: TypedUuid<MagicLinkId>,
+    pub secret_signature: String,
+    #[partial(NewMagicLinkSecret(skip))]
+    pub created_at: DateTime<Utc>,
+    #[partial(NewMagicLinkSecret(skip))]
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+impl From<MagicLinkSecretModel> for MagicLinkSecret {
+    fn from(value: MagicLinkSecretModel) -> Self {
+        MagicLinkSecret {
+            id: TypedUuid::from_untyped_uuid(value.id),
+            magic_link_client_id: TypedUuid::from_untyped_uuid(value.magic_link_client_id),
+            secret_signature: value.secret_signature,
+            created_at: value.created_at,
+            deleted_at: value.deleted_at,
+        }
+    }
+}
+
+#[derive(JsonSchema)]
+pub enum MagicLinkRedirectUriId {}
+impl TypedUuidKind for MagicLinkRedirectUriId {
+    fn tag() -> TypedUuidTag {
+        const TAG: TypedUuidTag = TypedUuidTag::new("oauth-redirect-uri");
+        TAG
+    }
+}
+
+#[partial(NewMagicLinkRedirectUri)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MagicLinkRedirectUri {
+    pub id: TypedUuid<MagicLinkRedirectUriId>,
+    pub magic_link_client_id: TypedUuid<MagicLinkId>,
+    pub redirect_uri: String,
+    #[partial(NewMagicLinkRedirectUri(skip))]
+    pub created_at: DateTime<Utc>,
+    #[partial(NewMagicLinkRedirectUri(skip))]
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+impl From<MagicLinkRedirectUriModel> for MagicLinkRedirectUri {
+    fn from(value: MagicLinkRedirectUriModel) -> Self {
+        MagicLinkRedirectUri {
+            id: TypedUuid::from_untyped_uuid(value.id),
+            magic_link_client_id: TypedUuid::from_untyped_uuid(value.magic_link_client_id),
+            redirect_uri: value.redirect_uri,
+            created_at: value.created_at,
+            deleted_at: value.deleted_at,
+        }
+    }
+}
+
+#[derive(JsonSchema)]
+pub enum MagicLinkAttemptId {}
+impl TypedUuidKind for MagicLinkAttemptId {
+    fn tag() -> TypedUuidTag {
+        const TAG: TypedUuidTag = TypedUuidTag::new("magic-link-attempt");
+        TAG
+    }
+}
+
+#[partial(NewMagicLinkAttempt)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MagicLinkAttempt {
+    pub id: TypedUuid<MagicLinkAttemptId>,
+    pub attempt_state: MagicLinkAttemptState,
+    pub magic_link_client_id: TypedUuid<MagicLinkId>,
+    pub recipient: String,
+    pub medium: String,
+    pub redirect_uri: String,
+    pub scope: String,
+    pub nonce_signature: String,
+    pub expiration: DateTime<Utc>,
+    #[partial(NewMagicLinkAttempt(skip))]
+    pub created_at: DateTime<Utc>,
+    #[partial(NewMagicLinkAttempt(skip))]
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<MagicLinkAttemptModel> for MagicLinkAttempt {
+    fn from(value: MagicLinkAttemptModel) -> Self {
+        MagicLinkAttempt {
+            id: TypedUuid::from_untyped_uuid(value.id),
+            attempt_state: value.attempt_state,
+            magic_link_client_id: TypedUuid::from_untyped_uuid(value.magic_link_client_id),
+            recipient: value.recipient,
+            medium: value.medium,
+            redirect_uri: value.redirect_uri,
+            scope: value.scope,
+            nonce_signature: value.nonce_signature,
+            expiration: value.expiration,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
         }
     }
 }
