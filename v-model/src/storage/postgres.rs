@@ -1106,10 +1106,12 @@ impl MagicLinkAttemptStore for PostgresStore {
                 magic_link_attempt::attempt_state.eq(attempt.attempt_state),
                 magic_link_attempt::magic_link_client_id
                     .eq(attempt.magic_link_client_id.into_untyped_uuid()),
+                magic_link_attempt::recipient.eq(attempt.recipient),
                 magic_link_attempt::medium.eq(attempt.medium),
                 magic_link_attempt::redirect_uri.eq(attempt.redirect_uri),
                 magic_link_attempt::scope.eq(attempt.scope),
                 magic_link_attempt::nonce_signature.eq(attempt.nonce_signature),
+                magic_link_attempt::expiration.eq(attempt.expiration),
             ))
             .on_conflict(magic_link_attempt::id)
             .do_update()

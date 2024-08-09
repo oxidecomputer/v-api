@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 
-use chrono::{TimeDelta, Utc};
+use chrono::{Duration, TimeDelta, Utc};
 use diesel::{
     migration::{Migration, MigrationSource},
     pg::Pg,
@@ -15,13 +15,15 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations};
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::ops::{Add, Sub};
 use uuid::Uuid;
 use v_model::{
+    schema_ext::MagicLinkAttemptState,
     storage::{
         postgres::PostgresStore, ApiKeyFilter, ApiKeyStore, ApiUserFilter, ApiUserStore,
-        ListPagination,
+        ListPagination, MagicLinkAttemptStore, MagicLinkStore,
     },
-    NewApiKey, NewApiUser, UserId,
+    NewApiKey, NewApiUser, NewMagicLink, NewMagicLinkAttempt, UserId,
 };
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
@@ -353,4 +355,138 @@ async fn test_api_user() {
         assert!(user.user.deleted_at.is_some());
         assert!(user.user.deleted_at.unwrap() < Utc::now());
     }
+}
+
+// Steps through the process of:
+//   1. Upsert a magic link attempt
+//   2. Retrieve the magic link attempt
+//   3. Try to transition with an invalid id
+//   4. Try to transition with an invalid secret
+//   5. Transition with valid arguments
+//   6. Try to transition same attempt a second time
+//   7. Upsert an expired magic link attempt
+//   8. Try to transition an expired attempt
+#[tokio::test]
+async fn test_magic_link_attempt() {
+    let db = TestDb::new("test_api_user");
+    let store = PostgresStore::new(&db.url()).await.unwrap();
+
+    // Create a client to reference
+    let client_id = TypedUuid::new_v4();
+    MagicLinkStore::upsert(&store, NewMagicLink { id: client_id })
+        .await
+        .unwrap();
+
+    // 1. Create a magic link attempt
+    let attempt = MagicLinkAttemptStore::upsert(
+        &store,
+        NewMagicLinkAttempt {
+            id: TypedUuid::new_v4(),
+            attempt_state: MagicLinkAttemptState::Sent,
+            magic_link_client_id: client_id,
+            recipient: String::new(),
+            medium: String::new(),
+            redirect_uri: String::new(),
+            scope: String::new(),
+            nonce_signature: "xxxxx".to_string(),
+            expiration: Utc::now().add(Duration::seconds(60)),
+        },
+    )
+    .await
+    .unwrap();
+
+    // 2. Retrieve the attempt
+    let attempt_lookup = MagicLinkAttemptStore::get(&store, &attempt.id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(attempt, attempt_lookup);
+
+    // 3. Try to transition with an invalid id
+    let attempt_lookup = MagicLinkAttemptStore::transition(
+        &store,
+        &TypedUuid::new_v4(),
+        &attempt.nonce_signature,
+        MagicLinkAttemptState::Sent,
+        MagicLinkAttemptState::Complete,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(None, attempt_lookup);
+
+    // 4. Try to transition with an invalid secret
+    let attempt_lookup = MagicLinkAttemptStore::transition(
+        &store,
+        &attempt.id,
+        "",
+        MagicLinkAttemptState::Sent,
+        MagicLinkAttemptState::Complete,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(None, attempt_lookup);
+
+    // 5. Transition with valid arguments
+    let attempt_lookup = MagicLinkAttemptStore::transition(
+        &store,
+        &attempt.id,
+        &attempt.nonce_signature,
+        MagicLinkAttemptState::Sent,
+        MagicLinkAttemptState::Complete,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(
+        MagicLinkAttemptState::Complete,
+        attempt_lookup.attempt_state
+    );
+
+    // 6. Try to transition same attempt a second time
+    let attempt_lookup = MagicLinkAttemptStore::transition(
+        &store,
+        &attempt.id,
+        &attempt.nonce_signature,
+        MagicLinkAttemptState::Sent,
+        MagicLinkAttemptState::Complete,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(None, attempt_lookup);
+
+    // 7. Upsert an expired magic link attempt
+    let expired_attempt = MagicLinkAttemptStore::upsert(
+        &store,
+        NewMagicLinkAttempt {
+            id: TypedUuid::new_v4(),
+            attempt_state: MagicLinkAttemptState::Sent,
+            magic_link_client_id: client_id,
+            recipient: String::new(),
+            medium: String::new(),
+            redirect_uri: String::new(),
+            scope: String::new(),
+            nonce_signature: "xxxxx".to_string(),
+            expiration: Utc::now().sub(Duration::seconds(60)),
+        },
+    )
+    .await
+    .unwrap();
+
+    // 8. Try to transition an expired attempt
+    let expired_attempt_lookup = MagicLinkAttemptStore::transition(
+        &store,
+        &expired_attempt.id,
+        &expired_attempt.nonce_signature,
+        MagicLinkAttemptState::Sent,
+        MagicLinkAttemptState::Complete,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(None, expired_attempt_lookup);
 }
