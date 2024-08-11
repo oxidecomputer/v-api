@@ -37,7 +37,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 rsa = "0.9.6"
 schemars = "0.8.21"
 secrecy = "0.8.0"
-serde = "1.0.205"
+serde = "1.0.206"
 serde_json = "1"
 serde_urlencoded = "0.7.1"
 sha2 = "0.10.8"
