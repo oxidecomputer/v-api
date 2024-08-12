@@ -246,7 +246,7 @@ mod macros {
                 path = "/login/magic/{medium}/exchange"
             }]
             pub async fn magic_link_exchange(
-                rqctx: RequestContext<$content_type>,
+                rqctx: RequestContext<$context_type>,
                 _path: Path<MagicLinkPath>,
                 body: TypedBody<MagicLinkExchangeRequest>,
             ) -> Result<HttpResponseOk<MagicLinkExchangeResponse>, HttpError> {
