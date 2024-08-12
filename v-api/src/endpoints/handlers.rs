@@ -591,6 +591,12 @@ mod macros {
                 .expect("Failed to register endpoint");
             $api.register(exchange_device_token)
                 .expect("Failed to register endpoint");
+
+            // Magic Link Login
+            $api.register(magic_link_send)
+                .expect("Failed to register endpoint");
+            $api.register(magic_link_exchange)
+                .expect("Failed to register endpoint");
         };
     }
 }
