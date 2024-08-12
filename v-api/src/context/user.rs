@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use chrono::Utc;
 use newtype_uuid::{GenericUuid, TypedUuid};
 use std::{
     collections::{BTreeSet, HashMap},
@@ -55,6 +56,7 @@ pub enum UserContextError {
 pub struct RegisteredAccessToken {
     pub access_token: AccessToken,
     pub signed_token: String,
+    pub expires_in: i64,
 }
 
 #[derive(Clone)]
@@ -564,6 +566,7 @@ where
         Ok(RegisteredAccessToken {
             access_token: token,
             signed_token: signed,
+            expires_in: claims.exp - Utc::now().timestamp(),
         })
     }
 }

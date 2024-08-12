@@ -18,28 +18,37 @@ use tracing::instrument;
 use crate::{
     db::{
         AccessGroupModel, ApiKeyModel, ApiUserAccessTokenModel, ApiUserModel, ApiUserProviderModel,
-        LinkRequestModel, LoginAttemptModel, MapperModel, OAuthClientModel,
+        LinkRequestModel, LoginAttemptModel, MagicLinkAttemptModel, MagicLinkModel,
+        MagicLinkRedirectUriModel, MagicLinkSecretModel, MapperModel, OAuthClientModel,
         OAuthClientRedirectUriModel, OAuthClientSecretModel,
     },
     permissions::Permission,
     schema::{
         access_groups, api_key, api_user, api_user_access_token, api_user_provider, link_request,
-        login_attempt, mapper, oauth_client, oauth_client_redirect_uri, oauth_client_secret,
+        login_attempt, magic_link_attempt, magic_link_client, magic_link_client_redirect_uri,
+        magic_link_client_secret, mapper, oauth_client, oauth_client_redirect_uri,
+        oauth_client_secret,
     },
+    schema_ext::MagicLinkAttemptState,
     storage::{LinkRequestFilter, LinkRequestStore, StoreError},
     AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUser, ApiUserInfo,
-    ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt, LoginAttemptId, Mapper, MapperId,
-    NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, NewLinkRequest,
-    NewLoginAttempt, NewMapper, NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret,
-    OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId,
-    OAuthSecretId, UserId, UserProviderId,
+    ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt, LoginAttemptId, MagicLink,
+    MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri,
+    MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, Mapper, MapperId, NewAccessGroup,
+    NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, NewLinkRequest, NewLoginAttempt,
+    NewMagicLink, NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper,
+    NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
+    OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId, UserId,
+    UserProviderId,
 };
 
 use super::{
     AccessGroupFilter, AccessGroupStore, AccessTokenFilter, AccessTokenStore, ApiKeyFilter,
     ApiKeyStore, ApiUserFilter, ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore,
-    ListPagination, LoginAttemptFilter, LoginAttemptStore, MapperFilter, MapperStore,
-    OAuthClientFilter, OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore,
+    ListPagination, LoginAttemptFilter, LoginAttemptStore, MagicLinkAttemptFilter,
+    MagicLinkAttemptStore, MagicLinkFilter, MagicLinkRedirectUriStore, MagicLinkSecretStore,
+    MagicLinkStore, MapperFilter, MapperStore, OAuthClientFilter, OAuthClientRedirectUriStore,
+    OAuthClientSecretStore, OAuthClientStore,
 };
 
 pub type DbPool = Pool<ConnectionManager<PgConnection>>;
@@ -816,6 +825,330 @@ impl OAuthClientRedirectUriStore for PostgresStore {
             .optional()?;
 
         Ok(result.map(|redirect| redirect.into()))
+    }
+}
+
+#[async_trait]
+impl MagicLinkStore for PostgresStore {
+    async fn get(
+        &self,
+        id: &TypedUuid<MagicLinkId>,
+        deleted: bool,
+    ) -> Result<Option<MagicLink>, StoreError> {
+        let client = MagicLinkStore::list(
+            self,
+            MagicLinkFilter {
+                id: Some(vec![*id]),
+                deleted,
+                ..Default::default()
+            },
+            &ListPagination::default().limit(1),
+        )
+        .await?;
+
+        Ok(client.into_iter().nth(0))
+    }
+
+    async fn list(
+        &self,
+        filter: MagicLinkFilter,
+        pagination: &ListPagination,
+    ) -> Result<Vec<MagicLink>, StoreError> {
+        let mut query = magic_link_client::table
+            .left_join(magic_link_client_secret::table)
+            .left_join(magic_link_client_redirect_uri::table)
+            .into_boxed();
+
+        let MagicLinkFilter {
+            id,
+            signature,
+            redirect_uri,
+            deleted,
+        } = filter;
+
+        if let Some(id) = id {
+            query = query.filter(
+                magic_link_client::id
+                    .eq_any(id.into_iter().map(|client| client.into_untyped_uuid())),
+            );
+        }
+
+        if let Some(signature) = signature {
+            query = query.filter(magic_link_client_secret::secret_signature.eq_any(signature));
+        }
+
+        if let Some(redirect_uri) = redirect_uri {
+            query = query.filter(magic_link_client_redirect_uri::redirect_uri.eq_any(redirect_uri));
+        }
+
+        if !deleted {
+            query = query.filter(magic_link_client::deleted_at.is_null());
+        }
+
+        let clients = query
+            .order(magic_link_client::created_at.desc())
+            .load_async::<(
+                MagicLinkModel,
+                Option<MagicLinkSecretModel>,
+                Option<MagicLinkRedirectUriModel>,
+            )>(&*self.pool.get().await?)
+            .await?
+            .into_iter()
+            .fold(
+                BTreeMap::new(),
+                |mut clients, (client, secret, redirect)| {
+                    let value = clients.entry(client.id).or_insert((
+                        client,
+                        Vec::<MagicLinkSecret>::new(),
+                        Vec::<MagicLinkRedirectUri>::new(),
+                    ));
+
+                    if let Some(secret) = secret {
+                        value.1.push(secret.into());
+                    }
+
+                    if let Some(redirect) = redirect {
+                        value.2.push(redirect.into());
+                    }
+
+                    clients
+                },
+            )
+            .into_iter()
+            .map(|(_, (client, secrets, redirect_uris))| {
+                MagicLink::new(client, secrets, redirect_uris)
+            })
+            .skip(pagination.offset as usize)
+            .take(pagination.limit as usize)
+            .collect::<Vec<_>>();
+
+        Ok(clients)
+    }
+
+    async fn upsert(&self, client: NewMagicLink) -> Result<MagicLink, StoreError> {
+        let client_m: MagicLinkModel = insert_into(magic_link_client::table)
+            .values(magic_link_client::id.eq(client.id.into_untyped_uuid()))
+            .get_result_async(&*self.pool.get().await?)
+            .await?;
+
+        Ok(client_m.into())
+    }
+
+    async fn delete(&self, id: &TypedUuid<MagicLinkId>) -> Result<Option<MagicLink>, StoreError> {
+        let _ = update(magic_link_client::table)
+            .filter(magic_link_client::id.eq(id.into_untyped_uuid()))
+            .set(magic_link_client::deleted_at.eq(Utc::now()))
+            .execute_async(&*self.pool.get().await?)
+            .await?;
+
+        MagicLinkStore::get(self, id, true).await
+    }
+}
+
+#[async_trait]
+impl MagicLinkSecretStore for PostgresStore {
+    async fn upsert(&self, secret: NewMagicLinkSecret) -> Result<MagicLinkSecret, StoreError> {
+        let secret_m: MagicLinkSecretModel = insert_into(magic_link_client_secret::table)
+            .values((
+                magic_link_client_secret::id.eq(secret.id.into_untyped_uuid()),
+                magic_link_client_secret::magic_link_client_id
+                    .eq(secret.magic_link_client_id.into_untyped_uuid()),
+                magic_link_client_secret::secret_signature.eq(secret.secret_signature),
+            ))
+            .get_result_async(&*self.pool.get().await?)
+            .await?;
+
+        Ok(secret_m.into())
+    }
+
+    async fn delete(
+        &self,
+        id: &TypedUuid<MagicLinkSecretId>,
+    ) -> Result<Option<MagicLinkSecret>, StoreError> {
+        let _ = update(magic_link_client_secret::table)
+            .filter(magic_link_client_secret::id.eq(id.into_untyped_uuid()))
+            .set(magic_link_client_secret::deleted_at.eq(Utc::now()))
+            .execute_async(&*self.pool.get().await?)
+            .await?;
+
+        let query = magic_link_client_secret::table
+            .into_boxed()
+            .filter(magic_link_client_secret::id.eq(id.into_untyped_uuid()));
+
+        let result = query
+            .get_result_async::<MagicLinkSecretModel>(&*self.pool.get().await?)
+            .await
+            .optional()?;
+
+        Ok(result.map(|secret| secret.into()))
+    }
+}
+
+#[async_trait]
+impl MagicLinkRedirectUriStore for PostgresStore {
+    async fn upsert(
+        &self,
+        redirect_uri: NewMagicLinkRedirectUri,
+    ) -> Result<MagicLinkRedirectUri, StoreError> {
+        let redirect_uri_m: MagicLinkRedirectUriModel =
+            insert_into(magic_link_client_redirect_uri::table)
+                .values((
+                    magic_link_client_redirect_uri::id.eq(redirect_uri.id.into_untyped_uuid()),
+                    magic_link_client_redirect_uri::magic_link_client_id
+                        .eq(redirect_uri.magic_link_client_id.into_untyped_uuid()),
+                    magic_link_client_redirect_uri::redirect_uri.eq(redirect_uri.redirect_uri),
+                ))
+                .get_result_async(&*self.pool.get().await?)
+                .await?;
+
+        Ok(redirect_uri_m.into())
+    }
+
+    async fn delete(
+        &self,
+        id: &TypedUuid<MagicLinkRedirectUriId>,
+    ) -> Result<Option<MagicLinkRedirectUri>, StoreError> {
+        let _ = update(magic_link_client_redirect_uri::table)
+            .filter(magic_link_client_redirect_uri::id.eq(id.into_untyped_uuid()))
+            .set(magic_link_client_redirect_uri::deleted_at.eq(Utc::now()))
+            .execute_async(&*self.pool.get().await?)
+            .await?;
+
+        let query = magic_link_client_redirect_uri::table
+            .into_boxed()
+            .filter(magic_link_client_redirect_uri::id.eq(id.into_untyped_uuid()));
+
+        let result = query
+            .get_result_async::<MagicLinkRedirectUriModel>(&*self.pool.get().await?)
+            .await
+            .optional()?;
+
+        Ok(result.map(|redirect| redirect.into()))
+    }
+}
+
+#[async_trait]
+impl MagicLinkAttemptStore for PostgresStore {
+    async fn get(
+        &self,
+        id: &TypedUuid<MagicLinkAttemptId>,
+    ) -> Result<Option<MagicLinkAttempt>, StoreError> {
+        let query = magic_link_attempt::table
+            .into_boxed()
+            .filter(magic_link_attempt::id.eq(id.into_untyped_uuid()));
+
+        let result = query
+            .get_result_async::<MagicLinkAttemptModel>(&*self.pool.get().await?)
+            .await
+            .optional()?;
+
+        Ok(result.map(|attempt| attempt.into()))
+    }
+
+    async fn list(
+        &self,
+        filter: MagicLinkAttemptFilter,
+        pagination: &ListPagination,
+    ) -> Result<Vec<MagicLinkAttempt>, StoreError> {
+        let mut query = magic_link_attempt::table.into_boxed();
+
+        let MagicLinkAttemptFilter {
+            id,
+            client_id,
+            attempt_state,
+            medium,
+            signature,
+        } = filter;
+
+        if let Some(id) = id {
+            query = query.filter(
+                magic_link_attempt::id
+                    .eq_any(id.into_iter().map(|attempt| attempt.into_untyped_uuid())),
+            );
+        }
+
+        if let Some(client_id) = client_id {
+            query = query.filter(
+                magic_link_attempt::magic_link_client_id.eq_any(
+                    client_id
+                        .into_iter()
+                        .map(|client| client.into_untyped_uuid()),
+                ),
+            );
+        }
+
+        if let Some(attempt_state) = attempt_state {
+            query = query.filter(magic_link_attempt::attempt_state.eq_any(attempt_state));
+        }
+
+        if let Some(medium) = medium {
+            query = query.filter(magic_link_attempt::medium.eq_any(medium));
+        }
+
+        if let Some(signature) = signature {
+            query = query.filter(magic_link_attempt::nonce_signature.eq_any(signature));
+        }
+
+        let results = query
+            .offset(pagination.offset)
+            .limit(pagination.limit)
+            .order(magic_link_attempt::created_at.desc())
+            .get_results_async::<MagicLinkAttemptModel>(&*self.pool.get().await?)
+            .await?;
+
+        Ok(results.into_iter().map(|model| model.into()).collect())
+    }
+
+    async fn upsert(&self, attempt: NewMagicLinkAttempt) -> Result<MagicLinkAttempt, StoreError> {
+        let attempt_m: MagicLinkAttemptModel = insert_into(magic_link_attempt::table)
+            .values((
+                magic_link_attempt::id.eq(attempt.id.into_untyped_uuid()),
+                magic_link_attempt::attempt_state.eq(attempt.attempt_state),
+                magic_link_attempt::magic_link_client_id
+                    .eq(attempt.magic_link_client_id.into_untyped_uuid()),
+                magic_link_attempt::recipient.eq(attempt.recipient),
+                magic_link_attempt::medium.eq(attempt.medium),
+                magic_link_attempt::redirect_uri.eq(attempt.redirect_uri),
+                magic_link_attempt::scope.eq(attempt.scope),
+                magic_link_attempt::nonce_signature.eq(attempt.nonce_signature),
+                magic_link_attempt::expiration.eq(attempt.expiration),
+            ))
+            .on_conflict(magic_link_attempt::id)
+            .do_update()
+            .set((
+                magic_link_attempt::attempt_state.eq(excluded(magic_link_attempt::attempt_state)),
+                magic_link_attempt::updated_at.eq(Utc::now()),
+            ))
+            .get_result_async(&*self.pool.get().await?)
+            .await?;
+
+        Ok(attempt_m.into())
+    }
+
+    async fn transition(
+        &self,
+        id: &TypedUuid<MagicLinkAttemptId>,
+        signature: &str,
+        from: MagicLinkAttemptState,
+        to: MagicLinkAttemptState,
+    ) -> Result<Option<MagicLinkAttempt>, StoreError> {
+        // Attempt to transition from the previous state to the new state
+        let query = update(magic_link_attempt::table)
+            .filter(magic_link_attempt::id.eq(id.into_untyped_uuid()))
+            .filter(magic_link_attempt::attempt_state.eq(from))
+            .filter(magic_link_attempt::nonce_signature.eq(signature.to_string()))
+            .filter(magic_link_attempt::expiration.gt(Utc::now()));
+
+        let attempt_m: Option<MagicLinkAttemptModel> = query
+            .set((
+                magic_link_attempt::attempt_state.eq(to),
+                magic_link_attempt::updated_at.eq(Utc::now()),
+            ))
+            .get_result_async(&*self.pool.get().await?)
+            .await
+            .optional()?;
+
+        Ok(attempt_m.map(|m| m.into()))
     }
 }
 

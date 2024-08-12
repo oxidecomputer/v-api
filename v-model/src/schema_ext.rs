@@ -17,7 +17,7 @@ use std::{
     io::Write,
 };
 
-use crate::schema::sql_types::AttemptState;
+use crate::schema::sql_types::{AttemptState, MlinkAttemptState};
 
 macro_rules! sql_conversion {
     (
@@ -82,5 +82,45 @@ impl Display for LoginAttemptState {
 impl Default for LoginAttemptState {
     fn default() -> Self {
         Self::New
+    }
+}
+
+// #[derive(Debug, PartialEq, Clone, FromSqlRow, AsExpression, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize, JsonSchema, Hash, Eq)]
+pub enum MagicLinkMedium {
+    Email,
+}
+
+impl Display for MagicLinkMedium {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MagicLinkMedium::Email => write!(f, "email"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, FromSqlRow, AsExpression, Serialize, Deserialize, JsonSchema)]
+#[diesel(sql_type = MlinkAttemptState)]
+#[serde(rename_all = "lowercase")]
+pub enum MagicLinkAttemptState {
+    Complete,
+    Failed,
+    Sent,
+}
+
+sql_conversion! {
+    MlinkAttemptState => MagicLinkAttemptState,
+    Complete => b"complete",
+    Failed => b"failed",
+    Sent => b"sent",
+}
+
+impl Display for MagicLinkAttemptState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MagicLinkAttemptState::Complete => write!(f, "complete"),
+            MagicLinkAttemptState::Failed => write!(f, "failed"),
+            MagicLinkAttemptState::Sent => write!(f, "sent"),
+        }
     }
 }

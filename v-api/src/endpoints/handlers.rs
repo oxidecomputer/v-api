@@ -33,25 +33,31 @@ mod macros {
                     create_group_op, delete_group_op, get_groups_op, update_group_op, AccessGroupPath,
                     AccessGroupUpdateParams,
                 },
-                login::oauth::{
-                    client::{
-                        create_oauth_client_op, create_oauth_client_redirect_uri_op,
-                        create_oauth_client_secret_op, delete_oauth_client_redirect_uri_op,
-                        delete_oauth_client_secret_op, get_oauth_client_op, list_oauth_clients_op,
-                        AddOAuthClientRedirectBody, AddOAuthClientRedirectPath,
-                        AddOAuthClientSecretPath, DeleteOAuthClientRedirectPath,
-                        DeleteOAuthClientSecretPath, GetOAuthClientPath,
-                        InitialOAuthClientSecretResponse,
+                login::{
+                    magic_link:: {
+                      magic_link_send_op,
+                      magic_link_exchange_op,
                     },
-                    code::{
-                        authz_code_callback_op, authz_code_exchange_op, authz_code_redirect_op,
-                        OAuthAuthzCodeExchangeBody, OAuthAuthzCodeExchangeResponse,
-                        OAuthAuthzCodeQuery, OAuthAuthzCodeReturnQuery,
-                    },
-                    device_token::{
-                        exchange_device_token_op, get_device_provider_op, AccessTokenExchangeRequest,
-                    },
-                    OAuthProviderInfo, OAuthProviderNameParam,
+                    oauth::{
+                        client::{
+                            create_oauth_client_op, create_oauth_client_redirect_uri_op,
+                            create_oauth_client_secret_op, delete_oauth_client_redirect_uri_op,
+                            delete_oauth_client_secret_op, get_oauth_client_op, list_oauth_clients_op,
+                            AddOAuthClientRedirectBody, AddOAuthClientRedirectPath,
+                            AddOAuthClientSecretPath, DeleteOAuthClientRedirectPath,
+                            DeleteOAuthClientSecretPath, GetOAuthClientPath,
+                            InitialOAuthClientSecretResponse,
+                        },
+                        code::{
+                            authz_code_callback_op, authz_code_exchange_op, authz_code_redirect_op,
+                            OAuthAuthzCodeExchangeBody, OAuthAuthzCodeExchangeResponse,
+                            OAuthAuthzCodeQuery, OAuthAuthzCodeReturnQuery,
+                        },
+                        device_token::{
+                            exchange_device_token_op, get_device_provider_op, AccessTokenExchangeRequest,
+                        },
+                        OAuthProviderInfo, OAuthProviderNameParam,
+                    }
                 },
                 mappers::{
                     create_mapper_op, delete_mapper_op, get_mappers_op, CreateMapper, ListMappersQuery,
@@ -145,6 +151,8 @@ mod macros {
                 delete_oauth_client_redirect_uri_op(&rqctx, path).await
             }
 
+            // LOGIN ENDPOINTS
+
             // AUTHZ CODE
 
             /// Generate the remote provider login url and redirect the user
@@ -212,6 +220,32 @@ mod macros {
                 body: TypedBody<AccessTokenExchangeRequest>,
             ) -> Result<Response<Body>, HttpError> {
                 exchange_device_token_op(&rqctx, path, body).await
+            }
+
+            // MAGIC LINK
+
+            #[endpoint {
+                method = POST,
+                path = "/login/magic/{medium}/send"
+            }]
+            pub async fn magic_link_send(
+                rqctx: RequestContext<$context_type>,
+                path: Path<MagicLinkPath>,
+                body: TypedBody<MagicLinkSendRequest>,
+            ) -> Result<HttpResponseOk<MagicLinkSendResponse>, HttpError> {
+              magic_link_send_op(&rqctx, path, body).await
+            }
+
+            #[endpoint {
+                method = POST,
+                path = "/login/magic/{medium}/exchange"
+            }]
+            pub async fn magic_link_exchange(
+                rqctx: RequestContext<$content_type>,
+                _path: Path<MagicLinkPath>,
+                body: TypedBody<MagicLinkExchangeRequest>,
+            ) -> Result<HttpResponseOk<MagicLinkExchangeResponse>, HttpError> {
+              magic_link_exchange_op(&rqctx, body).await
             }
 
             // WELL KNOWN

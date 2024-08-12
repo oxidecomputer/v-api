@@ -15,7 +15,7 @@ use v_model::{
 };
 
 use crate::{
-    authn::key::RawApiKey,
+    authn::key::RawKey,
     context::{ApiContext, VContextWithCaller},
     permissions::{VAppPermission, VPermission},
     secrets::OpenApiSecretString,
@@ -127,7 +127,7 @@ where
     T: VAppPermission + PermissionStorage,
 {
     let id = TypedUuid::new_v4();
-    let secret = RawApiKey::generate::<24>(id.as_untyped_uuid())
+    let secret = RawKey::generate::<24>(id.as_untyped_uuid())
         .sign(ctx.signer())
         .await
         .map_err(to_internal_error)?;
@@ -235,7 +235,7 @@ mod tests {
     };
 
     use crate::{
-        authn::key::RawApiKey,
+        authn::key::RawKey,
         context::test_mocks::{mock_context, MockStorage},
         endpoints::login::oauth::{
             client::{create_oauth_client_inner, create_oauth_client_secret_inner},
@@ -330,7 +330,7 @@ mod tests {
         storage.oauth_client_store = Some(Arc::new(store));
         storage.oauth_client_secret_store = Some(Arc::new(secret_store));
 
-        let ctx = mock_context(storage).await;
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let mut client = create_oauth_client_inner(&ctx, caller.clone())
             .await
@@ -348,7 +348,7 @@ mod tests {
             .secrets
             .push(last_stored_secret.lock().unwrap().clone().unwrap());
 
-        let key = RawApiKey::try_from(&secret.key.0).unwrap();
+        let key = RawKey::try_from(&secret.key.0).unwrap();
 
         assert!(client.is_secret_valid(&key, ctx.signer()))
     }

@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use super::{Signer, SigningKeyError};
 
-pub struct RawApiKey {
+pub struct RawKey {
     clear: SecretVec<u8>,
 }
 
@@ -28,7 +28,7 @@ pub enum ApiKeyError {
     Verify(SigningKeyError),
 }
 
-impl RawApiKey {
+impl RawKey {
     // Generate a new API key
     pub fn generate<const N: usize>(id: &Uuid) -> Self {
         // Generate random data to extend the token id with
@@ -47,14 +47,14 @@ impl RawApiKey {
         &self.clear.expose_secret()[0..16]
     }
 
-    pub async fn sign(self, signer: &dyn Signer) -> Result<SignedApiKey, ApiKeyError> {
+    pub async fn sign(self, signer: &dyn Signer) -> Result<SignedKey, ApiKeyError> {
         let signature = hex::encode(
             signer
                 .sign(&self.clear.expose_secret())
                 .await
                 .map_err(ApiKeyError::Signing)?,
         );
-        Ok(SignedApiKey::new(
+        Ok(SignedKey::new(
             hex::encode(self.clear.expose_secret()).into(),
             signature,
         ))
@@ -68,14 +68,14 @@ impl RawApiKey {
     }
 }
 
-impl TryFrom<&str> for RawApiKey {
+impl TryFrom<&str> for RawKey {
     type Error = ApiKeyError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let decoded = hex::decode(value)?;
 
         if decoded.len() > 16 {
-            Ok(RawApiKey {
+            Ok(RawKey {
                 clear: decoded.into(),
             })
         } else {
@@ -85,14 +85,14 @@ impl TryFrom<&str> for RawApiKey {
     }
 }
 
-impl TryFrom<&SecretString> for RawApiKey {
+impl TryFrom<&SecretString> for RawKey {
     type Error = ApiKeyError;
 
     fn try_from(value: &SecretString) -> Result<Self, Self::Error> {
         let decoded = hex::decode(value.expose_secret())?;
 
         if decoded.len() > 16 {
-            Ok(RawApiKey {
+            Ok(RawKey {
                 clear: decoded.into(),
             })
         } else {
@@ -102,12 +102,12 @@ impl TryFrom<&SecretString> for RawApiKey {
     }
 }
 
-pub struct SignedApiKey {
+pub struct SignedKey {
     key: SecretString,
     signature: String,
 }
 
-impl SignedApiKey {
+impl SignedKey {
     fn new(key: SecretString, signature: String) -> Self {
         Self { key, signature }
     }
@@ -126,7 +126,7 @@ mod tests {
     use secrecy::ExposeSecret;
     use uuid::Uuid;
 
-    use super::RawApiKey;
+    use super::RawKey;
     use crate::util::tests::mock_key;
 
     #[tokio::test]
@@ -134,10 +134,10 @@ mod tests {
         let id = Uuid::new_v4();
         let signer = mock_key().as_signer().await.unwrap();
 
-        let raw = RawApiKey::generate::<8>(&id);
+        let raw = RawKey::generate::<8>(&id);
         let signed = raw.sign(&*signer).await.unwrap();
 
-        let raw2 = RawApiKey::try_from(signed.key.expose_secret().as_str()).unwrap();
+        let raw2 = RawKey::try_from(signed.key.expose_secret().as_str()).unwrap();
 
         assert_eq!(
             (),
@@ -150,10 +150,10 @@ mod tests {
         let id = Uuid::new_v4();
         let signer = mock_key().as_signer().await.unwrap();
 
-        let raw1 = RawApiKey::generate::<8>(&id);
+        let raw1 = RawKey::generate::<8>(&id);
         let signed1 = raw1.sign(&*signer).await.unwrap();
 
-        let raw2 = RawApiKey::generate::<8>(&id);
+        let raw2 = RawKey::generate::<8>(&id);
         let signed2 = raw2.sign(&*signer).await.unwrap();
 
         assert_ne!(signed1.signature(), signed2.signature())
