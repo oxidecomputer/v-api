@@ -25,12 +25,12 @@ use crate::{
 };
 
 #[derive(Debug, Deserialize, JsonSchema)]
-struct MagicLinkPath {
+pub struct MagicLinkPath {
     medium: MagicLinkMedium,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-struct MagicLinkSendRequest {
+pub struct MagicLinkSendRequest {
     secret: String,
     recipient: String,
     redirect_uri: Url,
@@ -38,7 +38,7 @@ struct MagicLinkSendRequest {
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
-struct MagicLinkSendResponse {
+pub struct MagicLinkSendResponse {
     attempt_id: TypedUuid<MagicLinkAttemptId>,
 }
 
@@ -137,14 +137,14 @@ impl From<MagicLinkSendError> for HttpError {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-struct MagicLinkExchangeRequest {
+pub struct MagicLinkExchangeRequest {
     attempt_id: TypedUuid<MagicLinkAttemptId>,
     recipient: String,
     secret: String,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
-struct MagicLinkExchangeResponse {
+pub struct MagicLinkExchangeResponse {
     token_type: String,
     access_token: String,
     expires_in: i64,
