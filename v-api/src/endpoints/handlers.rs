@@ -37,6 +37,9 @@ mod macros {
                     magic_link:: {
                       magic_link_send_op,
                       magic_link_exchange_op,
+                      MagicLinkExchangeRequest,
+                      MagicLinkExchangeResponse,
+                      MagicLinkPath,
                     },
                     oauth::{
                         client::{
