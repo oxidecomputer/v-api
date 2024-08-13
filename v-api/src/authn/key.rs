@@ -66,6 +66,11 @@ impl RawKey {
             .verify(&self.clear.expose_secret(), &signature)
             .map_err(ApiKeyError::Verify)?)
     }
+
+    #[cfg(test)]
+    pub fn value(&self) -> &[u8] {
+        self.clear.expose_secret()
+    }
 }
 
 impl TryFrom<&str> for RawKey {
