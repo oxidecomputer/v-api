@@ -68,15 +68,6 @@ impl RawKey {
     }
 }
 
-#[cfg(test)]
-impl Clone for RawKey {
-    fn clone(&self) -> Self {
-        Self {
-            clear: self.clear.expose_secret().to_vec().into(),
-        }   
-    }
-}
-
 impl TryFrom<&str> for RawKey {
     type Error = ApiKeyError;
 
