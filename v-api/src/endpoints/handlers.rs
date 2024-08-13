@@ -700,13 +700,13 @@ mod macros {
                 .expect("Failed to register endpoint");
             $api.register(get_magic_link)
                 .expect("Failed to register endpoint");
-            $api.register(create_magic_liget_magic_link_secret)
+            $api.register(create_magic_link_secret)
                 .expect("Failed to register endpoint");
-            $api.register(delete_magic_liget_magic_link_secret)
+            $api.register(delete_magic_link_secret)
                 .expect("Failed to register endpoint");
-            $api.register(create_magic_liget_magic_link_redirect_uri)
+            $api.register(create_magic_link_redirect_uri)
                 .expect("Failed to register endpoint");
-            $api.register(delete_magic_liget_magic_link_redirect_uri)
+            $api.register(delete_magic_link_redirect_uri)
                 .expect("Failed to register endpoint");
 
             // Magic Link Login
