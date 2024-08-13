@@ -8,6 +8,7 @@ use http::StatusCode;
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use std::ops::Add;
 use tracing::instrument;
 use url::Url;
@@ -99,10 +100,12 @@ where
         .magic_link
         .find_client(&secret_signature, &redirect_uri)
         .await?;
+    let key = RawKey::generate::<8>(&Uuid::new_v4());
 
     let attempt = ctx
         .magic_link
         .send_login_attempt(
+            key,
             ctx.signer(),
             client.id,
             &redirect_uri,

@@ -8,7 +8,6 @@ use secrecy::ExposeSecret;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use url::Url;
-use uuid::Uuid;
 use v_model::{
     permissions::Caller,
     schema_ext::{MagicLinkAttemptState, MagicLinkMedium},
@@ -261,6 +260,7 @@ where
 
     pub async fn send_login_attempt(
         &self,
+        key: RawKey,
         signer: &dyn Signer,
         client_id: TypedUuid<MagicLinkId>,
         redirect_uri: &Url,
@@ -269,8 +269,7 @@ where
         expiration: DateTime<Utc>,
         recipient: &str,
     ) -> ResourceResult<MagicLinkAttempt, MagicLinkSendError> {
-        let key_id = Uuid::new_v4();
-        let key = RawKey::generate::<8>(&key_id)
+        let key = key
             .sign(signer)
             .await
             .map_err(|err| err.into())
@@ -474,8 +473,10 @@ mod tests {
         let storage = Arc::new(storage);
         let ctx = mock_context(storage.clone()).await;
         let mlink_ctx = mock_mlink_context(storage);
+        let key = RawKey::generate::<8>(&Uuid::new_v4());
         let attempt = mlink_ctx
             .send_login_attempt(
+                key,
                 ctx.signer(),
                 TypedUuid::new_v4(),
                 &Url::parse("http://127.0.0.1").unwrap(),
@@ -532,9 +533,11 @@ mod tests {
         )]
         .into_iter()
         .collect();
+        let key = RawKey::generate::<8>(&Uuid::new_v4());
 
         mlink_ctx
             .send_login_attempt(
+                key,
                 ctx.signer(),
                 TypedUuid::new_v4(),
                 &Url::parse("http://127.0.0.1").unwrap(),
@@ -594,9 +597,11 @@ mod tests {
         )]
         .into_iter()
         .collect();
+        let key = RawKey::generate::<8>(&Uuid::new_v4());
 
         mlink_ctx
             .send_login_attempt(
+                key,
                 ctx.signer(),
                 TypedUuid::new_v4(),
                 &Url::parse("http://127.0.0.1").unwrap(),
