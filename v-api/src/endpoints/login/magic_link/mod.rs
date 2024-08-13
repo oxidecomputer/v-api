@@ -11,9 +11,12 @@ use serde::{Deserialize, Serialize};
 use std::ops::Add;
 use tracing::instrument;
 use url::Url;
-use v_model::{permissions::PermissionStorage, schema_ext::MagicLinkMedium, MagicLinkAttemptId};
+use v_model::{
+    permissions::PermissionStorage, schema_ext::MagicLinkMedium, MagicLink, MagicLinkAttemptId,
+};
 
 use crate::{
+    authn::{key::RawKey, Signer},
     context::{
         magic_link::{MagicLinkSendError, MagicLinkTransitionError},
         VContextWithCaller,
@@ -23,6 +26,8 @@ use crate::{
     response::{to_internal_error, ResourceError},
     ApiContext, VContext,
 };
+
+pub mod client;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct MagicLinkPath {
@@ -253,5 +258,32 @@ impl From<MagicLinkTransitionError> for HttpError {
                 internal_message: "Unknown error occurred".to_string(),
             },
         }
+    }
+}
+
+pub trait CheckMagicLinkClient {
+    fn is_secret_valid(&self, key: &RawKey, signer: &dyn Signer) -> bool;
+    fn is_redirect_uri_valid(&self, redirect_uri: &str) -> bool;
+}
+
+impl CheckMagicLinkClient for MagicLink {
+    fn is_secret_valid(&self, key: &RawKey, signer: &dyn Signer) -> bool {
+        for secret in &self.secrets {
+            match key.verify(signer, secret.secret_signature.as_bytes()) {
+                Ok(_) => return true,
+                Err(err) => {
+                    tracing::error!(?err, ?secret.id, "Client contains an invalid secret signature");
+                }
+            }
+        }
+
+        false
+    }
+
+    fn is_redirect_uri_valid(&self, redirect_uri: &str) -> bool {
+        tracing::trace!(?redirect_uri, valid_uris = ?self.redirect_uris, "Checking redirect uri against list of valid uris");
+        self.redirect_uris
+            .iter()
+            .any(|r| r.redirect_uri == redirect_uri)
     }
 }

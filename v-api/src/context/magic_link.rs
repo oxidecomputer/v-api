@@ -10,12 +10,15 @@ use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
 use v_model::{
+    permissions::Caller,
     schema_ext::{MagicLinkAttemptState, MagicLinkMedium},
     storage::{
         ListPagination, MagicLinkAttemptFilter, MagicLinkAttemptStore, MagicLinkFilter,
-        MagicLinkStore, StoreError,
+        MagicLinkRedirectUriStore, MagicLinkSecretStore, MagicLinkStore, StoreError,
     },
-    MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId, NewMagicLinkAttempt,
+    MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri,
+    MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, NewMagicLink, NewMagicLinkAttempt,
+    NewMagicLinkRedirectUri, NewMagicLinkSecret,
 };
 
 use crate::{
@@ -24,7 +27,8 @@ use crate::{
         Signer, SigningKeyError,
     },
     messenger::{Message, Messenger, MessengerError},
-    response::{ResourceResult, ToResourceResult, ToResourceResultOpt},
+    permissions::{VAppPermission, VPermission},
+    response::{resource_restricted, ResourceResult, ToResourceResult, ToResourceResultOpt},
 };
 
 use super::VApiStorage;
@@ -65,12 +69,164 @@ pub struct MagicLinkContext<T> {
     storage: Arc<dyn VApiStorage<T>>,
 }
 
-impl<T> MagicLinkContext<T> {
+impl<T> MagicLinkContext<T>
+where
+    T: VAppPermission,
+{
     pub fn new(storage: Arc<dyn VApiStorage<T>>) -> Self {
         Self {
             message_builders: HashMap::new(),
             messengers: HashMap::new(),
             storage,
+        }
+    }
+
+    pub async fn create_magic_link(
+        &self,
+        caller: &Caller<T>,
+    ) -> ResourceResult<MagicLink, StoreError> {
+        if caller.can(&VPermission::CreateMagicLinkClient.into()) {
+            MagicLinkStore::upsert(
+                &*self.storage,
+                NewMagicLink {
+                    id: TypedUuid::new_v4(),
+                },
+            )
+            .await
+            .to_resource_result()
+        } else {
+            resource_restricted()
+        }
+    }
+
+    pub async fn get_magic_link(
+        &self,
+        caller: &Caller<T>,
+        id: &TypedUuid<MagicLinkId>,
+    ) -> ResourceResult<MagicLink, StoreError> {
+        if caller.any(&[
+            &VPermission::GetMagicLinkClient(*id).into(),
+            &VPermission::GetMagicLinkClientsAll.into(),
+        ]) {
+            MagicLinkStore::get(&*self.storage, id, false)
+                .await
+                .opt_to_resource_result()
+        } else {
+            resource_restricted()
+        }
+    }
+
+    pub async fn list_magic_links(
+        &self,
+        caller: &Caller<T>,
+    ) -> ResourceResult<Vec<MagicLink>, StoreError> {
+        let mut clients = MagicLinkStore::list(
+            &*self.storage,
+            MagicLinkFilter {
+                id: None,
+                signature: None,
+                redirect_uri: None,
+                deleted: false,
+            },
+            &ListPagination::default(),
+        )
+        .await
+        .to_resource_result()?;
+
+        clients.retain(|client| {
+            caller.any(&[
+                &VPermission::GetMagicLinkClient(client.id).into(),
+                &VPermission::GetMagicLinkClientsAll.into(),
+            ])
+        });
+
+        Ok(clients)
+    }
+
+    pub async fn add_magic_link_secret(
+        &self,
+        caller: &Caller<T>,
+        id: &TypedUuid<MagicLinkSecretId>,
+        client_id: &TypedUuid<MagicLinkId>,
+        secret: &str,
+    ) -> ResourceResult<MagicLinkSecret, StoreError> {
+        if caller.any(&[
+            &VPermission::ManageMagicLinkClient(*client_id).into(),
+            &VPermission::ManageMagicLinkClientsAll.into(),
+        ]) {
+            MagicLinkSecretStore::upsert(
+                &*self.storage,
+                NewMagicLinkSecret {
+                    id: *id,
+                    magic_link_client_id: *client_id,
+                    secret_signature: secret.to_string(),
+                },
+            )
+            .await
+            .to_resource_result()
+        } else {
+            resource_restricted()
+        }
+    }
+
+    pub async fn delete_magic_link_secret(
+        &self,
+        caller: &Caller<T>,
+        id: &TypedUuid<MagicLinkSecretId>,
+        client_id: &TypedUuid<MagicLinkId>,
+    ) -> ResourceResult<MagicLinkSecret, StoreError> {
+        if caller.any(&[
+            &VPermission::ManageMagicLinkClient(*client_id).into(),
+            &VPermission::ManageMagicLinkClientsAll.into(),
+        ]) {
+            MagicLinkSecretStore::delete(&*self.storage, id)
+                .await
+                .opt_to_resource_result()
+        } else {
+            resource_restricted()
+        }
+    }
+
+    pub async fn add_magic_link_redirect_uri(
+        &self,
+        caller: &Caller<T>,
+        client_id: &TypedUuid<MagicLinkId>,
+        uri: &str,
+    ) -> ResourceResult<MagicLinkRedirectUri, StoreError> {
+        if caller.any(&[
+            &VPermission::ManageMagicLinkClient(*client_id).into(),
+            &VPermission::ManageMagicLinkClientsAll.into(),
+        ]) {
+            MagicLinkRedirectUriStore::upsert(
+                &*self.storage,
+                NewMagicLinkRedirectUri {
+                    id: TypedUuid::new_v4(),
+                    magic_link_client_id: *client_id,
+                    redirect_uri: uri.to_string(),
+                },
+            )
+            .await
+            .to_resource_result()
+        } else {
+            resource_restricted()
+        }
+    }
+
+    pub async fn delete_magic_link_redirect_uri(
+        &self,
+        caller: &Caller<T>,
+        id: &TypedUuid<MagicLinkRedirectUriId>,
+        client_id: &TypedUuid<MagicLinkId>,
+    ) -> ResourceResult<MagicLinkRedirectUri, StoreError> {
+        if caller.any(&[
+            &VPermission::ManageMagicLinkClient(*client_id).into(),
+            &VPermission::ManageMagicLinkClientsAll.into(),
+        ]) {
+            MagicLinkRedirectUriStore::delete(&*self.storage, id)
+                .await
+                .opt_to_resource_result()
+        } else {
+            resource_restricted()
         }
     }
 

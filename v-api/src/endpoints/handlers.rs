@@ -14,7 +14,7 @@ mod macros {
             };
             use http::Response;
             use hyper::Body;
-            use v_model::{Mapper, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret, AccessGroup, ApiUser};
+            use v_model::{Mapper, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret, AccessGroup, ApiUser, MagicLink, MagicLinkRedirectUri, MagicLinkSecret};
 
             use v_api::endpoints::{
                 api_user::{
@@ -35,13 +35,29 @@ mod macros {
                 },
                 login::{
                     magic_link:: {
-                      magic_link_send_op,
-                      magic_link_exchange_op,
-                      MagicLinkSendRequest,
-                      MagicLinkSendResponse,
-                      MagicLinkExchangeRequest,
-                      MagicLinkExchangeResponse,
-                      MagicLinkPath,
+                        client::{
+                            create_magic_link_op,
+                            get_magic_link_op,
+                            GetMagicLinkPath,
+                            list_magic_links_op,
+                            create_magic_link_secret_op,
+                            AddMagicLinkSecretPath,
+                            InitialMagicLinkSecretResponse,
+                            delete_magic_link_secret_op,
+                            DeleteMagicLinkSecretPath,
+                            create_magic_link_redirect_uri_op,
+                            AddMagicLinkRedirectPath,
+                            AddMagicLinkRedirectBody,
+                            delete_magic_link_redirect_uri_op,
+                            DeleteMagicLinkRedirectPath,
+                        },
+                        magic_link_send_op,
+                        magic_link_exchange_op,
+                        MagicLinkSendRequest,
+                        MagicLinkSendResponse,
+                        MagicLinkExchangeRequest,
+                        MagicLinkExchangeResponse,
+                        MagicLinkPath,
                     },
                     oauth::{
                         client::{
@@ -156,6 +172,91 @@ mod macros {
                 delete_oauth_client_redirect_uri_op(&rqctx, path).await
             }
 
+            // MAGIC LINK CLIENT
+
+            /// List Magic Link clients
+            #[endpoint {
+                method = GET,
+                path = "/magic/client"
+            }]
+            pub async fn list_magic_links(
+                rqctx: RequestContext<$context_type>,
+            ) -> Result<HttpResponseOk<Vec<MagicLink>>, HttpError> {
+                list_magic_links_op(&rqctx).await
+            }
+
+            /// Create a new Magic Link Client
+            #[endpoint {
+                method = POST,
+                path = "/magic/client"
+            }]
+            pub async fn create_magic_link(
+                rqctx: RequestContext<$context_type>,
+            ) -> Result<HttpResponseCreated<MagicLink>, HttpError> {
+                create_magic_link_op(&rqctx).await
+            }
+
+            /// Get a Magic Link Client
+            #[endpoint {
+                method = GET,
+                path = "/magic/client/{client_id}"
+            }]
+            pub async fn get_magic_link(
+                rqctx: RequestContext<$context_type>,
+                path: Path<GetMagicLinkPath>,
+            ) -> Result<HttpResponseOk<MagicLink>, HttpError> {
+                get_magic_link_op(&rqctx, path).await
+            }
+
+            /// Add a Magic Link client secret
+            #[endpoint {
+                method = POST,
+                path = "/magic/client/{client_id}/secret"
+            }]
+            pub async fn create_magic_link_secret(
+                rqctx: RequestContext<$context_type>,
+                path: Path<AddMagicLinkSecretPath>,
+            ) -> Result<HttpResponseOk<InitialMagicLinkSecretResponse>, HttpError> {
+                create_magic_link_secret_op(&rqctx, path).await
+            }
+
+            /// Delete a Magic Link client secret
+            #[endpoint {
+                method = DELETE,
+                path = "/magic/client/{client_id}/secret/{secret_id}"
+            }]
+            pub async fn delete_magic_link_secret(
+                rqctx: RequestContext<$context_type>,
+                path: Path<DeleteMagicLinkSecretPath>,
+            ) -> Result<HttpResponseOk<MagicLinkSecret>, HttpError> {
+                delete_magic_link_secret_op(&rqctx, path).await
+            }
+
+            /// Add a Magic Link client redirect uri
+            #[endpoint {
+                method = POST,
+                path = "/magic/client/{client_id}/redirect_uri"
+            }]
+            pub async fn create_magic_link_redirect_uri(
+                rqctx: RequestContext<$context_type>,
+                path: Path<AddMagicLinkRedirectPath>,
+                body: TypedBody<AddMagicLinkRedirectBody>,
+            ) -> Result<HttpResponseOk<MagicLinkRedirectUri>, HttpError> {
+                create_magic_link_redirect_uri_op(&rqctx, path, body).await
+            }
+
+            /// Delete a Magic Link client redirect uri
+            #[endpoint {
+                method = DELETE,
+                path = "/magic/client/{client_id}/redirect_uri/{redirect_uri_id}"
+            }]
+            pub async fn delete_magic_link_redirect_uri(
+                rqctx: RequestContext<$context_type>,
+                path: Path<DeleteMagicLinkRedirectPath>,
+            ) -> Result<HttpResponseOk<MagicLinkRedirectUri>, HttpError> {
+                delete_magic_link_redirect_uri_op(&rqctx, path).await
+            }
+
             // LOGIN ENDPOINTS
 
             // AUTHZ CODE
@@ -227,7 +328,7 @@ mod macros {
                 exchange_device_token_op(&rqctx, path, body).await
             }
 
-            // MAGIC LINK
+            // MAGIC LINK 
 
             #[endpoint {
                 method = POST,
@@ -590,6 +691,22 @@ mod macros {
             $api.register(get_device_provider)
                 .expect("Failed to register endpoint");
             $api.register(exchange_device_token)
+                .expect("Failed to register endpoint");
+
+            // Magic Link Client Management
+            $api.register(list_magic_links)
+                .expect("Failed to register endpoint");
+            $api.register(create_magic_link)
+                .expect("Failed to register endpoint");
+            $api.register(get_magic_link)
+                .expect("Failed to register endpoint");
+            $api.register(create_magic_liget_magic_link_secret)
+                .expect("Failed to register endpoint");
+            $api.register(delete_magic_liget_magic_link_secret)
+                .expect("Failed to register endpoint");
+            $api.register(create_magic_liget_magic_link_redirect_uri)
+                .expect("Failed to register endpoint");
+            $api.register(delete_magic_liget_magic_link_redirect_uri)
                 .expect("Failed to register endpoint");
 
             // Magic Link Login
