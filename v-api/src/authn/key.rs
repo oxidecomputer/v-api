@@ -66,10 +66,14 @@ impl RawKey {
             .verify(&self.clear.expose_secret(), &signature)
             .map_err(ApiKeyError::Verify)?)
     }
+}
 
-    #[cfg(test)]
-    pub fn value(&self) -> &[u8] {
-        self.clear.expose_secret()
+#[cfg(test)]
+impl Clone for RawKey {
+    fn clone(&self) -> Self {
+        Self {
+            clear: self.clear.expose_secret().to_vec().into(),
+        }   
     }
 }
 
