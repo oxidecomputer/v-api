@@ -223,9 +223,10 @@ impl Parse for ExpandSettings {
                     _ => panic!("Unexpected source value"),
                 }
             }),
-            ext: settings.iter().find(|s| s.name == "ext").map(|s| {
-                s.value.to_string()
-            }),
+            ext: settings
+                .iter()
+                .find(|s| s.name == "ext")
+                .map(|s| s.value.to_string()),
             field: settings.iter().find(|s| s.name == "field").map(|s| {
                 match s.value.to_string().as_str() {
                     "id" => ExternalField::Id,

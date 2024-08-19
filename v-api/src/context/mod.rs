@@ -29,15 +29,21 @@ use crate::{
     authn::{
         jwt::{Claims, JwtSigner, JwtSignerError},
         AuthError, AuthToken, Signer,
-    }, config::{AsymmetricKey, JwtConfig}, endpoints::login::{
+    },
+    config::{AsymmetricKey, JwtConfig},
+    endpoints::login::{
         oauth::{
             ClientType, OAuthProvider, OAuthProviderError, OAuthProviderFn, OAuthProviderName,
         },
         UserInfo,
-    }, error::{ApiError, AppError}, mapper::DefaultMappingEngine, permissions::{VAppPermission, VPermission}, util::response::{
+    },
+    error::{ApiError, AppError},
+    mapper::DefaultMappingEngine,
+    permissions::{VAppPermission, VPermission},
+    util::response::{
         bad_request, client_error, internal_error, resource_error, resource_restricted,
         ResourceResult, ToResourceResult, ToResourceResultOpt,
-    }
+    },
 };
 
 pub mod auth;
@@ -54,7 +60,7 @@ pub use mapping::MappingContext;
 pub mod oauth;
 pub use oauth::OAuthContext;
 pub mod user;
-pub use user::{UserContext, CallerExtension, ExtensionError};
+pub use user::{CallerExtension, ExtensionError, UserContext};
 
 pub trait VApiStorage<P: Send + Sync>:
     ApiUserStore<P>
@@ -219,7 +225,10 @@ where
         let auth_ctx = AuthContext::new(jwt, keys).await?;
         let group_ctx = GroupContext::new(storage.clone());
         let mut mapping_ctx = MappingContext::new(storage.clone());
-        mapping_ctx.set_engine(Some(Arc::new(DefaultMappingEngine::new(auth_ctx.builtin_registration_user(), group_ctx.clone()))));
+        mapping_ctx.set_engine(Some(Arc::new(DefaultMappingEngine::new(
+            auth_ctx.builtin_registration_user(),
+            group_ctx.clone(),
+        ))));
 
         Ok(Self {
             public_url,

@@ -5,16 +5,23 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use newtype_uuid::{GenericUuid, TypedUuid};
-use std::{collections::{BTreeSet, HashMap}, error::Error, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashMap},
+    error::Error,
+    sync::Arc,
+};
 use thiserror::Error;
 use tracing::{info_span, instrument, Instrument};
 use uuid::Uuid;
 use v_model::{
-    permissions::{AsScope, Caller, Permission, PermissionError, PermissionStorage}, storage::{
+    permissions::{AsScope, Caller, Permission, PermissionError, PermissionStorage},
+    storage::{
         AccessGroupFilter, AccessGroupStore, AccessTokenStore, ApiKeyFilter, ApiKeyStore,
         ApiUserFilter, ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, ListPagination,
         StoreError,
-    }, AccessGroupId, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserInfo, ApiUserProvider, ArcMap, NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, Permissions, UserId, UserProviderId
+    },
+    AccessGroupId, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserInfo, ApiUserProvider, ArcMap,
+    NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, Permissions, UserId, UserProviderId,
 };
 
 use crate::{
@@ -58,11 +65,23 @@ pub type ExtensionError = Box<dyn Error + Send + Sync + 'static>;
 
 #[async_trait]
 pub trait CallerExtension<T>: Send + Sync + 'static {
-    async fn inject(&self, user: &ApiUser<T>, extensions: &mut ArcMap) -> Result<(), ExtensionError>;
+    async fn inject(
+        &self,
+        user: &ApiUser<T>,
+        extensions: &mut ArcMap,
+    ) -> Result<(), ExtensionError>;
 }
 #[async_trait]
-impl<T, F> CallerExtension<T> for F where F: Fn(&ApiUser<T>, &mut ArcMap) -> Result<(), ExtensionError> + Send + Sync + 'static, T: VAppPermission {
-    async fn inject(&self, user: &ApiUser<T>, extensions: &mut ArcMap) -> Result<(), ExtensionError> {
+impl<T, F> CallerExtension<T> for F
+where
+    F: Fn(&ApiUser<T>, &mut ArcMap) -> Result<(), ExtensionError> + Send + Sync + 'static,
+    T: VAppPermission,
+{
+    async fn inject(
+        &self,
+        user: &ApiUser<T>,
+        extensions: &mut ArcMap,
+    ) -> Result<(), ExtensionError> {
         (self)(user, extensions)
     }
 }
@@ -78,7 +97,10 @@ where
     T: VAppPermission,
 {
     pub fn new(storage: Arc<dyn VApiStorage<T>>) -> Self {
-        Self { caller_extension_handlers: Vec::new(), storage }
+        Self {
+            caller_extension_handlers: Vec::new(),
+            storage,
+        }
     }
 
     pub fn set_storage(&mut self, storage: Arc<dyn VApiStorage<T>>) {
@@ -92,7 +114,6 @@ where
     async fn get_extensions(&self, user: &ApiUser<T>) -> ArcMap {
         let mut extensions = HashMap::new();
         for handler in &self.caller_extension_handlers {
-
             // Handlers are not allowed to cause a login to fail. They only report errors
             if let Err(err) = handler.inject(user, &mut extensions).await {
                 tracing::error!(?err, "Caller extension failed");
@@ -235,7 +256,11 @@ where
     }
 
     #[instrument(skip(self), fields(user_id = ?user.id, groups = ?user.groups))]
-    async fn get_user_permissions(&self, user: &ApiUser<T>, extensions: &ArcMap) -> Result<Permissions<T>, StoreError> {
+    async fn get_user_permissions(
+        &self,
+        user: &ApiUser<T>,
+        extensions: &ArcMap,
+    ) -> Result<Permissions<T>, StoreError> {
         let mut group_permissions = self.get_user_group_permissions(&user, &extensions).await?;
         let mut permissions = user.permissions.clone();
         permissions.append(&mut group_permissions);
@@ -290,7 +315,7 @@ where
             let mut info = ApiUserStore::get(&*self.storage, id, false)
                 .await
                 .opt_to_resource_result()?;
-                        
+
             let extensions = self.get_extensions(&info.user).await;
 
             info.user.permissions = <T as PermissionStorage>::expand(

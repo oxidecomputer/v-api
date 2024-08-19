@@ -8,10 +8,10 @@ use http::StatusCode;
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use std::ops::Add;
 use tracing::instrument;
 use url::Url;
+use uuid::Uuid;
 use v_model::{
     permissions::PermissionStorage, schema_ext::MagicLinkMedium, MagicLink, MagicLinkAttemptId,
 };
@@ -87,7 +87,7 @@ where
     T: VAppPermission + PermissionStorage,
 {
     tracing::info!("Handling magic link send request");
-    
+
     // Any caller may create a magic link attempt by supplying the clients secret
     let secret_signature = ctx
         .signer()

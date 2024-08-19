@@ -94,7 +94,11 @@ where
 
 impl<T> From<Permissions<T>> for Caller<T> {
     fn from(value: Permissions<T>) -> Self {
-        Self { id: TypedUuid::new_v4(), permissions: value, extensions: HashMap::new(), }
+        Self {
+            id: TypedUuid::new_v4(),
+            permissions: value,
+            extensions: HashMap::new(),
+        }
     }
 }
 

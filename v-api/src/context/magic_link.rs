@@ -5,9 +5,9 @@
 use chrono::{DateTime, Utc};
 use newtype_uuid::TypedUuid;
 use secrecy::ExposeSecret;
-use tracing::instrument;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
+use tracing::instrument;
 use url::Url;
 use v_model::{
     permissions::Caller,
@@ -81,12 +81,18 @@ where
         }
     }
 
-    pub fn set_message_builder<U>(&mut self, medium: MagicLinkMedium, builder: U) -> &mut Self where U: MagicLinkMessage + 'static {
+    pub fn set_message_builder<U>(&mut self, medium: MagicLinkMedium, builder: U) -> &mut Self
+    where
+        U: MagicLinkMessage + 'static,
+    {
         self.message_builders.insert(medium, Box::new(builder));
         self
     }
 
-    pub fn set_messenger<U>(&mut self, medium: MagicLinkMedium, messenger: U) -> &mut Self where U: Messenger + 'static {
+    pub fn set_messenger<U>(&mut self, medium: MagicLinkMedium, messenger: U) -> &mut Self
+    where
+        U: Messenger + 'static,
+    {
         self.messengers.insert(medium, Box::new(messenger));
         self
     }

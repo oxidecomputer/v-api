@@ -115,12 +115,10 @@ where
         // We only need to run mapping logic if there is mapping engine available to transform
         // mappers into mappings
         if let Some(engine) = &self.engine {
-
             // We optimistically load mappers here. We do not want to take a lock on the mappers and
             // instead handle mappers that become depleted before we can evaluate them at evaluation
             // time.
             for mapper in self.get_mappers(caller, false).await? {
-
                 tracing::trace!(?mapper.name, "Attempt to run mapper");
 
                 // Try to transform this mapper into a mapping
@@ -134,7 +132,7 @@ where
                             mapping.permissions_for(&info).await.to_resource_result()?,
                             mapping.groups_for(&info).await?,
                         )
-                    },
+                    }
                     Err(err) => {
                         // Errors here can be expected. They are reported, but not acted upon
                         tracing::info!(?err, "Not mapping was found for mapper");
