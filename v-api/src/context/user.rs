@@ -2,24 +2,19 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use async_trait::async_trait;
 use chrono::Utc;
 use newtype_uuid::{GenericUuid, TypedUuid};
-use std::{
-    collections::{BTreeSet, HashMap},
-    sync::Arc,
-};
+use std::{collections::{BTreeSet, HashMap}, error::Error, sync::Arc};
 use thiserror::Error;
 use tracing::{info_span, instrument, Instrument};
 use uuid::Uuid;
 use v_model::{
-    permissions::{AsScope, Caller, Permission, PermissionError, PermissionStorage},
-    storage::{
+    permissions::{AsScope, Caller, Permission, PermissionError, PermissionStorage}, storage::{
         AccessGroupFilter, AccessGroupStore, AccessTokenStore, ApiKeyFilter, ApiKeyStore,
         ApiUserFilter, ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, ListPagination,
         StoreError,
-    },
-    AccessGroupId, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserInfo, ApiUserProvider,
-    NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, Permissions, UserId, UserProviderId,
+    }, AccessGroupId, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserInfo, ApiUserProvider, ArcMap, NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, Permissions, UserId, UserProviderId
 };
 
 use crate::{
@@ -59,8 +54,22 @@ pub struct RegisteredAccessToken {
     pub expires_in: i64,
 }
 
+pub type ExtensionError = Box<dyn Error + Send + Sync + 'static>;
+
+#[async_trait]
+pub trait CallerExtension<T>: Send + Sync + 'static {
+    async fn inject(&self, user: &ApiUser<T>, extensions: &mut ArcMap) -> Result<(), ExtensionError>;
+}
+#[async_trait]
+impl<T, F> CallerExtension<T> for F where F: Fn(&ApiUser<T>, &mut ArcMap) -> Result<(), ExtensionError> + Send + Sync + 'static, T: VAppPermission {
+    async fn inject(&self, user: &ApiUser<T>, extensions: &mut ArcMap) -> Result<(), ExtensionError> {
+        (self)(user, extensions)
+    }
+}
+
 #[derive(Clone)]
 pub struct UserContext<T> {
+    caller_extension_handlers: Vec<Arc<dyn CallerExtension<T>>>,
     storage: Arc<dyn VApiStorage<T>>,
 }
 
@@ -69,11 +78,28 @@ where
     T: VAppPermission,
 {
     pub fn new(storage: Arc<dyn VApiStorage<T>>) -> Self {
-        Self { storage }
+        Self { caller_extension_handlers: Vec::new(), storage }
     }
 
     pub fn set_storage(&mut self, storage: Arc<dyn VApiStorage<T>>) {
         self.storage = storage;
+    }
+
+    pub fn add_extension_handler(&mut self, handler: Arc<dyn CallerExtension<T>>) {
+        self.caller_extension_handlers.push(handler);
+    }
+
+    async fn get_extensions(&self, user: &ApiUser<T>) -> ArcMap {
+        let mut extensions = HashMap::new();
+        for handler in &self.caller_extension_handlers {
+
+            // Handlers are not allowed to cause a login to fail. They only report errors
+            if let Err(err) = handler.inject(user, &mut extensions).await {
+                tracing::error!(?err, "Caller extension failed");
+            }
+        }
+
+        extensions
     }
 
     #[instrument(skip(self, signer, token))]
@@ -89,8 +115,10 @@ where
 
         match self.get_api_user(registration_user, &api_user_id).await {
             ResourceResult::Ok(info) => {
+                let extensions = self.get_extensions(&info.user).await;
+
                 // The permissions for the caller is the intersection of the user's permissions and the tokens permissions
-                let user_permissions = self.get_user_permissions(&info.user).await?;
+                let user_permissions = self.get_user_permissions(&info.user, &extensions).await?;
 
                 let combined_permissions = match &base_permissions {
                     BasePermissions::Full => user_permissions.clone(),
@@ -99,6 +127,7 @@ where
                             permissions,
                             &info.user,
                             Some(&user_permissions),
+                            &extensions,
                         );
                         token_permissions.intersect(&user_permissions)
                     }
@@ -112,7 +141,7 @@ where
                         .into_iter()
                         .map(|p| p.into())
                         .collect::<Permissions<T>>(),
-                    extensions: HashMap::default(),
+                    extensions,
                 };
 
                 tracing::info!(?caller.id, "Resolved caller");
@@ -206,8 +235,8 @@ where
     }
 
     #[instrument(skip(self), fields(user_id = ?user.id, groups = ?user.groups))]
-    async fn get_user_permissions(&self, user: &ApiUser<T>) -> Result<Permissions<T>, StoreError> {
-        let mut group_permissions = self.get_user_group_permissions(&user).await?;
+    async fn get_user_permissions(&self, user: &ApiUser<T>, extensions: &ArcMap) -> Result<Permissions<T>, StoreError> {
+        let mut group_permissions = self.get_user_group_permissions(&user, &extensions).await?;
         let mut permissions = user.permissions.clone();
         permissions.append(&mut group_permissions);
 
@@ -217,6 +246,7 @@ where
     async fn get_user_group_permissions(
         &self,
         user: &ApiUser<T>,
+        extensions: &ArcMap,
     ) -> Result<Permissions<T>, StoreError> {
         tracing::trace!("Expanding groups into permissions");
 
@@ -235,7 +265,7 @@ where
         let permissions = groups
             .into_iter()
             .fold(Permissions::new(), |mut aggregate, group| {
-                let mut expanded = <T as PermissionStorage>::expand(&group.permissions, &user, Some(&user.permissions));
+                let mut expanded = <T as PermissionStorage>::expand(&group.permissions, &user, Some(&user.permissions), extensions);
 
                 tracing::trace!(group_id = ?group.id, group_name = ?group.name, permissions = ?expanded, "Transformed group into permission set");
                 aggregate.append(&mut expanded);
@@ -257,19 +287,20 @@ where
             &VPermission::GetApiUser(*id).into(),
             &VPermission::GetApiUsersAll.into(),
         ]) {
-            ApiUserStore::get(&*self.storage, id, false)
+            let mut info = ApiUserStore::get(&*self.storage, id, false)
                 .await
-                .map(|opt| {
-                    opt.map(|mut info| {
-                        info.user.permissions = <T as PermissionStorage>::expand(
-                            &info.user.permissions,
-                            &info.user,
-                            None,
-                        );
-                        info
-                    })
-                })
-                .opt_to_resource_result()
+                .opt_to_resource_result()?;
+                        
+            let extensions = self.get_extensions(&info.user).await;
+
+            info.user.permissions = <T as PermissionStorage>::expand(
+                &info.user.permissions,
+                &info.user,
+                None,
+                &extensions,
+            );
+
+            Ok(info)
         } else {
             resource_restricted()
         }

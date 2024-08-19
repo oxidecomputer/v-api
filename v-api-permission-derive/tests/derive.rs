@@ -9,6 +9,10 @@ use v_api_permission_derive::v_api;
 
 #[test]
 fn test_derive() {
+    struct ItemWrapper {
+        id: Uuid,
+    }
+
     #[v_api(From(VPermission))]
     #[derive(
         Debug,
@@ -29,6 +33,8 @@ fn test_derive() {
         CreateItems(BTreeSet<Uuid>),
         #[v_api(scope(to = "write", from = "write"))]
         CreateItemsAssigned,
+        #[v_api(expand(kind = replace, variant = CreateItem, source = ext, ext = ItemWrapper, field = id))]
+        CreateItemsSelf,
         #[v_api(contract(kind = append, variant = ReadItems))]
         ReadItem(Uuid),
         #[v_api(expand(kind = iter, variant = ReadItem))]

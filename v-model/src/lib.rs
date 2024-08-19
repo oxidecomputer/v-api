@@ -27,7 +27,7 @@ pub mod schema;
 pub mod schema_ext;
 pub mod storage;
 
-pub use {permissions::Permissions, schema_ext::LoginAttemptState};
+pub use {permissions::{Permissions, ArcMap}, schema_ext::LoginAttemptState};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ApiUserInfo<T> {

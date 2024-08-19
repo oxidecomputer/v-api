@@ -70,18 +70,21 @@ struct ExpandSettings {
     kind: ExpandKind,
     variant: Ident,
     source: Option<ExternalSource>,
+    ext: Option<String>,
     field: Option<ExternalField>,
 }
 
 #[derive(Clone, Debug)]
 enum ExternalSource {
     Actor,
+    Extension,
 }
 
 impl ExternalSource {
     fn to_ident(&self) -> Ident {
         match self {
             Self::Actor => format_ident!("actor"),
+            Self::Extension => format_ident!("extensions"),
         }
     }
 }
@@ -90,6 +93,7 @@ impl ExternalSource {
 enum ExternalField {
     Id,
     Groups,
+    Extension(String),
 }
 
 impl ExternalField {
@@ -97,6 +101,7 @@ impl ExternalField {
         match self {
             Self::Id => format_ident!("id"),
             Self::Groups => format_ident!("groups"),
+            Self::Extension(field) => format_ident!("{}", field),
         }
     }
 }
@@ -214,14 +219,18 @@ impl Parse for ExpandSettings {
             source: settings.iter().find(|s| s.name == "source").map(|s| {
                 match s.value.to_string().as_str() {
                     "actor" => ExternalSource::Actor,
+                    "ext" => ExternalSource::Extension,
                     _ => panic!("Unexpected source value"),
                 }
+            }),
+            ext: settings.iter().find(|s| s.name == "ext").map(|s| {
+                s.value.to_string()
             }),
             field: settings.iter().find(|s| s.name == "field").map(|s| {
                 match s.value.to_string().as_str() {
                     "id" => ExternalField::Id,
                     "groups" => ExternalField::Groups,
-                    _ => panic!("Unexpected field value"),
+                    other => ExternalField::Extension(other.to_string()),
                 }
             }),
         })
@@ -873,7 +882,9 @@ fn permission_storage_contract_tokens(
         .fold(quote! {}, |tokens, (key, value)| match value {
             Some(value) => quote! {
                 #tokens
-                contracted.push(#permission_type::#key(#value));
+                if !#value.is_empty() {
+                    contracted.push(#permission_type::#key(#value));
+                }
             },
             None => quote! { #tokens },
         });
@@ -915,6 +926,7 @@ fn permission_storage_expand_tokens(
                 let permission_source = setting.source.map(|source| {
                     match source {
                         ExternalSource::Actor => format_ident!("actor_permissions"),
+                        ExternalSource::Extension => panic!("Extensions not yet supported"),
                     }
                 }).expect("Alias expansions must always have a source defined");
 
@@ -968,10 +980,33 @@ fn permission_storage_expand_tokens(
                 let target_variant = setting.variant;
                 match (setting.source, setting.field) {
                     (Some(source), Some(field)) => {
-                        let source = source.to_ident();
                         let field = field.to_ident();
-                        quote! {
-                            #permission_type::#variant_ident => expanded.push(#permission_type::#target_variant(#source.#field)),
+                        match &source {
+                            ExternalSource::Actor => {
+                                let source = source.to_ident();
+                                quote! {
+                                    #permission_type::#variant_ident => expanded.push(#permission_type::#target_variant(#source.#field)),
+                                }
+                            },
+                            ExternalSource::Extension => {
+                                if let Some(ext) = setting.ext {
+                                    let source = source.to_ident();
+                                    let ext = format_ident!("{}", ext);
+                                    quote! {
+                                        #permission_type::#variant_ident => {
+                                            if let Some(entry) = #source.get(&std::any::TypeId::of::<#ext>()) {
+                                                use std::any::Any;
+                                                let entry: Option<&#ext> = (**entry).downcast_ref();
+                                                if let Some(entry) = entry {
+                                                    expanded.push(#permission_type::#target_variant(entry.#field));
+                                                }
+                                            }
+                                        },
+                                    }
+                                } else {
+                                    panic!("Extension sources must specify an ext key to read from")
+                                }
+                            }
                         }
                     },
                     _ => panic!("Replace expansions must define a value source and field")
@@ -985,6 +1020,7 @@ fn permission_storage_expand_tokens(
             collection: &v_model::Permissions<Self>,
             actor: &v_model::ApiUser<Self>,
             actor_permissions: Option<&v_model::Permissions<Self>>,
+            extensions: &v_model::ArcMap,
         ) -> v_model::Permissions<Self> {
             let mut expanded = Vec::new();
 

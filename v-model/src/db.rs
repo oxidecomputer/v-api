@@ -152,8 +152,8 @@ pub struct MagicLinkAttemptModel {
     pub attempt_state: MagicLinkAttemptState,
     pub magic_link_client_id: Uuid,
     // TODO: This needs to be the MagicLinkMedium enum
-    pub recipient: String,
     pub medium: String,
+    pub recipient: String,
     pub redirect_uri: String,
     pub scope: String,
     pub nonce_signature: String,

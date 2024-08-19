@@ -48,10 +48,6 @@ pub struct MagicLinkSendResponse {
     attempt_id: TypedUuid<MagicLinkAttemptId>,
 }
 
-// #[endpoint {
-//     method = POST,
-//     path = "/login/magic/{medium}/send"
-// }]
 #[instrument(skip(rqctx), err(Debug))]
 pub async fn magic_link_send_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
@@ -78,6 +74,7 @@ where
     ))
 }
 
+#[instrument(skip(ctx, secret, recipient, redirect_uri))]
 async fn magic_link_send_op_inner<T>(
     ctx: &VContext<T>,
     medium: MagicLinkMedium,
@@ -89,12 +86,14 @@ async fn magic_link_send_op_inner<T>(
 where
     T: VAppPermission + PermissionStorage,
 {
+    tracing::info!("Handling magic link send request");
+    
     // Any caller may create a magic link attempt by supplying the clients secret
     let secret_signature = ctx
         .signer()
         .sign(secret.as_bytes())
         .await
-        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+        .map(|bytes| hex::encode(&bytes))
         .map_err(to_internal_error)?;
     let client = ctx
         .magic_link
@@ -158,10 +157,6 @@ pub struct MagicLinkExchangeResponse {
     expires_in: i64,
 }
 
-// #[endpoint {
-//     method = POST,
-//     path = "/login/magic/{medium}/exchange"
-// }]
 #[instrument(skip(rqctx), err(Debug))]
 pub async fn magic_link_exchange_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
@@ -174,23 +169,19 @@ where
     let body = body.into_inner();
 
     // Any caller may consume a magic link by supplying the attempt secret
-    let secret_signature = ctx
-        .signer()
-        .sign(body.secret.as_bytes())
-        .await
-        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
-        .map_err(to_internal_error)?;
+    let key: RawKey = body.secret.as_str().try_into().map_err(to_internal_error)?;
+    let signed_key = key.sign(ctx.signer()).await.unwrap();
 
     let recipient_signature = ctx
         .signer()
         .sign(body.recipient.as_bytes())
         .await
-        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+        .map(|bytes| hex::encode(&bytes))
         .map_err(to_internal_error)?;
 
     let attempt = ctx
         .magic_link
-        .complete_login_attempt(body.attempt_id, &secret_signature)
+        .complete_login_attempt(body.attempt_id, &signed_key.signature())
         .await?;
 
     // Register this user as an API user if needed

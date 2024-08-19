@@ -115,19 +115,26 @@ where
         // We only need to run mapping logic if there is mapping engine available to transform
         // mappers into mappings
         if let Some(engine) = &self.engine {
+
             // We optimistically load mappers here. We do not want to take a lock on the mappers and
             // instead handle mappers that become depleted before we can evaluate them at evaluation
             // time.
             for mapper in self.get_mappers(caller, false).await? {
+
+                tracing::trace!(?mapper.name, "Attempt to run mapper");
+
                 // Try to transform this mapper into a mapping
                 // let mappings = self.mapping_fns.iter().filter_map(|mapping_fn| mapping_fn(mapper.clone()).ok()).nth(0);
                 let mapping = engine.create_mapping(mapper.clone());
 
                 let (mut permissions, mut groups) = match mapping {
-                    Ok(mapping) => (
-                        mapping.permissions_for(&info).await.to_resource_result()?,
-                        mapping.groups_for(&info).await?,
-                    ),
+                    Ok(mapping) => {
+                        tracing::trace!(?mapper.name, "Applying mapping");
+                        (
+                            mapping.permissions_for(&info).await.to_resource_result()?,
+                            mapping.groups_for(&info).await?,
+                        )
+                    },
                     Err(err) => {
                         // Errors here can be expected. They are reported, but not acted upon
                         tracing::info!(?err, "Not mapping was found for mapper");

@@ -33,7 +33,7 @@ impl<T> Permission for T where
 {
 }
 
-type ArcMap = HashMap<TypeId, Arc<dyn Any + Send + Sync>>;
+pub type ArcMap = HashMap<TypeId, Arc<dyn Any + Send + Sync>>;
 
 #[derive(Debug, Clone)]
 pub struct Caller<T> {
@@ -89,6 +89,12 @@ where
         self.extensions
             .remove(&TypeId::of::<U>())
             .and_then(|arc| arc.downcast().ok())
+    }
+}
+
+impl<T> From<Permissions<T>> for Caller<T> {
+    fn from(value: Permissions<T>) -> Self {
+        Self { id: TypedUuid::new_v4(), permissions: value, extensions: HashMap::new(), }
     }
 }
 
@@ -187,6 +193,16 @@ where
     }
 }
 
+impl<T, U, const N: usize> From<[T; N]> for Permissions<U>
+where
+    T: Permission,
+    U: Permission + From<T>,
+{
+    fn from(value: [T; N]) -> Self {
+        Self::from_iter(value.into_iter().map(|v| v.into()))
+    }
+}
+
 impl<T, U> From<Vec<T>> for Permissions<U>
 where
     T: Permission,
@@ -252,6 +268,7 @@ pub trait PermissionStorage {
         collection: &Permissions<Self>,
         actor: &ApiUser<Self>,
         actor_permissions: Option<&Permissions<Self>>,
+        extensions: &ArcMap,
     ) -> Permissions<Self>
     where
         Self: Sized;

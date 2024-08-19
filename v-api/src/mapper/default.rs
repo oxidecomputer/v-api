@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 use std::collections::BTreeSet;
 use v_model::{
     permissions::{Caller, Permissions},
@@ -48,20 +49,25 @@ impl<T> MapperRule<T> for DefaultMapper<T>
 where
     T: VAppPermission,
 {
+    #[instrument(skip(self, _user), field(data = ?self.data))]
     async fn permissions_for(&self, _user: &UserInfo) -> Result<Permissions<T>, StoreError> {
+        tracing::trace!("Running default mapper");
         Ok(self.data.permissions.clone().unwrap_or_default())
     }
 
+    #[instrument(skip(self, _user), field(data = ?self.data))]
     async fn groups_for(
         &self,
         _user: &UserInfo,
     ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError> {
+        tracing::trace!("Running default mapper");
         let groups = self
             .group
             .get_groups(&self.caller)
             .await?
             .into_iter()
             .filter_map(|group| {
+                tracing::trace!(?group, "Processing group for default mapper");
                 if self.data.groups.contains(&group.name) {
                     Some(group.id)
                 } else {

@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 use std::collections::BTreeSet;
 use v_model::{
     permissions::{Caller, Permissions},
@@ -49,14 +50,17 @@ impl<T> MapperRule<T> for EmailDomainMapper<T>
 where
     T: VAppPermission,
 {
+    #[instrument(skip(self, _user), field(data = ?self.data))]
     async fn permissions_for(&self, _user: &UserInfo) -> Result<Permissions<T>, StoreError> {
         Ok(Permissions::new())
     }
 
+    #[instrument(skip(self, user), field(data = ?self.data))]
     async fn groups_for(
         &self,
         user: &UserInfo,
     ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError> {
+        tracing::trace!("Running email domain mapper");
         let has_email_in_domain = user.verified_emails.iter().fold(false, |found, email| {
             found || email.ends_with(&self.data.domain)
         });
@@ -68,6 +72,7 @@ where
                 .await?
                 .into_iter()
                 .filter_map(|group| {
+                    tracing::trace!(?group, "Processing group for email domain mapper");
                     if self.data.groups.contains(&group.name) {
                         Some(group.id)
                     } else {

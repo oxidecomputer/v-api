@@ -5,6 +5,7 @@
 use chrono::{DateTime, Utc};
 use newtype_uuid::TypedUuid;
 use secrecy::ExposeSecret;
+use tracing::instrument;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use url::Url;
@@ -78,6 +79,16 @@ where
             messengers: HashMap::new(),
             storage,
         }
+    }
+
+    pub fn set_message_builder<U>(&mut self, medium: MagicLinkMedium, builder: U) -> &mut Self where U: MagicLinkMessage + 'static {
+        self.message_builders.insert(medium, Box::new(builder));
+        self
+    }
+
+    pub fn set_messenger<U>(&mut self, medium: MagicLinkMedium, messenger: U) -> &mut Self where U: Messenger + 'static {
+        self.messengers.insert(medium, Box::new(messenger));
+        self
     }
 
     pub async fn create_magic_link(
@@ -258,6 +269,7 @@ where
             .opt_to_resource_result()
     }
 
+    #[instrument(skip(self, key, signer, redirect_uri, recipient), err(Debug))]
     pub async fn send_login_attempt(
         &self,
         key: RawKey,
@@ -269,6 +281,7 @@ where
         expiration: DateTime<Utc>,
         recipient: &str,
     ) -> ResourceResult<MagicLinkAttempt, MagicLinkSendError> {
+        tracing::debug!("Signing login key");
         let key = key
             .sign(signer)
             .await
@@ -276,19 +289,20 @@ where
             .to_resource_result()?;
         let (signature, key) = (key.signature().to_string(), key.key());
 
+        tracing::debug!("Constructing login signature");
         let recipient_signature = signer
             .sign(recipient.as_bytes())
             .await
-            .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+            .map(|bytes| hex::encode(&bytes))
             .map_err(|err| err.into())
             .to_resource_result()?;
 
-        // Construct the url to send to the recipient
+        tracing::debug!("Appending login key to redirect target");
         let mut url = redirect_uri.clone();
         url.query_pairs_mut()
             .append_pair("code", key.expose_secret());
 
-        // Construct the message to be sent
+        tracing::debug!("Constructing message to send to recipient");
         let message = self
             .message_builders
             .get(&medium)
@@ -296,7 +310,7 @@ where
             .to_resource_result()?
             .create_message(recipient, &url);
 
-        // Send the message
+        tracing::info!("Sending magic link login attempt message");
         self.messengers
             .get(&medium)
             .ok_or_else(|| MagicLinkSendError::NoMessageSender(medium))
@@ -306,6 +320,7 @@ where
             .to_resource_result()
             .map_err(|err| err.inner_into())?;
 
+        tracing::info!("Storing magic link attempt");
         MagicLinkAttemptStore::upsert(
             &*self.storage,
             NewMagicLinkAttempt {
@@ -374,7 +389,7 @@ where
     }
 }
 
-trait MagicLinkMessage: Send + Sync {
+pub trait MagicLinkMessage: Send + Sync {
     fn create_message(&self, recipient: &str, url: &Url) -> Message;
 }
 

@@ -29,20 +29,15 @@ use crate::{
     authn::{
         jwt::{Claims, JwtSigner, JwtSignerError},
         AuthError, AuthToken, Signer,
-    },
-    config::{AsymmetricKey, JwtConfig},
-    endpoints::login::{
+    }, config::{AsymmetricKey, JwtConfig}, endpoints::login::{
         oauth::{
             ClientType, OAuthProvider, OAuthProviderError, OAuthProviderFn, OAuthProviderName,
         },
         UserInfo,
-    },
-    error::{ApiError, AppError},
-    permissions::{VAppPermission, VPermission},
-    util::response::{
+    }, error::{ApiError, AppError}, mapper::DefaultMappingEngine, permissions::{VAppPermission, VPermission}, util::response::{
         bad_request, client_error, internal_error, resource_error, resource_restricted,
         ResourceResult, ToResourceResult, ToResourceResultOpt,
-    },
+    }
 };
 
 pub mod auth;
@@ -53,13 +48,13 @@ pub use link::LinkContext;
 pub mod login;
 pub use login::LoginContext;
 pub mod magic_link;
-pub use magic_link::MagicLinkContext;
+pub use magic_link::{MagicLinkContext, MagicLinkMessage};
 pub mod mapping;
 pub use mapping::MappingContext;
 pub mod oauth;
 pub use oauth::OAuthContext;
 pub mod user;
-pub use user::UserContext;
+pub use user::{UserContext, CallerExtension, ExtensionError};
 
 pub trait VApiStorage<P: Send + Sync>:
     ApiUserStore<P>
@@ -221,15 +216,20 @@ where
             jwt_signers.push(JwtSigner::new(&key).await.unwrap())
         }
 
+        let auth_ctx = AuthContext::new(jwt, keys).await?;
+        let group_ctx = GroupContext::new(storage.clone());
+        let mut mapping_ctx = MappingContext::new(storage.clone());
+        mapping_ctx.set_engine(Some(Arc::new(DefaultMappingEngine::new(auth_ctx.builtin_registration_user(), group_ctx.clone()))));
+
         Ok(Self {
             public_url,
             storage: storage.clone(),
-            auth: AuthContext::new(jwt, keys).await?,
-            group: GroupContext::new(storage.clone()),
+            auth: auth_ctx,
+            group: group_ctx,
             link: LinkContext::new(storage.clone()),
             login: LoginContext::new(storage.clone()),
             magic_link: MagicLinkContext::new(storage.clone()),
-            mapping: MappingContext::new(storage.clone()),
+            mapping: mapping_ctx,
             oauth: OAuthContext::new(storage.clone()),
             user: UserContext::new(storage.clone()),
         })
@@ -358,6 +358,9 @@ where
             .await
             .map_err(|err| ApiError::from(err))
             .to_resource_result()?;
+
+        tracing::debug!(?mapped_permissions, "Computed mapping permissions");
+        tracing::debug!(?mapped_groups, "Computed mapped groups");
 
         let user = match api_user_providers.len() {
             0 => {

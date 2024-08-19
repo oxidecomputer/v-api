@@ -15,6 +15,9 @@ mod util;
 
 pub use context::{
     auth::SecretContext, ApiContext, GroupContext, LinkContext, LoginContext, MappingContext,
-    OAuthContext, UserContext, VApiStorage, VContext,
+    OAuthContext, UserContext, VApiStorage, VContext, MagicLinkContext, MagicLinkMessage, CallerExtension, ExtensionError
 };
 pub use util::response;
+
+// Re-export ArcMap
+pub use v_model::ArcMap;
