@@ -289,6 +289,11 @@ where
         self
     }
 
+    pub fn builtin_unauthenticated_caller(&self) -> Caller<T> {
+        self.auth.builtin_unauthenticated_caller()
+    }
+
+
     pub fn builtin_registration_user(&self) -> Caller<T> {
         self.auth.builtin_registration_user()
     }
@@ -334,10 +339,10 @@ where
         Ok(match auth {
             Some(token) => {
                 self.user
-                    .get_caller(&self.auth.builtin_registration_user(), self.signer(), token)
+                    .get_caller(&self.builtin_registration_user(), self.signer(), token)
                     .await?
             }
-            None => self.auth.builtin_unauthenticated_caller(),
+            None => self.builtin_unauthenticated_caller(),
         })
     }
 
