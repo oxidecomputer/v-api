@@ -12,5 +12,6 @@
     }
   ],
   "timezone": "America/Los_Angeles",
-  "schedule": ["at any time"]
+  "schedule": ["at any time"],
+  "rollbackPrs": true
 }
