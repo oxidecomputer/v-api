@@ -10,5 +10,7 @@
       "matchPackageNames": ["tokio"],
       "allowedVersions": "<=1.38.1"
     }
-  ]
+  ],
+  "timezone": "America/Los_Angeles",
+  "schedule": ["at any time"]
 }
