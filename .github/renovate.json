@@ -4,15 +4,5 @@
     "local>oxidecomputer/renovate-config",
     "local>oxidecomputer/renovate-config//rust/autocreate",
     "helpers:pinGitHubActionDigests"
-  ],
-  "packageRules": [
-    {
-      "matchDatasources": ["crate"],
-      "matchPackageNames": ["tokio"],
-      "allowedVersions": "<=1.38.1"
-    }
-  ],
-  "timezone": "America/Los_Angeles",
-  "schedule": ["at any time"],
-  "rollbackPrs": true
+  ]
 }
