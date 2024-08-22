@@ -293,7 +293,6 @@ where
         self.auth.builtin_unauthenticated_caller()
     }
 
-
     pub fn builtin_registration_user(&self) -> Caller<T> {
         self.auth.builtin_registration_user()
     }
