@@ -750,8 +750,11 @@ fn as_scope_trait_tokens(
         .iter()
         .fold(HashMap::new(), |mut map, (variant, settings)| {
             if let Some(from) = &settings.from {
-                let entry: &mut Vec<Ident> = map.entry(LiteralKey::new(from)).or_default();
-                entry.push(variant.ident.clone());
+                for from in from.to_string().trim_matches('"').split(' ') {
+                    let inner = Literal::string(from);
+                    let entry: &mut Vec<Ident> = map.entry(LiteralKey::new(&inner)).or_default();
+                    entry.push(variant.ident.clone());
+                }
             }
 
             map

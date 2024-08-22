@@ -39,7 +39,7 @@ fn test_derive() {
         ReadItem(Uuid),
         #[v_api(expand(kind = iter, variant = ReadItem))]
         ReadItems(BTreeSet<Uuid>),
-        #[v_api(expand(kind = alias, variant = ReadItem, source = actor), scope(to = "read", from = "read"))]
+        #[v_api(expand(kind = alias, variant = ReadItem, source = actor), scope(to = "read read2 read3", from = "read read2 read3"))]
         ReadItemsAssigned,
     }
 }
