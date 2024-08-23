@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use hyper::{body::Bytes, client::HttpConnector, Body, Client, Request};
-use hyper_rustls::HttpsConnector;
+use hyper::body::Bytes;
+use reqwest::Request;
 use secrecy::SecretString;
 use serde::Deserialize;
 use std::fmt;
@@ -21,7 +21,7 @@ pub struct GoogleOAuthProvider {
     web_public: OAuthPublicCredentials,
     web_private: Option<OAuthPrivateCredentials>,
     additional_scopes: Vec<String>,
-    client: Client<HttpsConnector<HttpConnector>>,
+    client: reqwest::Client,
 }
 
 impl fmt::Debug for GoogleOAuthProvider {
@@ -38,15 +38,6 @@ impl GoogleOAuthProvider {
         web_client_secret: SecretString,
         additional_scopes: Option<Vec<String>>,
     ) -> Self {
-        let client = Client::builder().build(
-            hyper_rustls::HttpsConnectorBuilder::new()
-                .with_native_roots()
-                .unwrap()
-                .https_only()
-                .enable_http2()
-                .build(),
-        );
-
         Self {
             device_public: OAuthPublicCredentials {
                 client_id: device_client_id,
@@ -61,11 +52,11 @@ impl GoogleOAuthProvider {
                 client_secret: web_client_secret,
             }),
             additional_scopes: additional_scopes.unwrap_or_default(),
-            client,
+            client: reqwest::Client::new(),
         }
     }
 
-    pub fn with_client(&mut self, client: Client<HttpsConnector<HttpConnector>>) -> &mut Self {
+    pub fn with_client(&mut self, client: reqwest::Client) -> &mut Self {
         self.client = client;
         self
     }
@@ -108,11 +99,9 @@ impl OAuthProvider for GoogleOAuthProvider {
         default
     }
 
-    fn start_request(&self) -> Request<Body> {
-        Request::new(Body::empty())
-    }
+    fn initialize_headers(&self, _request: &mut Request) {}
 
-    fn client(&self) -> &Client<HttpsConnector<HttpConnector>> {
+    fn client(&self) -> &reqwest::Client {
         &self.client
     }
 

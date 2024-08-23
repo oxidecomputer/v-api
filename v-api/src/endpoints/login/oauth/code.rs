@@ -5,14 +5,13 @@
 use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
 use chrono::{TimeDelta, Utc};
 use dropshot::{
-    http_response_temporary_redirect, HttpError, HttpResponseOk, HttpResponseTemporaryRedirect,
-    Path, Query, RequestContext, RequestInfo, TypedBody,
+    http_response_temporary_redirect, Body, HttpError, HttpResponseOk, HttpResponseTemporaryRedirect, Path, Query, RequestContext, RequestInfo, TypedBody
 };
 use http::{
     header::{LOCATION, SET_COOKIE},
     HeaderValue, StatusCode,
 };
-use hyper::{Body, Response};
+use hyper::Response;
 use newtype_uuid::TypedUuid;
 use oauth2::{
     reqwest::async_http_client, AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier,
@@ -715,7 +714,7 @@ mod tests {
         header::{COOKIE, LOCATION, SET_COOKIE},
         HeaderValue, StatusCode,
     };
-    use hyper::Body;
+    use http_body_util::Empty;
     use mockall::predicate::eq;
     use newtype_uuid::TypedUuid;
     use oauth2::PkceCodeChallenge;
@@ -894,7 +893,7 @@ mod tests {
     async fn test_csrf_check() {
         let id = TypedUuid::new_v4();
 
-        let mut rq = hyper::Request::new(Body::empty());
+        let mut rq = hyper::Request::new(Empty::<()>::new());
         rq.headers_mut().insert(
             COOKIE,
             HeaderValue::from_str(&format!("{}={}", LOGIN_ATTEMPT_COOKIE, id)).unwrap(),
@@ -922,7 +921,7 @@ mod tests {
                 .status_code
         );
 
-        let mut rq = hyper::Request::new(Body::empty());
+        let mut rq = hyper::Request::new(Empty::<()>::new());
         rq.headers_mut().insert(
             COOKIE,
             HeaderValue::from_str(&format!("{}={}", LOGIN_ATTEMPT_COOKIE, Uuid::new_v4())).unwrap(),
@@ -943,7 +942,7 @@ mod tests {
                 .status_code
         );
 
-        let rq = hyper::Request::new(Body::empty());
+        let rq = hyper::Request::new(Empty::<()>::new());
         let with_missing_cookie = RequestInfo::new(
             &rq,
             std::net::SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 8888)),

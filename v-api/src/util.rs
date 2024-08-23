@@ -4,8 +4,8 @@
 
 use diesel::result::{DatabaseErrorKind, Error as DieselError};
 use google_cloudkms1::{hyper_rustls::HttpsConnector, CloudKMS};
-use hyper::client::HttpConnector;
 use v_model::storage::StoreError;
+use yup_oauth2::hyper::client::HttpConnector;
 
 use crate::authn::CloudKmsError;
 
@@ -222,8 +222,8 @@ pub async fn cloud_kms_client() -> Result<CloudKMS<HttpsConnector<HttpConnector>
     };
 
     let gcp_kms = CloudKMS::new(
-        hyper::Client::builder().build(
-            hyper_rustls::HttpsConnectorBuilder::new()
+        yup_oauth2::hyper::Client::builder().build(
+            yup_oauth2::hyper_rustls::HttpsConnectorBuilder::new()
                 .with_native_roots()
                 .unwrap()
                 .https_only()

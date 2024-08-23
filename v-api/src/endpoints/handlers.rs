@@ -10,10 +10,9 @@ mod macros {
             use dropshot::{
                 endpoint, HttpError, HttpResponseCreated, HttpResponseOk,
                 HttpResponseTemporaryRedirect, HttpResponseUpdatedNoContent, Path, Query,
-                RequestContext, TypedBody,
+                RequestContext, TypedBody, Body,
             };
             use http::Response;
-            use hyper::Body;
             use v_model::{Mapper, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret, AccessGroup, ApiUser, MagicLink, MagicLinkRedirectUri, MagicLinkSecret};
 
             use v_api::endpoints::{
