@@ -5,7 +5,8 @@
 use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
 use chrono::{TimeDelta, Utc};
 use dropshot::{
-    http_response_temporary_redirect, Body, HttpError, HttpResponseOk, HttpResponseTemporaryRedirect, Path, Query, RequestContext, RequestInfo, TypedBody
+    http_response_temporary_redirect, Body, HttpError, HttpResponseOk,
+    HttpResponseTemporaryRedirect, Path, Query, RequestContext, RequestInfo, TypedBody,
 };
 use http::{
     header::{LOCATION, SET_COOKIE},

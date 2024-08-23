@@ -4,11 +4,7 @@
 
 use async_trait::async_trait;
 use http::Method;
-use hyper::{
-    body::Bytes,
-    header::HeaderValue,
-    header::AUTHORIZATION,
-};
+use hyper::{body::Bytes, header::HeaderValue, header::AUTHORIZATION};
 use oauth2::{
     basic::BasicClient, url::ParseError, AuthUrl, ClientId, ClientSecret, RedirectUrl,
     RevocationUrl, TokenUrl,

@@ -18,7 +18,8 @@ use super::{
     ClientType, OAuthProvider, OAuthProviderInfo, OAuthProviderNameParam, UserInfoProvider,
 };
 use crate::{
-    context::ApiContext, endpoints::login::LoginError, error::ApiError, permissions::VAppPermission, response::internal_error, util::response::bad_request
+    context::ApiContext, endpoints::login::LoginError, error::ApiError,
+    permissions::VAppPermission, response::internal_error, util::response::bad_request,
 };
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -137,16 +138,16 @@ where
             .header(header::ACCEPT, HeaderValue::from_static("application/json"))
             .body(
                 // We know that this is safe to unwrap as we just deserialized it via the body Extractor
-                serde_urlencoded::to_string(&exchange.provider).unwrap()
+                serde_urlencoded::to_string(&exchange.provider).unwrap(),
             )
             .send()
             .await
             .tap_err(|err| tracing::error!(?err, "Token exchange request failed"))
             .map_err(internal_error)?
             .into();
-            // .tap_err(|err| tracing::error!(?err, "Failed to construct token exchange request"))?;
-            // .send()
-            // .await
+        // .tap_err(|err| tracing::error!(?err, "Failed to construct token exchange request"))?;
+        // .send()
+        // .await
 
         let (parts, body) = response.into_parts();
 
@@ -157,7 +158,10 @@ where
             // report their error back to the client
             tracing::debug!(provider = ?path.provider, "Received error response from OAuth provider");
 
-            Ok(Response::from_parts(parts, body.as_bytes().unwrap_or_default().to_vec().into()))
+            Ok(Response::from_parts(
+                parts,
+                body.as_bytes().unwrap_or_default().to_vec().into(),
+            ))
         } else {
             // The server gave us back a non-error response but it still may not be a success.
             // GitHub for instance does not use a status code for indicating the success or failure

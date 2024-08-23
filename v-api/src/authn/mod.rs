@@ -7,7 +7,10 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use crc32c::crc32c;
 use dropshot::{HttpError, RequestContext, SharedExtractor};
 use dropshot_authorization_header::bearer::BearerAuth;
-use google_cloudkms1::{api::AsymmetricSignRequest, hyper_rustls::HttpsConnector, CloudKMS, hyper::client::HttpConnector};
+use google_cloudkms1::{
+    api::AsymmetricSignRequest, hyper::client::HttpConnector, hyper_rustls::HttpsConnector,
+    CloudKMS,
+};
 use rsa::{
     pkcs1v15::Signature,
     pkcs1v15::{SigningKey, VerifyingKey},
