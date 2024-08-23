@@ -45,15 +45,6 @@ impl GitHubOAuthProvider {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static("v-api"));
 
-        // let client = Client::builder().build(
-        //     hyper_rustls::HttpsConnectorBuilder::new()
-        //         .with_native_roots()
-        //         .unwrap()
-        //         .https_only()
-        //         .enable_http2()
-        //         .build(),
-        // );
-
         Self {
             device_public: OAuthPublicCredentials {
                 client_id: device_client_id,
