@@ -16,6 +16,8 @@ use crate::{
     util::response::{bad_request, internal_error},
 };
 
+#[cfg(feature = "local-dev")]
+pub mod local;
 pub mod magic_link;
 pub mod oauth;
 
@@ -58,6 +60,8 @@ impl From<LoginError> for HttpError {
 pub enum ExternalUserId {
     GitHub(String),
     Google(String),
+    #[cfg(feature = "local-dev")]
+    Local(String),
     MagicLink(String),
 }
 
@@ -66,6 +70,8 @@ impl ExternalUserId {
         match self {
             Self::GitHub(id) => id,
             Self::Google(id) => id,
+            #[cfg(feature = "local-dev")]
+            Self::Local(id) => id,
             Self::MagicLink(id) => id,
         }
     }
@@ -74,6 +80,8 @@ impl ExternalUserId {
         match self {
             Self::GitHub(_) => "github",
             Self::Google(_) => "google",
+            #[cfg(feature = "local-dev")]
+            Self::Local(_) => "local",
             Self::MagicLink(_) => "magic-link",
         }
     }
@@ -95,6 +103,8 @@ impl Serialize for ExternalUserId {
         match self {
             ExternalUserId::GitHub(id) => serializer.serialize_str(&format!("github-{}", id)),
             ExternalUserId::Google(id) => serializer.serialize_str(&format!("google-{}", id)),
+            #[cfg(feature = "local-dev")]
+            ExternalUserId::Local(id) => serializer.serialize_str(&format!("local-{}", id)),
             ExternalUserId::MagicLink(id) => {
                 serializer.serialize_str(&format!("magic-link-{}", id))
             }
@@ -131,6 +141,22 @@ impl<'de> Deserialize<'de> for ExternalUserId {
                         Ok(ExternalUserId::Google(id.to_string()))
                     } else {
                         Err(de::Error::custom(ExternalUserIdDeserializeError::Empty))
+                    }
+                } else if let Some(("", id)) = value.split_once("local-") {
+                    #[cfg(feature = "local-dev")]
+                    {
+                        if !id.is_empty() {
+                            Ok(ExternalUserId::Local(id.to_string()))
+                        } else {
+                            Err(de::Error::custom(ExternalUserIdDeserializeError::Empty))
+                        }
+                    }
+                    #[cfg(not(feature = "local-dev"))]
+                    {
+                        tracing::info!(id, "Attempted to authenticate with local token");
+                        Err(de::Error::custom(
+                            ExternalUserIdDeserializeError::InvalidPrefix,
+                        ))
                     }
                 } else if let Some(("", id)) = value.split_once("magic-link-") {
                     if !id.is_empty() {

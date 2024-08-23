@@ -5,7 +5,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use v_api::{permissions::VPermission, v_system_endpoints, ApiContext};
+use v_api::{permissions::VPermission, ApiContext};
 use v_api_permission_derive::v_api;
 
 #[v_api(From(VPermission))]
@@ -24,4 +24,20 @@ impl ApiContext for Context {
     }
 }
 
-v_system_endpoints!(Context, Permissions);
+mod system {
+    use v_api::v_system_endpoints;
+    use super::{Context, Permissions};
+
+    v_system_endpoints!(Context, Permissions);
+}
+
+#[cfg(feature = "local-dev")]
+mod development {
+    use v_api::v_local_dev_endpoints;
+    use super::{Context, Permissions};
+
+    v_local_dev_endpoints!(Context, Permissions);
+}
+
+#[test]
+fn run_import_test() { }

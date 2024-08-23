@@ -90,11 +90,11 @@ impl AccessTokenExchange {
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct ProxyTokenResponse {
-    access_token: String,
-    token_type: String,
-    expires_in: Option<i64>,
-    refresh_token: Option<String>,
-    scopes: Option<Vec<String>>,
+    pub access_token: String,
+    pub token_type: String,
+    pub expires_in: Option<i64>,
+    pub refresh_token: Option<String>,
+    pub scopes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
