@@ -4,14 +4,19 @@
 
 use chrono::{Duration, Utc};
 use dropshot::{HttpError, RequestContext, TypedBody};
-use http::{header, StatusCode, Response};
+use http::{header, Response, StatusCode};
 use hyper::Body;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use v_model::permissions::PermissionStorage;
 
-use crate::{authn::jwt::Claims, context::ApiContext, endpoints::login::{oauth::device_token::ProxyTokenResponse, ExternalUserId, UserInfo}, permissions::{VAppPermission, VPermission}};
+use crate::{
+    authn::jwt::Claims,
+    context::ApiContext,
+    endpoints::login::{oauth::device_token::ProxyTokenResponse, ExternalUserId, UserInfo},
+    permissions::{VAppPermission, VPermission},
+};
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LocalLogin {
