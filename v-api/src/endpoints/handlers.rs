@@ -720,9 +720,8 @@ mod macros {
     #[macro_export]
     macro_rules! v_local_dev_endpoints {
         ($context_type:ident, $permission_type:ident) => {
-            use dropshot::{endpoint, HttpError, RequestContext, TypedBody};
+            use dropshot::{endpoint, HttpError, RequestContext, TypedBody, Body};
             use http::Response;
-            use hyper::Body;
             use v_api::endpoints::login::local::{local_login_op, LocalLogin};
 
             #[endpoint {
