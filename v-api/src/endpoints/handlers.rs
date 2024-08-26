@@ -715,4 +715,36 @@ mod macros {
                 .expect("Failed to register endpoint");
         };
     }
+
+    #[cfg(feature = "local-dev")]
+    #[macro_export]
+    macro_rules! v_local_dev_endpoints {
+        ($context_type:ident, $permission_type:ident) => {
+            use dropshot::{endpoint, HttpError, RequestContext, TypedBody};
+            use http::Response;
+            use hyper::Body;
+            use v_api::endpoints::login::local::{local_login_op, LocalLogin};
+
+            #[endpoint {
+                method = POST,
+                path = "/login/local"
+            }]
+            pub async fn local_login(
+                rqctx: RequestContext<$context_type>,
+                body: TypedBody<LocalLogin>,
+            ) -> Result<Response<Body>, HttpError> {
+                local_login_op(&rqctx, body).await
+            }
+        }
+    }
+
+    #[cfg(feature = "local-dev")]
+    #[macro_export]
+    macro_rules! v_inject_local_dev_endpoints {
+        ($api:ident) => {
+            // Local development mock login
+            $api.register(openid_configuration)
+                .expect("Failed to register endpoint");
+        }
+    }
 }
