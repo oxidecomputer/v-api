@@ -89,9 +89,9 @@ pub mod response {
     where
         S: ToString + Debug,
     {
-        let internal_message = internal_message.to_string();
-        tracing::error!(internal_message, "Request failed");
-        HttpError::for_internal_error(internal_message)
+        let internal_message_fmt = internal_message.to_string();
+        tracing::error!(error = ?internal_message, message = internal_message_fmt, "Request failed");
+        HttpError::for_internal_error(internal_message_fmt)
     }
 
     pub type ResourceResult<T, E> = Result<T, ResourceError<E>>;
