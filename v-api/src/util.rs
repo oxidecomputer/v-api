@@ -80,6 +80,7 @@ pub mod response {
     where
         E: Error,
     {
+        tracing::error!(?error, "Encountered internal error");
         internal_error(error.to_string())
     }
 
