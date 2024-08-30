@@ -111,6 +111,8 @@ where
         filter: ApiUserFilter,
         pagination: &ListPagination,
     ) -> Result<Vec<ApiUserInfo<T>>, StoreError> {
+        tracing::trace!("Lookup api users");
+
         let mut query = api_user::dsl::api_user
             .left_join(api_user_provider::dsl::api_user_provider)
             .into_boxed();
@@ -170,6 +172,8 @@ where
             .map(|(user, providers)| ApiUserInfo { user, providers })
             .collect::<Vec<_>>();
 
+        tracing::trace!(count = ?users.len(), "Found api users");
+
         Ok(users)
     }
 
@@ -196,6 +200,8 @@ where
             ))
             .execute_async(&*self.pool.get().await?)
             .await?;
+
+        tracing::trace!("Upserted api user");
 
         Ok(ApiUserStore::get(self, &user.id, false).await?.unwrap())
     }
@@ -242,6 +248,8 @@ where
         filter: ApiKeyFilter,
         pagination: &ListPagination,
     ) -> Result<Vec<ApiKey<T>>, StoreError> {
+        tracing::trace!("Lookup api keys");
+
         let mut query = api_key::dsl::api_key.into_boxed();
 
         let ApiKeyFilter {
@@ -282,6 +290,8 @@ where
             .order(api_key::created_at.desc())
             .get_results_async::<ApiKeyModel<T>>(&*self.pool.get().await?)
             .await?;
+
+        tracing::trace!(count = ?results.len(), "Found api keys");
 
         Ok(results.into_iter().map(|token| token.into()).collect())
     }
