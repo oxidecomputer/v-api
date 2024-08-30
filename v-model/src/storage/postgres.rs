@@ -130,7 +130,7 @@ where
         }
 
         if let Some(email) = email {
-            query = query.filter(api_user_provider::emails.contains(email));
+            query = query.filter(api_user_provider::emails.overlaps_with(email));
         }
 
         if let Some(groups) = groups {
