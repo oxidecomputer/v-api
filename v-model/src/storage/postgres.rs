@@ -436,9 +436,7 @@ impl ApiUserProviderStore for PostgresStore {
         tracing::trace!(id = ?provider.id, api_user_id = ?provider.user_id, provider = ?provider, "Updating user provider");
 
         let provider_m: ApiUserProviderModel = update(api_user_provider::dsl::api_user_provider)
-            .set((
-                api_user_provider::api_user_id.eq(provider.user_id.into_untyped_uuid()),
-            ))
+            .set((api_user_provider::api_user_id.eq(provider.user_id.into_untyped_uuid()),))
             .filter(api_user_provider::id.eq(provider.id.into_untyped_uuid()))
             .filter(api_user_provider::api_user_id.eq(current_api_user_id.into_untyped_uuid()))
             .get_result_async(&*self.pool.get().await?)
@@ -1145,9 +1143,7 @@ impl MagicLinkAttemptStore for PostgresStore {
             .filter(magic_link_attempt::expiration.gt(Utc::now()));
 
         let attempt_m: Option<MagicLinkAttemptModel> = query
-            .set((
-                magic_link_attempt::attempt_state.eq(to),
-            ))
+            .set((magic_link_attempt::attempt_state.eq(to),))
             .get_result_async(&*self.pool.get().await?)
             .await
             .optional()?;
