@@ -196,7 +196,6 @@ where
             .set((
                 api_user::permissions.eq(excluded(api_user::permissions)),
                 api_user::groups.eq(excluded(api_user::groups)),
-                api_user::updated_at.eq(Utc::now()),
             ))
             .execute_async(&*self.pool.get().await?)
             .await?;
@@ -422,7 +421,6 @@ impl ApiUserProviderStore for PostgresStore {
                 .set((
                     api_user_provider::emails.eq(excluded(api_user_provider::emails)),
                     api_user_provider::display_names.eq(excluded(api_user_provider::display_names)),
-                    api_user_provider::updated_at.eq(Utc::now()),
                 ))
                 .get_result_async(&*self.pool.get().await?)
                 .await?;
@@ -438,10 +436,7 @@ impl ApiUserProviderStore for PostgresStore {
         tracing::trace!(id = ?provider.id, api_user_id = ?provider.user_id, provider = ?provider, "Updating user provider");
 
         let provider_m: ApiUserProviderModel = update(api_user_provider::dsl::api_user_provider)
-            .set((
-                api_user_provider::api_user_id.eq(provider.user_id.into_untyped_uuid()),
-                api_user_provider::updated_at.eq(Utc::now()),
-            ))
+            .set((api_user_provider::api_user_id.eq(provider.user_id.into_untyped_uuid()),))
             .filter(api_user_provider::id.eq(provider.id.into_untyped_uuid()))
             .filter(api_user_provider::api_user_id.eq(current_api_user_id.into_untyped_uuid()))
             .get_result_async(&*self.pool.get().await?)
@@ -641,7 +636,6 @@ impl LoginAttemptStore for PostgresStore {
                 login_attempt::error.eq(excluded(login_attempt::error)),
                 login_attempt::provider_authz_code.eq(excluded(login_attempt::provider_authz_code)),
                 login_attempt::provider_error.eq(excluded(login_attempt::provider_error)),
-                login_attempt::updated_at.eq(Utc::now()),
             ))
             .get_result_async(&*self.pool.get().await?)
             .await?;
@@ -1127,7 +1121,6 @@ impl MagicLinkAttemptStore for PostgresStore {
             .do_update()
             .set((
                 magic_link_attempt::attempt_state.eq(excluded(magic_link_attempt::attempt_state)),
-                magic_link_attempt::updated_at.eq(Utc::now()),
             ))
             .get_result_async(&*self.pool.get().await?)
             .await?;
@@ -1150,10 +1143,7 @@ impl MagicLinkAttemptStore for PostgresStore {
             .filter(magic_link_attempt::expiration.gt(Utc::now()));
 
         let attempt_m: Option<MagicLinkAttemptModel> = query
-            .set((
-                magic_link_attempt::attempt_state.eq(to),
-                magic_link_attempt::updated_at.eq(Utc::now()),
-            ))
+            .set((magic_link_attempt::attempt_state.eq(to),))
             .get_result_async(&*self.pool.get().await?)
             .await
             .optional()?;
@@ -1231,7 +1221,6 @@ where
             .set((
                 access_groups::name.eq(excluded(access_groups::name)),
                 access_groups::permissions.eq(excluded(access_groups::permissions)),
-                access_groups::updated_at.eq(Utc::now()),
             ))
             .get_result_async(&*self.pool.get().await?)
             .await?;

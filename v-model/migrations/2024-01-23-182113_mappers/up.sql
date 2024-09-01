@@ -6,6 +6,8 @@ CREATE TABLE mapper (
   max_activations INTEGER,
   depleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   deleted_at TIMESTAMPTZ,
   CHECK (activations <= max_activations)
 );
+SELECT diesel_manage_updated_at('mapper');
