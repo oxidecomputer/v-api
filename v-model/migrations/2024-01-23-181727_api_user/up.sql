@@ -5,6 +5,7 @@ CREATE TABLE api_user (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   deleted_at TIMESTAMPTZ
 );
+SELECT diesel_manage_updated_at('api_user');
 
 CREATE TABLE api_key (
   id UUID PRIMARY KEY,
@@ -16,6 +17,7 @@ CREATE TABLE api_key (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   deleted_at TIMESTAMPTZ
 );
+SELECT diesel_manage_updated_at('api_key');
 
 CREATE TABLE api_user_provider (
   id UUID PRIMARY KEY,
@@ -27,6 +29,7 @@ CREATE TABLE api_user_provider (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   deleted_at TIMESTAMPTZ
 );
+SELECT diesel_manage_updated_at('api_user_provider');
 
 CREATE UNIQUE INDEX api_user_provider_idx ON api_user_provider (provider, provider_id);
 
@@ -37,3 +40,4 @@ CREATE TABLE api_user_access_token (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+SELECT diesel_manage_updated_at('api_user_access_token');

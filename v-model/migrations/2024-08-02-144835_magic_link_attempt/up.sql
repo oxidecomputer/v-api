@@ -15,4 +15,5 @@ CREATE TABLE magic_link_attempt(
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-)
+);
+SELECT diesel_manage_updated_at('magic_link_attempt');

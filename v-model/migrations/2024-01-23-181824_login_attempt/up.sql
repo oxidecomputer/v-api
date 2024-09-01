@@ -21,4 +21,5 @@ CREATE TABLE login_attempt(
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-)
+);
+SELECT diesel_manage_updated_at('login_attempt');
