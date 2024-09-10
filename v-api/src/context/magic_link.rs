@@ -246,11 +246,14 @@ where
         }
     }
 
+    #[instrument(skip(self))]
     pub async fn find_client(
         &self,
         signature: &str,
         redirect_uri: &Url,
     ) -> ResourceResult<MagicLink, StoreError> {
+        tracing::debug!("Looking up magic link client");
+
         let filter = MagicLinkFilter {
             signature: Some(vec![signature.to_string()]),
             redirect_uri: Some(vec![redirect_uri.to_string()]),

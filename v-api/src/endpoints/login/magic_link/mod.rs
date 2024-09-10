@@ -95,12 +95,17 @@ where
         .await
         .map(|bytes| hex::encode(&bytes))
         .map_err(to_internal_error)?;
+
+    tracing::debug!(?secret_signature, "Generated secret signature");
+
     let client = ctx
         .magic_link
         .find_client(&secret_signature, &redirect_uri)
         .await?;
-    let key = RawKey::generate::<8>(&Uuid::new_v4());
 
+    tracing::debug!(id = ?client.id, "Acquired magic link client");
+
+    let key = RawKey::generate::<8>(&Uuid::new_v4());
     let attempt = ctx
         .magic_link
         .send_login_attempt(
