@@ -24,7 +24,7 @@ use crate::{
     },
     endpoints::login::{ExternalUserId, UserInfo},
     permissions::VAppPermission,
-    response::{bad_request, to_internal_error, ResourceError},
+    response::{bad_request, internal_error, to_internal_error, ResourceError},
     ApiContext, VContext,
 };
 
@@ -130,14 +130,14 @@ impl From<MagicLinkSendError> for HttpError {
     fn from(value: MagicLinkSendError) -> Self {
         match value {
             MagicLinkSendError::ApiKey(err) => ResourceError::InternalError(err).into(),
-            MagicLinkSendError::NoMessageBuilder(_) => {
-                unimplemented!()
+            MagicLinkSendError::NoMessageBuilder(medium) => {
+                internal_error(format!("No message builder is available for {}", medium))
             }
-            MagicLinkSendError::NoMessageSender(_) => {
-                unimplemented!()
+            MagicLinkSendError::NoMessageSender(medium) => {
+                internal_error(format!("No message sender is available for {}", medium))
             }
-            MagicLinkSendError::Send(_) => {
-                unimplemented!()
+            MagicLinkSendError::Send(err) => {
+                internal_error(err.to_string())
             }
             MagicLinkSendError::Signing(err) => ResourceError::InternalError(err).into(),
             MagicLinkSendError::Storage(err) => ResourceError::InternalError(err).into(),
