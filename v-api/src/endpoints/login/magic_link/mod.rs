@@ -24,7 +24,7 @@ use crate::{
     },
     endpoints::login::{ExternalUserId, UserInfo},
     permissions::VAppPermission,
-    response::{to_internal_error, ResourceError},
+    response::{bad_request, to_internal_error, ResourceError},
     ApiContext, VContext,
 };
 
@@ -89,18 +89,15 @@ where
     tracing::info!("Handling magic link send request");
 
     // Any caller may create a magic link attempt by supplying the clients secret
-    let secret_signature = ctx
-        .signer()
-        .sign(secret.as_bytes())
-        .await
-        .map(|bytes| hex::encode(&bytes))
-        .map_err(to_internal_error)?;
-
-    tracing::debug!(?secret_signature, "Generated secret signature");
+    let key = RawKey::try_from(secret.as_str()).map_err(|err| {
+        tracing::info!(?err, "Request supplied malformed secret");
+        bad_request("Malformed secret".to_string())
+    })?;
+    let signed_key = key.sign(ctx.signer()).await.map_err(to_internal_error)?;
 
     let client = ctx
         .magic_link
-        .find_client(&secret_signature, &redirect_uri)
+        .find_client(signed_key.signature(), &redirect_uri)
         .await?;
 
     tracing::debug!(id = ?client.id, "Acquired magic link client");
