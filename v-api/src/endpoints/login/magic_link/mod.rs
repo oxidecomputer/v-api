@@ -41,6 +41,7 @@ pub struct MagicLinkSendRequest {
     recipient: String,
     redirect_uri: Url,
     expires_in: i64,
+    scope: String,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -69,6 +70,7 @@ where
             body.recipient,
             body.redirect_uri,
             body.expires_in,
+            body.scope,
         )
         .await?,
     ))
@@ -82,6 +84,7 @@ async fn magic_link_send_op_inner<T>(
     recipient: String,
     redirect_uri: Url,
     expires_in: i64,
+    scope: String,
 ) -> Result<MagicLinkSendResponse, HttpError>
 where
     T: VAppPermission + PermissionStorage,
@@ -111,7 +114,7 @@ where
             client.id,
             &redirect_uri,
             medium,
-            "",
+            &scope,
             Utc::now().add(Duration::seconds(expires_in)),
             &recipient,
         )
