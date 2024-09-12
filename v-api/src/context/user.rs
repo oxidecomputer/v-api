@@ -111,6 +111,7 @@ where
         self.caller_extension_handlers.push(handler);
     }
 
+    #[instrument(skip(self, user), fields(user = ?user.id))]
     async fn get_extensions(&self, user: &ApiUser<T>) -> ArcMap {
         let mut extensions = HashMap::new();
         for handler in &self.caller_extension_handlers {
