@@ -123,7 +123,7 @@ where
         extensions
     }
 
-    #[instrument(skip(self, signer, token))]
+    #[instrument(skip(self, registration_user, signer, token))]
     pub async fn get_caller(
         &self,
         registration_user: &Caller<T>,
