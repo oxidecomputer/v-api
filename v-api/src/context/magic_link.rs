@@ -47,6 +47,8 @@ pub enum MagicLinkSendError {
     Signing(#[from] SigningKeyError),
     #[error(transparent)]
     Storage(#[from] StoreError),
+    #[error("The {0} medium does not support the {1} channel")]
+    UnsupportedChannel(MagicLinkMedium, String),
 }
 
 #[derive(Debug, Error)]
@@ -318,7 +320,9 @@ where
             .get(&medium)
             .ok_or_else(|| MagicLinkSendError::NoMessageBuilder(medium))
             .to_resource_result()?
-            .create_message(channel, recipient, &url);
+            .create_message(channel, recipient, &url)
+            .ok_or_else(|| MagicLinkSendError::UnsupportedChannel(medium, channel.to_string()))
+            .to_resource_result()?;
 
         tracing::info!("Sending magic link login attempt message");
         self.messengers
@@ -401,7 +405,7 @@ where
 }
 
 pub trait MagicLinkMessage: Send + Sync {
-    fn create_message(&self, channel: &str, recipient: &str, url: &Url) -> Message;
+    fn create_message(&self, channel: &str, recipient: &str, url: &Url) -> Option<Message>;
 }
 
 #[cfg(test)]
@@ -435,13 +439,13 @@ mod tests {
 
     struct TestMessageBuilder {}
     impl MagicLinkMessage for TestMessageBuilder {
-        fn create_message(&self, _channel: &str, recipient: &str, url: &Url) -> Message {
-            Message {
+        fn create_message(&self, _channel: &str, recipient: &str, url: &Url) -> Option<Message> {
+            Some(Message {
                 recipient: recipient.to_string(),
                 subject: None,
                 text: url.to_string(),
                 html: None,
-            }
+            })
         }
     }
 

@@ -108,12 +108,12 @@ pub struct SpecConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct AuthnProviders {
-    pub magic_link: MagicLinkProvider,
+    pub magic_link: MagicLinkProviders,
     pub oauth: OAuthProviders,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct MagicLinkProvider {
+pub struct MagicLinkProviders {
     pub sendgrid: Option<SendGridConfig>,
 }
 

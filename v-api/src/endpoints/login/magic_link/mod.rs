@@ -146,6 +146,10 @@ impl From<MagicLinkSendError> for HttpError {
             MagicLinkSendError::Send(err) => internal_error(err.to_string()),
             MagicLinkSendError::Signing(err) => ResourceError::InternalError(err).into(),
             MagicLinkSendError::Storage(err) => ResourceError::InternalError(err).into(),
+            MagicLinkSendError::UnsupportedChannel(medium, channel) => internal_error(format!(
+                "{} does not support the {} channel",
+                medium, channel
+            )),
         }
     }
 }
