@@ -318,7 +318,7 @@ where
             .get(&medium)
             .ok_or_else(|| MagicLinkSendError::NoMessageBuilder(medium))
             .to_resource_result()?
-            .create_message(recipient, &url);
+            .create_message(channel, recipient, &url);
 
         tracing::info!("Sending magic link login attempt message");
         self.messengers
@@ -401,7 +401,7 @@ where
 }
 
 pub trait MagicLinkMessage: Send + Sync {
-    fn create_message(&self, recipient: &str, url: &Url) -> Message;
+    fn create_message(&self, channel: &str, recipient: &str, url: &Url) -> Message;
 }
 
 #[cfg(test)]
@@ -435,7 +435,7 @@ mod tests {
 
     struct TestMessageBuilder {}
     impl MagicLinkMessage for TestMessageBuilder {
-        fn create_message(&self, recipient: &str, url: &Url) -> Message {
+        fn create_message(&self, _channel: &str, recipient: &str, url: &Url) -> Message {
             Message {
                 recipient: recipient.to_string(),
                 subject: None,
