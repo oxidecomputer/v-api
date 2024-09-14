@@ -37,18 +37,18 @@ use super::VApiStorage;
 pub enum MagicLinkSendError {
     #[error(transparent)]
     ApiKey(#[from] ApiKeyError),
-    #[error("No message builder has been registered for the {0} medium")]
-    NoMessageBuilder(MagicLinkMedium),
-    #[error("No message sender has been registered for the {0} medium")]
-    NoMessageSender(MagicLinkMedium),
+    #[error("Failed to build message to send")]
+    FailedToBuildMessage,
+    #[error("No message builder has been registered for the target")]
+    NoMessageBuilder(MagicLinkTarget),
+    #[error("No message sender has been registered for the target")]
+    NoMessageSender(MagicLinkTarget),
     #[error(transparent)]
     Send(#[from] MessengerError),
     #[error(transparent)]
     Signing(#[from] SigningKeyError),
     #[error(transparent)]
     Storage(#[from] StoreError),
-    #[error("The {0} medium does not support the {1} channel")]
-    UnsupportedChannel(MagicLinkMedium, String),
 }
 
 #[derive(Debug, Error)]
@@ -65,9 +65,15 @@ pub enum MagicLinkTransitionError {
     Unknown,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct MagicLinkTarget {
+    pub medium: MagicLinkMedium,
+    pub channel: String,
+}
+
 pub struct MagicLinkContext<T> {
-    message_builders: HashMap<MagicLinkMedium, Box<dyn MagicLinkMessage>>,
-    messengers: HashMap<MagicLinkMedium, Box<dyn Messenger>>,
+    message_builders: HashMap<MagicLinkTarget, Box<dyn MagicLinkMessage>>,
+    messengers: HashMap<MagicLinkTarget, Box<dyn Messenger>>,
     storage: Arc<dyn VApiStorage<T>>,
 }
 
@@ -83,19 +89,19 @@ where
         }
     }
 
-    pub fn set_message_builder<U>(&mut self, medium: MagicLinkMedium, builder: U) -> &mut Self
+    pub fn set_message_builder<U>(&mut self, target: MagicLinkTarget, builder: U) -> &mut Self
     where
         U: MagicLinkMessage + 'static,
     {
-        self.message_builders.insert(medium, Box::new(builder));
+        self.message_builders.insert(target, Box::new(builder));
         self
     }
 
-    pub fn set_messenger<U>(&mut self, medium: MagicLinkMedium, messenger: U) -> &mut Self
+    pub fn set_messenger<U>(&mut self, target: MagicLinkTarget, messenger: U) -> &mut Self
     where
         U: Messenger + 'static,
     {
-        self.messengers.insert(medium, Box::new(messenger));
+        self.messengers.insert(target, Box::new(messenger));
         self
     }
 
@@ -314,20 +320,27 @@ where
         url.query_pairs_mut()
             .append_pair("code", key.expose_secret());
 
+        let target = MagicLinkTarget {
+            medium,
+            channel: channel.to_string(),
+        };
+
         tracing::debug!("Constructing message to send to recipient");
+        let builder_target = target.clone();
         let message = self
             .message_builders
-            .get(&medium)
-            .ok_or_else(|| MagicLinkSendError::NoMessageBuilder(medium))
+            .get(&builder_target)
+            .ok_or_else(move || MagicLinkSendError::NoMessageBuilder(builder_target))
             .to_resource_result()?
-            .create_message(channel, recipient, &url)
-            .ok_or_else(|| MagicLinkSendError::UnsupportedChannel(medium, channel.to_string()))
+            .create_message(recipient, &url)
+            .ok_or(MagicLinkSendError::FailedToBuildMessage)
             .to_resource_result()?;
 
         tracing::info!("Sending magic link login attempt message");
+        let sender_target = target.clone();
         self.messengers
-            .get(&medium)
-            .ok_or_else(|| MagicLinkSendError::NoMessageSender(medium))
+            .get(&sender_target)
+            .ok_or_else(move || MagicLinkSendError::NoMessageSender(sender_target))
             .to_resource_result()?
             .send(message)
             .await
@@ -405,7 +418,7 @@ where
 }
 
 pub trait MagicLinkMessage: Send + Sync {
-    fn create_message(&self, channel: &str, recipient: &str, url: &Url) -> Option<Message>;
+    fn create_message(&self, recipient: &str, url: &Url) -> Option<Message>;
 }
 
 #[cfg(test)]
@@ -428,7 +441,7 @@ mod tests {
         MagicLinkAttempt,
     };
 
-    use super::{MagicLinkContext, MagicLinkMessage};
+    use super::{MagicLinkContext, MagicLinkMessage, MagicLinkTarget};
     use crate::{
         authn::key::RawKey,
         context::test_mocks::{mock_context, MockStorage},
@@ -439,7 +452,7 @@ mod tests {
 
     struct TestMessageBuilder {}
     impl MagicLinkMessage for TestMessageBuilder {
-        fn create_message(&self, _channel: &str, recipient: &str, url: &Url) -> Option<Message> {
+        fn create_message(&self, recipient: &str, url: &Url) -> Option<Message> {
             Some(Message {
                 recipient: recipient.to_string(),
                 subject: None,
@@ -460,13 +473,19 @@ mod tests {
 
     fn mock_mlink_context(storage: Arc<MockStorage>) -> MagicLinkContext<VPermission> {
         let message_builders = [(
-            MagicLinkMedium::Email,
+            MagicLinkTarget {
+                medium: MagicLinkMedium::Email,
+                channel: "all".to_string(),
+            },
             Box::new(TestMessageBuilder {}) as Box<dyn MagicLinkMessage>,
         )]
         .into_iter()
         .collect();
         let messengers = [(
-            MagicLinkMedium::Email,
+            MagicLinkTarget {
+                medium: MagicLinkMedium::Email,
+                channel: "all".to_string(),
+            },
             Box::new(TestMessenger {}) as Box<dyn Messenger>,
         )]
         .into_iter()
@@ -561,7 +580,10 @@ mod tests {
 
         let sent = Arc::new(AtomicBool::new(false));
         mlink_ctx.messengers = [(
-            MagicLinkMedium::Email,
+            MagicLinkTarget {
+                medium: MagicLinkMedium::Email,
+                channel: "all".to_string(),
+            },
             Box::new(SendMonitor { sent: sent.clone() }) as Box<dyn Messenger>,
         )]
         .into_iter()
@@ -625,7 +647,10 @@ mod tests {
 
         let message = Arc::new(RwLock::new(String::new()));
         mlink_ctx.messengers = [(
-            MagicLinkMedium::Email,
+            MagicLinkTarget {
+                medium: MagicLinkMedium::Email,
+                channel: "all".to_string(),
+            },
             Box::new(MessageMonitor {
                 message: message.clone(),
             }) as Box<dyn Messenger>,

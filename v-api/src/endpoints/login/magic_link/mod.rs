@@ -137,19 +137,18 @@ impl From<MagicLinkSendError> for HttpError {
     fn from(value: MagicLinkSendError) -> Self {
         match value {
             MagicLinkSendError::ApiKey(err) => ResourceError::InternalError(err).into(),
-            MagicLinkSendError::NoMessageBuilder(medium) => {
-                internal_error(format!("No message builder is available for {}", medium))
-            }
-            MagicLinkSendError::NoMessageSender(medium) => {
-                internal_error(format!("No message sender is available for {}", medium))
-            }
+            MagicLinkSendError::FailedToBuildMessage => internal_error("Failed to build message"),
+            MagicLinkSendError::NoMessageBuilder(target) => internal_error(format!(
+                "No message builder is available for ({}, {})",
+                target.medium, target.channel
+            )),
+            MagicLinkSendError::NoMessageSender(target) => internal_error(format!(
+                "No message sender is available for ({}, {})",
+                target.medium, target.channel
+            )),
             MagicLinkSendError::Send(err) => internal_error(err.to_string()),
             MagicLinkSendError::Signing(err) => ResourceError::InternalError(err).into(),
             MagicLinkSendError::Storage(err) => ResourceError::InternalError(err).into(),
-            MagicLinkSendError::UnsupportedChannel(medium, channel) => internal_error(format!(
-                "{} does not support the {} channel",
-                medium, channel
-            )),
         }
     }
 }
