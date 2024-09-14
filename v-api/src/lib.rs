@@ -15,8 +15,8 @@ mod util;
 
 pub use context::{
     auth::SecretContext, ApiContext, CallerExtension, ExtensionError, GroupContext, LinkContext,
-    LoginContext, MagicLinkContext, MagicLinkMessage, MappingContext, OAuthContext, UserContext,
-    VApiStorage, VContext,
+    LoginContext, MagicLinkContext, MagicLinkMessage, MagicLinkTarget, MappingContext,
+    OAuthContext, UserContext, VApiStorage, VContext,
 };
 pub use util::response;
 

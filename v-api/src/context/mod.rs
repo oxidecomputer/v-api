@@ -54,7 +54,7 @@ pub use link::LinkContext;
 pub mod login;
 pub use login::LoginContext;
 pub mod magic_link;
-pub use magic_link::{MagicLinkContext, MagicLinkMessage};
+pub use magic_link::{MagicLinkContext, MagicLinkMessage, MagicLinkTarget};
 pub mod mapping;
 pub use mapping::MappingContext;
 pub mod oauth;
