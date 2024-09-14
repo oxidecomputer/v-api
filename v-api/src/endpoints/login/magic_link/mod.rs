@@ -19,7 +19,7 @@ use v_model::{
 use crate::{
     authn::{key::RawKey, Signer},
     context::{
-        magic_link::{MagicLinkSendError, MagicLinkTransitionError},
+        magic_link::{MagicLinkSendError, MagicLinkTransitionError, MessageCustomization},
         VContextWithCaller,
     },
     endpoints::login::{ExternalUserId, UserInfo},
@@ -42,6 +42,7 @@ pub struct MagicLinkSendRequest {
     redirect_uri: Url,
     expires_in: i64,
     scope: String,
+    message_customization: Option<MessageCustomization>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -71,6 +72,7 @@ where
             body.redirect_uri,
             body.expires_in,
             body.scope,
+            body.message_customization.unwrap_or_default(),
         )
         .await?,
     ))
@@ -85,6 +87,7 @@ async fn magic_link_send_op_inner<T>(
     redirect_uri: Url,
     expires_in: i64,
     scope: String,
+    customization: MessageCustomization,
 ) -> Result<MagicLinkSendResponse, HttpError>
 where
     T: VAppPermission + PermissionStorage,
@@ -117,6 +120,7 @@ where
             &scope,
             Utc::now().add(Duration::seconds(expires_in)),
             &recipient,
+            customization,
         )
         .await;
 
@@ -139,9 +143,7 @@ impl From<MagicLinkSendError> for HttpError {
             MagicLinkSendError::NoMessageSender(medium) => {
                 internal_error(format!("No message sender is available for {}", medium))
             }
-            MagicLinkSendError::Send(err) => {
-                internal_error(err.to_string())
-            }
+            MagicLinkSendError::Send(err) => internal_error(err.to_string()),
             MagicLinkSendError::Signing(err) => ResourceError::InternalError(err).into(),
             MagicLinkSendError::Storage(err) => ResourceError::InternalError(err).into(),
         }

@@ -289,6 +289,7 @@ where
         scope: &str,
         expiration: DateTime<Utc>,
         recipient: &str,
+        customization: MessageCustomization,
     ) -> ResourceResult<MagicLinkAttempt, MagicLinkSendError> {
         tracing::debug!("Signing login key");
         let key = key
@@ -317,7 +318,7 @@ where
             .get(&medium)
             .ok_or_else(|| MagicLinkSendError::NoMessageBuilder(medium))
             .to_resource_result()?
-            .create_message(recipient, &url);
+            .create_message(recipient, &url, customization);
 
         tracing::info!("Sending magic link login attempt message");
         self.messengers
@@ -398,8 +399,15 @@ where
     }
 }
 
+pub type MessageCustomization = HashMap<String, String>;
+
 pub trait MagicLinkMessage: Send + Sync {
-    fn create_message(&self, recipient: &str, url: &Url) -> Message;
+    fn create_message(
+        &self,
+        recipient: &str,
+        url: &Url,
+        customization: MessageCustomization,
+    ) -> Message;
 }
 
 #[cfg(test)]
@@ -422,7 +430,7 @@ mod tests {
         MagicLinkAttempt,
     };
 
-    use super::{MagicLinkContext, MagicLinkMessage};
+    use super::{MagicLinkContext, MagicLinkMessage, MessageCustomization};
     use crate::{
         authn::key::RawKey,
         context::test_mocks::{mock_context, MockStorage},
@@ -433,7 +441,12 @@ mod tests {
 
     struct TestMessageBuilder {}
     impl MagicLinkMessage for TestMessageBuilder {
-        fn create_message(&self, recipient: &str, url: &Url) -> Message {
+        fn create_message(
+            &self,
+            recipient: &str,
+            url: &Url,
+            _customization: MessageCustomization,
+        ) -> Message {
             Message {
                 recipient: recipient.to_string(),
                 subject: None,
@@ -508,6 +521,7 @@ mod tests {
                 "",
                 Utc::now().add(Duration::seconds(60)),
                 "ducks@oxidecomputer.com",
+                MessageCustomization::default(),
             )
             .await;
 
@@ -569,6 +583,7 @@ mod tests {
                 "",
                 Utc::now().add(Duration::seconds(60)),
                 "ducks@oxidecomputer.com",
+                MessageCustomization::default(),
             )
             .await
             .expect("Magic link attempt created");
@@ -633,6 +648,7 @@ mod tests {
                 "",
                 Utc::now().add(Duration::seconds(60)),
                 "ducks@oxidecomputer.com",
+                MessageCustomization::default(),
             )
             .await
             .expect("Magic link attempt created");
