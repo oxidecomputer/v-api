@@ -108,7 +108,19 @@ pub struct SpecConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct AuthnProviders {
+    pub magic_link: MagicLinkProvider,
     pub oauth: OAuthProviders,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MagicLinkProvider {
+    pub sendgrid: Option<SendGridConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SendGridConfig {
+    pub from: String,
+    pub key: String,
 }
 
 #[derive(Debug, Deserialize)]
