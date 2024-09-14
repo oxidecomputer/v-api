@@ -1061,6 +1061,7 @@ impl MagicLinkAttemptStore for PostgresStore {
             client_id,
             attempt_state,
             medium,
+            channel,
             signature,
         } = filter;
 
@@ -1087,6 +1088,10 @@ impl MagicLinkAttemptStore for PostgresStore {
 
         if let Some(medium) = medium {
             query = query.filter(magic_link_attempt::medium.eq_any(medium));
+        }
+
+        if let Some(channel) = channel {
+            query = query.filter(magic_link_attempt::channel.eq_any(channel));
         }
 
         if let Some(signature) = signature {

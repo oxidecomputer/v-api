@@ -118,6 +118,7 @@ diesel::table! {
         attempt_state -> MlinkAttemptState,
         magic_link_client_id -> Uuid,
         medium -> Varchar,
+        channel -> Varchar,
         recipient -> Varchar,
         redirect_uri -> Varchar,
         scope -> Varchar,

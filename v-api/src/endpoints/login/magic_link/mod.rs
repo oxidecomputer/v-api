@@ -32,11 +32,12 @@ pub mod client;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct MagicLinkPath {
-    medium: MagicLinkMedium,
+    channel: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct MagicLinkSendRequest {
+    medium: MagicLinkMedium,
     secret: String,
     recipient: String,
     redirect_uri: Url,
@@ -65,7 +66,8 @@ where
     Ok(HttpResponseOk(
         magic_link_send_op_inner(
             ctx,
-            path.medium,
+            body.medium,
+            &path.channel,
             body.secret,
             body.recipient,
             body.redirect_uri,
@@ -80,6 +82,7 @@ where
 async fn magic_link_send_op_inner<T>(
     ctx: &VContext<T>,
     medium: MagicLinkMedium,
+    channel: &str,
     secret: String,
     recipient: String,
     redirect_uri: Url,
@@ -114,6 +117,7 @@ where
             client.id,
             &redirect_uri,
             medium,
+            channel,
             &scope,
             Utc::now().add(Duration::seconds(expires_in)),
             &recipient,
@@ -139,9 +143,7 @@ impl From<MagicLinkSendError> for HttpError {
             MagicLinkSendError::NoMessageSender(medium) => {
                 internal_error(format!("No message sender is available for {}", medium))
             }
-            MagicLinkSendError::Send(err) => {
-                internal_error(err.to_string())
-            }
+            MagicLinkSendError::Send(err) => internal_error(err.to_string()),
             MagicLinkSendError::Signing(err) => ResourceError::InternalError(err).into(),
             MagicLinkSendError::Storage(err) => ResourceError::InternalError(err).into(),
         }

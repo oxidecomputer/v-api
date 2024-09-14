@@ -332,7 +332,7 @@ mod macros {
 
             #[endpoint {
                 method = POST,
-                path = "/login/magic/{medium}/send"
+                path = "/login/magic/{channel}/send"
             }]
             pub async fn magic_link_send(
                 rqctx: RequestContext<$context_type>,
