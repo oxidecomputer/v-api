@@ -1116,6 +1116,7 @@ impl MagicLinkAttemptStore for PostgresStore {
                 magic_link_attempt::magic_link_client_id
                     .eq(attempt.magic_link_client_id.into_untyped_uuid()),
                 magic_link_attempt::medium.eq(attempt.medium),
+                magic_link_attempt::channel.eq(attempt.channel),
                 magic_link_attempt::recipient.eq(attempt.recipient),
                 magic_link_attempt::redirect_uri.eq(attempt.redirect_uri),
                 magic_link_attempt::scope.eq(attempt.scope),
