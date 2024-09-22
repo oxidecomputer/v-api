@@ -87,6 +87,7 @@ impl Default for LoginAttemptState {
 
 // #[derive(Debug, PartialEq, Clone, FromSqlRow, AsExpression, Serialize, Deserialize, JsonSchema)]
 #[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize, JsonSchema, Hash, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum MagicLinkMedium {
     Email,
 }
