@@ -53,6 +53,7 @@ use super::{
 
 pub type DbPool = Pool<ConnectionManager<PgConnection>>;
 
+#[derive(Clone)]
 pub struct PostgresStore {
     pub pool: DbPool,
 }
