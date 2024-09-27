@@ -63,6 +63,7 @@ enum ContractKind {
     Append,
     Drop,
     Extend,
+    Replace,
 }
 
 #[derive(Clone, Debug)]
@@ -176,6 +177,7 @@ impl Parse for ContractSettings {
                 "append" => ContractKind::Append,
                 "drop" => ContractKind::Drop,
                 "extend" => ContractKind::Extend,
+                "replace" => ContractKind::Replace,
                 _ => return Err(Error::new(span, "Unexpected contract kind")),
             },
             variant: settings
@@ -834,11 +836,11 @@ fn permission_storage_contract_tokens(
 
     for (variant, setting) in contract_settings {
         let variant_ident = variant.ident;
-        let target_variant_ident = setting.variant;
-        let set_name = format_ident!("{}", target_variant_ident.to_string().to_snake_case());
+        let target_variant = setting.variant;
+        let set_name = format_ident!("{}", target_variant.to_string().to_snake_case());
         sets.insert(
-            target_variant_ident.clone(),
-            (setting.kind != ContractKind::Drop).then(|| set_name.clone()),
+            target_variant.clone(),
+            (setting.kind != ContractKind::Drop && setting.kind != ContractKind::Replace).then(|| set_name.clone()),
         );
 
         let fields = if variant.fields.len() > 0 && setting.kind != ContractKind::Drop {
@@ -868,6 +870,11 @@ fn permission_storage_contract_tokens(
             ContractKind::Extend => branches.push(quote! {
                 #permission_type::#variant_ident(#fields) => {
                     #set_name.extend(#fields);
+                }
+            }),
+            ContractKind::Replace => branches.push(quote! {
+                #permission_type::#variant_ident(#fields) => {
+                    contracted.push(#permission_type::#target_variant);
                 }
             }),
         }

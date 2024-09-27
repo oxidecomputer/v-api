@@ -3,9 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::BTreeSet;
+use newtype_uuid::TypedUuid;
 use uuid::Uuid;
 use v_api::permissions::VPermission;
 use v_api_permission_derive::v_api;
+use v_model::UserId;
 
 #[test]
 fn test_derive() {
@@ -41,5 +43,9 @@ fn test_derive() {
         ReadItems(BTreeSet<Uuid>),
         #[v_api(expand(kind = alias, variant = ReadItem, source = actor), scope(to = "read read2 read3", from = "read read2 read3"))]
         ReadItemsAssigned,
+        #[v_api(contract(kind = replace, variant = Flop))]
+        Flip(TypedUuid<UserId>),
+        #[v_api(expand(kind = replace, variant = Flip, source = actor, field = id))]
+        Flop,
     }
 }
