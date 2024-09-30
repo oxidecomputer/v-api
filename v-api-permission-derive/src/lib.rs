@@ -840,7 +840,8 @@ fn permission_storage_contract_tokens(
         let set_name = format_ident!("{}", target_variant.to_string().to_snake_case());
         sets.insert(
             target_variant.clone(),
-            (setting.kind != ContractKind::Drop && setting.kind != ContractKind::Replace).then(|| set_name.clone()),
+            (setting.kind != ContractKind::Drop && setting.kind != ContractKind::Replace)
+                .then(|| set_name.clone()),
         );
 
         let fields = if variant.fields.len() > 0 && setting.kind != ContractKind::Drop {
