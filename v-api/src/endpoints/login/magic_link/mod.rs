@@ -156,6 +156,7 @@ impl From<MagicLinkSendError> for HttpError {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct MagicLinkExchangeRequest {
     attempt_id: TypedUuid<MagicLinkAttemptId>,
+    recipient: String,
     secret: String,
 }
 
@@ -181,45 +182,58 @@ where
     let key: RawKey = body.secret.as_str().try_into().map_err(to_internal_error)?;
     let signed_key = key.sign(ctx.signer()).await.unwrap();
 
+    let recipient_signature = ctx
+        .signer()
+        .sign(body.recipient.as_bytes())
+        .await
+        .map(|bytes| hex::encode(&bytes))
+        .map_err(to_internal_error)?;
+
     let attempt = ctx
         .magic_link
         .complete_login_attempt(body.attempt_id, &signed_key.signature())
         .await?;
 
-    // Register this user as an API user if needed
-    let (api_user_info, api_user_provider) = ctx
-        .register_api_user(
-            &ctx.builtin_registration_user(),
-            UserInfo {
-                external_id: ExternalUserId::MagicLink(attempt.recipient.clone()),
-                verified_emails: vec![attempt.recipient],
-                display_name: None,
-            },
-        )
-        .await?;
+    // Verify that the submitted recipient email address matches the one that this attempt was
+    // generated for
+    if attempt.recipient == recipient_signature {
+        // Register this user as an API user if needed
+        let (api_user_info, api_user_provider) = ctx
+            .register_api_user(
+                &ctx.builtin_registration_user(),
+                UserInfo {
+                    external_id: ExternalUserId::MagicLink(body.recipient.clone()),
+                    verified_emails: vec![body.recipient],
+                    display_name: None,
+                },
+            )
+            .await?;
 
-    tracing::info!(api_user_id = ?api_user_info.user.id, "Retrieved api user to generate access token for");
+        tracing::info!(api_user_id = ?api_user_info.user.id, "Retrieved api user to generate access token for");
 
-    let scope = attempt
-        .scope
-        .split(' ')
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>();
+        let scope = attempt
+            .scope
+            .split(' ')
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
 
-    let token = ctx
-        .generate_access_token(
-            &ctx.builtin_registration_user(),
-            &api_user_info.user.id,
-            &api_user_provider.id,
-            Some(scope),
-        )
-        .await?;
+        let token = ctx
+            .generate_access_token(
+                &ctx.builtin_registration_user(),
+                &api_user_info.user.id,
+                &api_user_provider.id,
+                Some(scope),
+            )
+            .await?;
 
-    Ok(HttpResponseOk(MagicLinkExchangeResponse {
-        token_type: "Bearer".to_string(),
-        access_token: token.signed_token,
-        expires_in: token.expires_in,
-    }))
+        Ok(HttpResponseOk(MagicLinkExchangeResponse {
+            token_type: "Bearer".to_string(),
+            access_token: token.signed_token,
+            expires_in: token.expires_in,
+        }))
+    } else {
+        Err(bad_request("Invalid reciption"))
+    }
 }
 
 impl From<MagicLinkTransitionError> for HttpError {
