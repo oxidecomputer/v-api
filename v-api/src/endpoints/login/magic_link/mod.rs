@@ -156,7 +156,6 @@ impl From<MagicLinkSendError> for HttpError {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct MagicLinkExchangeRequest {
     attempt_id: TypedUuid<MagicLinkAttemptId>,
-    recipient: String,
     secret: String,
 }
 
@@ -192,8 +191,8 @@ where
         .register_api_user(
             &ctx.builtin_registration_user(),
             UserInfo {
-                external_id: ExternalUserId::MagicLink(body.recipient.clone()),
-                verified_emails: vec![body.recipient],
+                external_id: ExternalUserId::MagicLink(attempt.recipient.clone()),
+                verified_emails: vec![attempt.recipient],
                 display_name: None,
             },
         )
