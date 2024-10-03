@@ -182,13 +182,6 @@ where
     let key: RawKey = body.secret.as_str().try_into().map_err(to_internal_error)?;
     let signed_key = key.sign(ctx.signer()).await.unwrap();
 
-    let recipient_signature = ctx
-        .signer()
-        .sign(body.recipient.as_bytes())
-        .await
-        .map(|bytes| hex::encode(&bytes))
-        .map_err(to_internal_error)?;
-
     let attempt = ctx
         .magic_link
         .complete_login_attempt(body.attempt_id, &signed_key.signature())
@@ -199,9 +192,9 @@ where
         .register_api_user(
             &ctx.builtin_registration_user(),
             UserInfo {
-                external_id: ExternalUserId::MagicLink(recipient_signature),
+                external_id: ExternalUserId::MagicLink(body.recipient.clone()),
                 verified_emails: vec![body.recipient],
-                github_username: None,
+                display_name: None,
             },
         )
         .await?;

@@ -400,10 +400,8 @@ where
                             emails: info.verified_emails,
                             provider: info.external_id.provider().to_string(),
                             provider_id: info.external_id.id().to_string(),
-                            // TODO: Refactor in generic display name across providers. This cascades
-                            // into changes needed within mappers
                             display_names: info
-                                .github_username
+                                .display_name
                                 .map(|name| vec![name])
                                 .unwrap_or_default(),
                         },
@@ -422,10 +420,8 @@ where
 
                 // Update the provider with the newest user info
                 provider.emails = info.verified_emails;
-                provider.display_names = info
-                    .github_username
-                    .map(|name| vec![name])
-                    .unwrap_or_default();
+                provider.display_names =
+                    info.display_name.map(|name| vec![name]).unwrap_or_default();
 
                 tracing::info!(?provider.id, "Updating provider for user");
 
