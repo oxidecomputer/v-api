@@ -304,6 +304,7 @@ where
 
     // API User Operations
 
+    #[instrument(skip(self, caller), fields(caller = ?caller.id))]
     pub async fn get_api_user(
         &self,
         caller: &Caller<T>,
@@ -332,6 +333,7 @@ where
         }
     }
 
+    #[instrument(skip(self, caller, filter, pagination), fields(caller = ?caller.id))]
     pub async fn list_api_user(
         &self,
         caller: &Caller<T>,
@@ -352,7 +354,7 @@ where
         Ok(users)
     }
 
-    #[instrument(skip(self))]
+    #[instrument(skip(self, caller), fields(caller = ?caller.id))]
     pub async fn create_api_user(
         &self,
         caller: &Caller<T>,
@@ -374,7 +376,7 @@ where
         }
     }
 
-    #[instrument(skip(self))]
+    #[instrument(skip(self, caller, api_user), fields(caller = ?caller.id))]
     pub async fn update_api_user(
         &self,
         caller: &Caller<T>,
@@ -393,6 +395,7 @@ where
         }
     }
 
+    #[instrument(skip(self, caller, user_id, new_permissions), fields(caller = ?caller.id))]
     pub async fn add_permissions_to_user(
         &self,
         caller: &Caller<T>,
@@ -417,6 +420,7 @@ where
         }
     }
 
+    #[instrument(skip(self, caller, token, api_user_id), fields(caller = ?caller.id))]
     pub async fn create_api_user_token(
         &self,
         caller: &Caller<T>,
