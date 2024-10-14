@@ -341,7 +341,10 @@ where
                     .get_caller(&self.builtin_registration_user(), self.signer(), token)
                     .await?
             }
-            None => self.builtin_unauthenticated_caller(),
+            None => {
+                tracing::debug!("No token found in request. Falling back to unauthenticated user");
+                self.builtin_unauthenticated_caller()
+            },
         })
     }
 
