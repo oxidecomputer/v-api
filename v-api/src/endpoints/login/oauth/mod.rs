@@ -4,18 +4,12 @@
 
 use async_trait::async_trait;
 use http::Method;
-use hyper::{
-    body::{to_bytes, Bytes},
-    client::HttpConnector,
-    header::HeaderValue,
-    header::AUTHORIZATION,
-    Body, Client, Request,
-};
-use hyper_rustls::HttpsConnector;
+use hyper::{body::Bytes, header::HeaderValue, header::AUTHORIZATION};
 use oauth2::{
     basic::BasicClient, url::ParseError, AuthUrl, ClientId, ClientSecret, RedirectUrl,
     RevocationUrl, TokenUrl,
 };
+use reqwest::Request;
 use schemars::JsonSchema;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
@@ -57,8 +51,8 @@ pub struct OAuthPrivateCredentials {
 pub trait OAuthProvider: ExtractUserInfo + Debug + Send + Sync {
     fn name(&self) -> OAuthProviderName;
     fn scopes(&self) -> Vec<&str>;
-    fn start_request(&self) -> Request<Body>;
-    fn client(&self) -> &Client<HttpsConnector<HttpConnector>>;
+    fn initialize_headers(&self, request: &mut Request);
+    fn client(&self) -> &reqwest::Client;
     fn client_id(&self, client_type: &ClientType) -> &str;
     fn client_secret(&self, client_type: &ClientType) -> Option<&SecretString>;
 
@@ -139,9 +133,8 @@ where
         let mut responses = vec![];
 
         for endpoint in self.user_info_endpoints() {
-            let mut request = self.start_request();
-            *request.method_mut() = Method::GET;
-            *request.uri_mut() = endpoint.parse().unwrap();
+            let mut request = Request::new(Method::GET, endpoint.parse().unwrap());
+            self.initialize_headers(&mut request);
 
             let headers = request.headers_mut();
             headers.insert(
@@ -149,11 +142,11 @@ where
                 HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
             );
 
-            let response = self.client().request(request).await?;
+            let response = self.client().execute(request).await?;
 
             tracing::trace!(status = ?response.status(), "Received response from OAuth provider");
 
-            let bytes = to_bytes(response.into_body()).await?;
+            let bytes = response.bytes().await?;
             responses.push(bytes);
         }
 

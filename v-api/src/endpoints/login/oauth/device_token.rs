@@ -3,10 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use chrono::{DateTime, Utc};
-use dropshot::{HttpError, HttpResponseOk, Method, Path, RequestContext, TypedBody};
-use http::{header, HeaderValue, Request, Response, StatusCode};
-use hyper::{body::to_bytes, Body};
-use hyper_rustls::HttpsConnectorBuilder;
+use dropshot::{Body, HttpError, HttpResponseOk, Method, Path, RequestContext, TypedBody};
+use http::{header, HeaderValue, Response, StatusCode};
 use oauth2::{basic::BasicTokenType, EmptyExtraTokenFields, StandardTokenResponse, TokenResponse};
 use schemars::JsonSchema;
 use secrecy::ExposeSecret;
@@ -21,7 +19,7 @@ use super::{
 };
 use crate::{
     context::ApiContext, endpoints::login::LoginError, error::ApiError,
-    permissions::VAppPermission, util::response::bad_request,
+    permissions::VAppPermission, response::internal_error, util::response::bad_request,
 };
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -132,44 +130,38 @@ where
         exchange.provider.client_secret = exchange.provider.client_secret;
 
         let token_exchange_endpoint = provider.token_exchange_endpoint();
-
-        // We know that this is safe to unwrap as we just deserialized it via the body Extractor
-        let body: Body = serde_urlencoded::to_string(&exchange.provider)
-            .unwrap()
-            .into();
-
-        let request = Request::builder()
-            .method(Method::POST)
-            .header(header::CONTENT_TYPE, provider.token_exchange_content_type())
-            .header(header::ACCEPT, HeaderValue::from_static("application/json"))
-            .uri(token_exchange_endpoint)
-            .body(body)
-            .tap_err(|err| tracing::error!(?err, "Failed to construct token exchange request"))?;
-
-        let client = hyper::Client::builder().build(
-            HttpsConnectorBuilder::new()
-                .with_native_roots()
-                .unwrap()
-                .https_only()
-                .enable_http1()
-                .build(),
-        );
+        let client = reqwest::Client::new();
 
         let response = client
-            .request(request)
+            .request(Method::POST, token_exchange_endpoint)
+            .header(header::CONTENT_TYPE, provider.token_exchange_content_type())
+            .header(header::ACCEPT, HeaderValue::from_static("application/json"))
+            .body(
+                // We know that this is safe to unwrap as we just deserialized it via the body Extractor
+                serde_urlencoded::to_string(&exchange.provider).unwrap(),
+            )
+            .send()
             .await
-            .tap_err(|err| tracing::error!(?err, "Token exchange request failed"))?;
+            .tap_err(|err| tracing::error!(?err, "Token exchange request failed"))
+            .map_err(internal_error)?;
 
-        let (parts, body) = response.into_parts();
+        // Take a part the response as we will need the individual parts later
+        let status = response.status();
+        let headers = response.headers().clone();
+        let bytes = response.bytes().await.map_err(internal_error)?;
 
         // We unfortunately can not trust our providers to follow specs and therefore need to do
         // our own inspection of the response to determine what to do
-        if !parts.status.is_success() {
+        if !status.is_success() {
             // If the server returned a non-success status then we are going to trust the server and
             // report their error back to the client
-            tracing::debug!(provider = ?path.provider, "Received error response from OAuth provider");
+            tracing::debug!(provider = ?path.provider, ?headers, ?status, "Received error response from OAuth provider");
 
-            Ok(Response::from_parts(parts, body))
+            let mut client_response = Response::new(Body::from(bytes));
+            *client_response.headers_mut() = headers;
+            *client_response.status_mut() = status;
+
+            Ok(client_response)
         } else {
             // The server gave us back a non-error response but it still may not be a success.
             // GitHub for instance does not use a status code for indicating the success or failure
@@ -177,7 +169,6 @@ where
             // understanding that it may fail and we will need to try and treat the response as
             // an error instead.
 
-            let bytes = to_bytes(body).await?;
             let parsed: Result<
                 StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>,
                 serde_json::Error,
@@ -243,7 +234,12 @@ where
                             // We found an error in the message body. This is not ideal, but we at
                             // least can understand what the server was trying to tell us
                             tracing::debug!(?error, provider = ?path.provider, "Parsed error response from OAuth provider");
-                            Response::from_parts(parts, Body::from(bytes))
+
+                            let mut client_response = Response::new(Body::from(bytes));
+                            *client_response.headers_mut() = headers;
+                            *client_response.status_mut() = status;
+
+                            client_response
                         }
                         Err(_) => {
                             // We still do not know what the remote server is doing... and need to
@@ -252,8 +248,8 @@ where
                                 "Remote OAuth provide returned a response that we do not undestand"
                             );
 
-                            Response::new(Body::from(
-                                serde_json::to_string(&ProxyTokenError {
+                            Response::new(
+                                serde_json::to_vec(&ProxyTokenError {
                                     error: "access_denied".to_string(),
                                     error_description: Some(format!(
                                         "{} returned a malformed response",
@@ -261,8 +257,9 @@ where
                                     )),
                                     error_uri: None,
                                 })
-                                .unwrap(),
-                            ))
+                                .unwrap()
+                                .into(),
+                            )
                         }
                     };
 

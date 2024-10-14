@@ -3,9 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use chrono::{Duration, Utc};
-use dropshot::{HttpError, RequestContext, TypedBody};
+use dropshot::{Body, HttpError, RequestContext, TypedBody};
 use http::{header, Response, StatusCode};
-use hyper::Body;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;

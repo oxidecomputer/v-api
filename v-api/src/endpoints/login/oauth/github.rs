@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use http::{header::USER_AGENT, HeaderMap, HeaderValue};
-use hyper::{body::Bytes, client::HttpConnector, Body, Client, Request};
-use hyper_rustls::HttpsConnector;
+use hyper::body::Bytes;
+use reqwest::Request;
 use secrecy::SecretString;
 use serde::Deserialize;
 use std::fmt;
@@ -25,7 +25,7 @@ pub struct GitHubOAuthProvider {
     web_private: Option<OAuthPrivateCredentials>,
     additional_scopes: Vec<String>,
     default_headers: HeaderMap,
-    client: Client<HttpsConnector<HttpConnector>>,
+    client: reqwest::Client,
 }
 
 impl fmt::Debug for GitHubOAuthProvider {
@@ -45,15 +45,6 @@ impl GitHubOAuthProvider {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static("v-api"));
 
-        let client = Client::builder().build(
-            hyper_rustls::HttpsConnectorBuilder::new()
-                .with_native_roots()
-                .unwrap()
-                .https_only()
-                .enable_http2()
-                .build(),
-        );
-
         Self {
             device_public: OAuthPublicCredentials {
                 client_id: device_client_id,
@@ -69,11 +60,11 @@ impl GitHubOAuthProvider {
             }),
             additional_scopes: additional_scopes.unwrap_or_default(),
             default_headers: headers,
-            client,
+            client: reqwest::Client::new(),
         }
     }
 
-    pub fn with_client(&mut self, client: Client<HttpsConnector<HttpConnector>>) -> &mut Self {
+    pub fn with_client(&mut self, client: reqwest::Client) -> &mut Self {
         self.client = client;
         self
     }
@@ -125,14 +116,11 @@ impl OAuthProvider for GitHubOAuthProvider {
         default
     }
 
-    fn start_request(&self) -> Request<Body> {
-        let mut request = Request::new(Body::empty());
+    fn initialize_headers(&self, request: &mut Request) {
         *request.headers_mut() = self.default_headers.clone();
-
-        request
     }
 
-    fn client(&self) -> &Client<HttpsConnector<HttpConnector>> {
+    fn client(&self) -> &reqwest::Client {
         &self.client
     }
 
