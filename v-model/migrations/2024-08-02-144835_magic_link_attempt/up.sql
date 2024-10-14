@@ -6,6 +6,7 @@ CREATE TABLE magic_link_attempt(
   magic_link_client_id UUID REFERENCES magic_link_client (id) NOT NULL,
 
   medium VARCHAR NOT NULL,
+  channel VARCHAR NOT NULL,
   recipient VARCHAR NOT NULL,
   redirect_uri VARCHAR NOT NULL,
   scope VARCHAR NOT NULL DEFAULT '',
@@ -15,4 +16,5 @@ CREATE TABLE magic_link_attempt(
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-)
+);
+SELECT diesel_manage_updated_at('magic_link_attempt');

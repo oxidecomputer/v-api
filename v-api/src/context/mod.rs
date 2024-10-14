@@ -54,7 +54,7 @@ pub use link::LinkContext;
 pub mod login;
 pub use login::LoginContext;
 pub mod magic_link;
-pub use magic_link::{MagicLinkContext, MagicLinkMessage};
+pub use magic_link::{MagicLinkContext, MagicLinkMessage, MagicLinkTarget};
 pub mod mapping;
 pub use mapping::MappingContext;
 pub mod oauth;
@@ -341,7 +341,10 @@ where
                     .get_caller(&self.builtin_registration_user(), self.signer(), token)
                     .await?
             }
-            None => self.builtin_unauthenticated_caller(),
+            None => {
+                tracing::debug!("No token found in request. Falling back to unauthenticated user");
+                self.builtin_unauthenticated_caller()
+            }
         })
     }
 
@@ -400,10 +403,8 @@ where
                             emails: info.verified_emails,
                             provider: info.external_id.provider().to_string(),
                             provider_id: info.external_id.id().to_string(),
-                            // TODO: Refactor in generic display name across providers. This cascades
-                            // into changes needed within mappers
                             display_names: info
-                                .github_username
+                                .display_name
                                 .map(|name| vec![name])
                                 .unwrap_or_default(),
                         },
@@ -422,10 +423,8 @@ where
 
                 // Update the provider with the newest user info
                 provider.emails = info.verified_emails;
-                provider.display_names = info
-                    .github_username
-                    .map(|name| vec![name])
-                    .unwrap_or_default();
+                provider.display_names =
+                    info.display_name.map(|name| vec![name]).unwrap_or_default();
 
                 tracing::info!(?provider.id, "Updating provider for user");
 

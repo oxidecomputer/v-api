@@ -24,7 +24,7 @@ use crate::{
     },
     endpoints::login::{ExternalUserId, UserInfo},
     permissions::VAppPermission,
-    response::{to_internal_error, ResourceError},
+    response::{bad_request, internal_error, to_internal_error, ResourceError},
     ApiContext, VContext,
 };
 
@@ -32,15 +32,17 @@ pub mod client;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct MagicLinkPath {
-    medium: MagicLinkMedium,
+    channel: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct MagicLinkSendRequest {
+    medium: MagicLinkMedium,
     secret: String,
     recipient: String,
     redirect_uri: Url,
     expires_in: i64,
+    scope: String,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -64,11 +66,13 @@ where
     Ok(HttpResponseOk(
         magic_link_send_op_inner(
             ctx,
-            path.medium,
+            body.medium,
+            &path.channel,
             body.secret,
             body.recipient,
             body.redirect_uri,
             body.expires_in,
+            body.scope,
         )
         .await?,
     ))
@@ -78,10 +82,12 @@ where
 async fn magic_link_send_op_inner<T>(
     ctx: &VContext<T>,
     medium: MagicLinkMedium,
+    channel: &str,
     secret: String,
     recipient: String,
     redirect_uri: Url,
     expires_in: i64,
+    scope: String,
 ) -> Result<MagicLinkSendResponse, HttpError>
 where
     T: VAppPermission + PermissionStorage,
@@ -89,18 +95,20 @@ where
     tracing::info!("Handling magic link send request");
 
     // Any caller may create a magic link attempt by supplying the clients secret
-    let secret_signature = ctx
-        .signer()
-        .sign(secret.as_bytes())
-        .await
-        .map(|bytes| hex::encode(&bytes))
-        .map_err(to_internal_error)?;
+    let key = RawKey::try_from(secret.as_str()).map_err(|err| {
+        tracing::info!(?err, "Request supplied malformed secret");
+        bad_request("Malformed secret".to_string())
+    })?;
+    let signed_key = key.sign(ctx.signer()).await.map_err(to_internal_error)?;
+
     let client = ctx
         .magic_link
-        .find_client(&secret_signature, &redirect_uri)
+        .find_client(signed_key.signature(), &redirect_uri)
         .await?;
-    let key = RawKey::generate::<8>(&Uuid::new_v4());
 
+    tracing::debug!(id = ?client.id, "Acquired magic link client");
+
+    let key = RawKey::generate::<8>(&Uuid::new_v4());
     let attempt = ctx
         .magic_link
         .send_login_attempt(
@@ -109,7 +117,8 @@ where
             client.id,
             &redirect_uri,
             medium,
-            "",
+            channel,
+            &scope,
             Utc::now().add(Duration::seconds(expires_in)),
             &recipient,
         )
@@ -128,15 +137,16 @@ impl From<MagicLinkSendError> for HttpError {
     fn from(value: MagicLinkSendError) -> Self {
         match value {
             MagicLinkSendError::ApiKey(err) => ResourceError::InternalError(err).into(),
-            MagicLinkSendError::NoMessageBuilder(_) => {
-                unimplemented!()
-            }
-            MagicLinkSendError::NoMessageSender(_) => {
-                unimplemented!()
-            }
-            MagicLinkSendError::Send(_) => {
-                unimplemented!()
-            }
+            MagicLinkSendError::FailedToBuildMessage => internal_error("Failed to build message"),
+            MagicLinkSendError::NoMessageBuilder(target) => internal_error(format!(
+                "No message builder is available for ({}, {})",
+                target.medium, target.channel
+            )),
+            MagicLinkSendError::NoMessageSender(target) => internal_error(format!(
+                "No message sender is available for ({}, {})",
+                target.medium, target.channel
+            )),
+            MagicLinkSendError::Send(err) => internal_error(err.to_string()),
             MagicLinkSendError::Signing(err) => ResourceError::InternalError(err).into(),
             MagicLinkSendError::Storage(err) => ResourceError::InternalError(err).into(),
         }
@@ -184,40 +194,46 @@ where
         .complete_login_attempt(body.attempt_id, &signed_key.signature())
         .await?;
 
-    // Register this user as an API user if needed
-    let (api_user_info, api_user_provider) = ctx
-        .register_api_user(
-            &ctx.builtin_registration_user(),
-            UserInfo {
-                external_id: ExternalUserId::MagicLink(recipient_signature),
-                verified_emails: vec![body.recipient],
-                github_username: None,
-            },
-        )
-        .await?;
+    // Verify that the submitted recipient email address matches the one that this attempt was
+    // generated for
+    if attempt.recipient == recipient_signature {
+        // Register this user as an API user if needed
+        let (api_user_info, api_user_provider) = ctx
+            .register_api_user(
+                &ctx.builtin_registration_user(),
+                UserInfo {
+                    external_id: ExternalUserId::MagicLink(body.recipient.clone()),
+                    verified_emails: vec![body.recipient],
+                    display_name: None,
+                },
+            )
+            .await?;
 
-    tracing::info!(api_user_id = ?api_user_info.user.id, "Retrieved api user to generate access token for");
+        tracing::info!(api_user_id = ?api_user_info.user.id, "Retrieved api user to generate access token for");
 
-    let scope = attempt
-        .scope
-        .split(' ')
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>();
+        let scope = attempt
+            .scope
+            .split(' ')
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
 
-    let token = ctx
-        .generate_access_token(
-            &ctx.builtin_registration_user(),
-            &api_user_info.user.id,
-            &api_user_provider.id,
-            Some(scope),
-        )
-        .await?;
+        let token = ctx
+            .generate_access_token(
+                &ctx.builtin_registration_user(),
+                &api_user_info.user.id,
+                &api_user_provider.id,
+                Some(scope),
+            )
+            .await?;
 
-    Ok(HttpResponseOk(MagicLinkExchangeResponse {
-        token_type: "Bearer".to_string(),
-        access_token: token.signed_token,
-        expires_in: token.expires_in,
-    }))
+        Ok(HttpResponseOk(MagicLinkExchangeResponse {
+            token_type: "Bearer".to_string(),
+            access_token: token.signed_token,
+            expires_in: token.expires_in,
+        }))
+    } else {
+        Err(bad_request("Invalid reciption"))
+    }
 }
 
 impl From<MagicLinkTransitionError> for HttpError {

@@ -37,7 +37,7 @@ where
     let info = UserInfo {
         external_id: ExternalUserId::Local(body.external_id),
         verified_emails: vec![body.email],
-        github_username: Some("Local Dev".to_string()),
+        display_name: Some("Local Dev".to_string()),
     };
 
     let (api_user, api_user_provider) = ctx

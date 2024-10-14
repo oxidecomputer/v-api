@@ -55,7 +55,7 @@ where
 {
     async fn permissions_for(&self, user: &UserInfo) -> Result<Permissions<T>, StoreError> {
         if user
-            .github_username
+            .display_name
             .as_ref()
             .map(|u| u == &self.data.github_username)
             .unwrap_or(false)
@@ -71,7 +71,7 @@ where
         user: &UserInfo,
     ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError> {
         if user
-            .github_username
+            .display_name
             .as_ref()
             .map(|u| u == &self.data.github_username)
             .unwrap_or(false)

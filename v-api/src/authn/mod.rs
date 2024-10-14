@@ -76,7 +76,10 @@ impl AuthToken {
         })?;
 
         // Check that the extracted token actually contains a value
-        let token = bearer.consume().ok_or(AuthError::NoToken)?;
+        let token = bearer.consume().ok_or_else(|| {
+            tracing::debug!("Bearer auth is empty");
+            AuthError::NoToken
+        })?;
 
         let ctx = rqctx.context();
 
@@ -85,7 +88,10 @@ impl AuthToken {
         let jwt = Jwt::new(ctx.v_ctx(), &token).await;
 
         match jwt {
-            Ok(token) => Ok(AuthToken::Jwt(token)),
+            Ok(token) => {
+                tracing::trace!("Extracted auth token");
+                Ok(AuthToken::Jwt(token))
+            }
             Err(err) => {
                 tracing::debug!(?err, ?token, "Token is not a JWT, falling back to API key");
 

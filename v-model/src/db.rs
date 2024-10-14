@@ -153,6 +153,7 @@ pub struct MagicLinkAttemptModel {
     pub magic_link_client_id: Uuid,
     // TODO: This needs to be the MagicLinkMedium enum
     pub medium: String,
+    pub channel: String,
     pub recipient: String,
     pub redirect_uri: String,
     pub scope: String,

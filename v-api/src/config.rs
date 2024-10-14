@@ -112,6 +112,12 @@ pub struct AuthnProviders {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SendGridConfig {
+    pub from: String,
+    pub key: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct OAuthProviders {
     pub github: Option<OAuthConfig>,
     pub google: Option<OAuthConfig>,

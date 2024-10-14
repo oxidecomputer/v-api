@@ -311,6 +311,7 @@ pub struct MagicLinkAttemptFilter {
     pub client_id: Option<Vec<TypedUuid<OAuthClientId>>>,
     pub attempt_state: Option<Vec<MagicLinkAttemptState>>,
     pub medium: Option<Vec<String>>,
+    pub channel: Option<Vec<String>>,
     pub signature: Option<Vec<String>>,
 }
 
