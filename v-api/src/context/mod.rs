@@ -344,7 +344,7 @@ where
             None => {
                 tracing::debug!("No token found in request. Falling back to unauthenticated user");
                 self.builtin_unauthenticated_caller()
-            },
+            }
         })
     }
 

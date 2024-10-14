@@ -89,7 +89,7 @@ impl AuthToken {
             Ok(token) => {
                 tracing::trace!("Extracted auth token");
                 Ok(AuthToken::Jwt(token))
-            },
+            }
             Err(err) => {
                 tracing::debug!(?err, ?token, "Token is not a JWT, falling back to API key");
 
