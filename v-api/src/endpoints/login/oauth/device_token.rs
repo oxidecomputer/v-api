@@ -238,7 +238,7 @@ where
                             let mut client_response = Response::new(Body::from(bytes));
                             *client_response.headers_mut() = headers;
                             *client_response.status_mut() = status;
-                            
+
                             client_response
                         }
                         Err(_) => {
