@@ -8,8 +8,8 @@ use crc32c::crc32c;
 use dropshot::{HttpError, RequestContext, SharedExtractor};
 use dropshot_authorization_header::bearer::BearerAuth;
 use google_cloudkms1::{
-    api::AsymmetricSignRequest, hyper::client::HttpConnector, hyper_rustls::HttpsConnector,
-    CloudKMS,
+    api::AsymmetricSignRequest, hyper_rustls::HttpsConnector,
+    hyper_util::client::legacy::connect::HttpConnector, CloudKMS,
 };
 use rsa::{
     pkcs1v15::Signature,
