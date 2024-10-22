@@ -20,7 +20,6 @@ hex = { workspace = true }
 http = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true }
-hyper-rustls = { workspace = true, features = ["http2"] }
 jsonwebtoken = { workspace = true }
 oauth2 = { workspace = true }
 newtype-uuid = { workspace = true }

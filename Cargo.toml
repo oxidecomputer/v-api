@@ -24,7 +24,6 @@ hex = "0.4.3"
 http = "1"
 http-body-util = "0.1.2"
 hyper = "1.5.0"
-hyper-rustls = "0.27"
 jsonwebtoken = "9.3.0"
 mockall = "0.13.0"
 newtype-uuid = { version = "1.1.2", features = ["schemars08", "serde", "v4"] }
