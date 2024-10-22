@@ -38,7 +38,7 @@ reqwest = { version = "0.12.8", default-features = false, features = ["json", "s
 rsa = "0.9.6"
 schemars = { version = "0.8.21", features = ["url"] }
 secrecy = "0.8.0"
-serde = "1.0.210"
+serde = "1.0.211"
 serde_json = "1"
 serde_urlencoded = "0.7.1"
 sha2 = "0.10.8"
