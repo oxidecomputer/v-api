@@ -4,14 +4,14 @@
 
 use hex::FromHexError;
 use rand::{rngs::OsRng, RngCore};
-use secrecy::{ExposeSecret, SecretString, SecretVec};
+use secrecy::{ExposeSecret, SecretSlice, SecretString};
 use thiserror::Error;
 use uuid::Uuid;
 
 use super::{Signer, SigningKeyError};
 
 pub struct RawKey {
-    clear: SecretVec<u8>,
+    clear: SecretSlice<u8>,
 }
 
 #[derive(Debug, Error)]
@@ -141,7 +141,7 @@ mod tests {
         let raw = RawKey::generate::<8>(&id);
         let signed = raw.sign(&*signer).await.unwrap();
 
-        let raw2 = RawKey::try_from(signed.key.expose_secret().as_str()).unwrap();
+        let raw2 = RawKey::try_from(signed.key.expose_secret()).unwrap();
 
         assert_eq!(
             (),
