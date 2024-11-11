@@ -730,6 +730,7 @@ mod macros {
                 .expect("Failed to register endpoint");
 
             // Local development mock login
+            #[cfg(feature = "local-dev")]
             $api.register(local_login)
                 .expect("Failed to register endpoint");
         };
