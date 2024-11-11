@@ -31,13 +31,5 @@ mod system {
     v_system_endpoints!(Context, Permissions);
 }
 
-#[cfg(feature = "local-dev")]
-mod development {
-    use super::{Context, Permissions};
-    use v_api::v_local_dev_endpoints;
-
-    v_local_dev_endpoints!(Context, Permissions);
-}
-
 #[test]
 fn run_import_test() {}

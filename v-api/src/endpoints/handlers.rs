@@ -606,6 +606,21 @@ mod macros {
             ) -> Result<HttpResponseOk<Mapper>, HttpError> {
                 delete_mapper_op(&rqctx, path.into_inner()).await
             }
+
+            #[cfg(feature = "local-dev")]
+            use v_api::endpoints::login::local::{local_login_op, LocalLogin};
+
+            #[cfg(feature = "local-dev")]
+            #[endpoint {
+                method = POST,
+                path = "/login/local"
+            }]
+            pub async fn local_login(
+                rqctx: RequestContext<$context_type>,
+                body: TypedBody<LocalLogin>,
+            ) -> Result<Response<Body>, HttpError> {
+                local_login_op(&rqctx, body).await
+            }
         };
     }
 
@@ -713,37 +728,10 @@ mod macros {
                 .expect("Failed to register endpoint");
             $api.register(magic_link_exchange)
                 .expect("Failed to register endpoint");
-        };
-    }
 
-    #[cfg(feature = "local-dev")]
-    #[macro_export]
-    macro_rules! v_local_dev_endpoints {
-        ($context_type:ident, $permission_type:ident) => {
-            use dropshot::{endpoint, HttpError, RequestContext, TypedBody, Body};
-            use http::Response;
-            use v_api::endpoints::login::local::{local_login_op, LocalLogin};
-
-            #[endpoint {
-                method = POST,
-                path = "/login/local"
-            }]
-            pub async fn local_login(
-                rqctx: RequestContext<$context_type>,
-                body: TypedBody<LocalLogin>,
-            ) -> Result<Response<Body>, HttpError> {
-                local_login_op(&rqctx, body).await
-            }
-        }
-    }
-
-    #[cfg(feature = "local-dev")]
-    #[macro_export]
-    macro_rules! v_inject_local_dev_endpoints {
-        ($api:ident) => {
             // Local development mock login
-            $api.register(openid_configuration)
+            $api.register(local_login)
                 .expect("Failed to register endpoint");
-        }
+        };
     }
 }
