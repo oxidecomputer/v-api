@@ -761,3 +761,54 @@ impl From<LinkRequestModel> for LinkRequest {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use chrono::Utc;
+    use newtype_uuid::TypedUuid;
+
+    use crate::{ApiUser, ApiUserContactEmail, ApiUserInfo, ApiUserProvider};
+
+    #[test]
+    fn test_user_owns_email() {
+        let api_user_id = TypedUuid::new_v4();
+        let user = ApiUserInfo {
+            user: ApiUser::<()> {
+                id: api_user_id,
+                permissions: Vec::new().into(),
+                groups: BTreeSet::default(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                deleted_at: None,
+            },
+            email: Some(ApiUserContactEmail {
+                id: TypedUuid::new_v4(),
+                user_id: api_user_id,
+                email: "not-user@company".to_string(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                deleted_at: None,
+            }),
+            providers: vec![ApiUserProvider {
+                id: TypedUuid::new_v4(),
+                user_id: api_user_id,
+                provider: "local".to_string(),
+                provider_id: "123".to_string(),
+                emails: vec!["user@company".to_string()],
+                display_names: vec![],
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                deleted_at: None,
+            }],
+        };
+
+        // Users own email addresses defined by their providers
+        assert!(user.owns_email("user@company"));
+        assert!(!user.owns_email("user@company-two"));
+
+        // But they do not own emails defined by their email contact
+        assert!(!user.owns_email("not-user@company"));
+    }
+}
