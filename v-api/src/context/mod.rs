@@ -15,11 +15,11 @@ use user::{RegisteredAccessToken, UserContextError};
 use v_model::{
     permissions::{Caller, Permission},
     storage::{
-        AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserProviderFilter,
-        ApiUserProviderStore, ApiUserStore, LinkRequestStore, ListPagination, LoginAttemptStore,
-        MagicLinkAttemptStore, MagicLinkRedirectUriStore, MagicLinkSecretStore, MagicLinkStore,
-        MapperStore, OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore,
-        StoreError,
+        AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore,
+        ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, LinkRequestStore,
+        ListPagination, LoginAttemptStore, MagicLinkAttemptStore, MagicLinkRedirectUriStore,
+        MagicLinkSecretStore, MagicLinkStore, MapperStore, OAuthClientRedirectUriStore,
+        OAuthClientSecretStore, OAuthClientStore, StoreError,
     },
     AccessGroupId, ApiUserInfo, ApiUserProvider, InvalidValueError, LinkRequest, NewApiUser,
     NewApiUserProvider, NewLinkRequest, UserId, UserProviderId,
@@ -65,6 +65,7 @@ pub use user::{CallerExtension, ExtensionError, UserContext};
 pub trait VApiStorage<P: Send + Sync>:
     ApiUserStore<P>
     + ApiKeyStore<P>
+    + ApiUserContactEmailStore
     + ApiUserProviderStore
     + AccessTokenStore
     + LoginAttemptStore
@@ -88,6 +89,7 @@ where
     P: Permission,
     T: ApiUserStore<P>
         + ApiKeyStore<P>
+        + ApiUserContactEmailStore
         + ApiUserProviderStore
         + AccessTokenStore
         + LoginAttemptStore
@@ -693,6 +695,7 @@ mod tests {
                 updated_at: Utc::now(),
                 deleted_at: None,
             },
+            email: None,
             providers: vec![],
         };
 
@@ -745,23 +748,25 @@ pub(crate) mod test_mocks {
     use v_model::{
         schema_ext::MagicLinkAttemptState,
         storage::{
-            AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserProviderStore, ApiUserStore,
-            LinkRequestStore, ListPagination, LoginAttemptStore, MagicLinkAttemptFilter,
-            MagicLinkAttemptStore, MagicLinkFilter, MagicLinkRedirectUriStore,
-            MagicLinkSecretStore, MagicLinkStore, MapperStore, MockAccessGroupStore,
-            MockAccessTokenStore, MockApiKeyStore, MockApiUserProviderStore, MockApiUserStore,
+            AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore,
+            ApiUserProviderStore, ApiUserStore, LinkRequestStore, ListPagination,
+            LoginAttemptStore, MagicLinkAttemptFilter, MagicLinkAttemptStore, MagicLinkFilter,
+            MagicLinkRedirectUriStore, MagicLinkSecretStore, MagicLinkStore, MapperStore,
+            MockAccessGroupStore, MockAccessTokenStore, MockApiKeyStore,
+            MockApiUserContactEmailStore, MockApiUserProviderStore, MockApiUserStore,
             MockLinkRequestStore, MockLoginAttemptStore, MockMagicLinkAttemptStore,
             MockMagicLinkRedirectUriStore, MockMagicLinkSecretStore, MockMagicLinkStore,
             MockMapperStore, MockOAuthClientRedirectUriStore, MockOAuthClientSecretStore,
             MockOAuthClientStore, OAuthClientRedirectUriStore, OAuthClientSecretStore,
             OAuthClientStore, StoreError,
         },
-        AccessGroupId, AccessTokenId, ApiKey, ApiKeyId, ApiUserProvider, LinkRequestId,
-        LoginAttemptId, MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId,
-        MagicLinkRedirectUri, MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, MapperId,
-        NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, NewLoginAttempt,
-        NewMagicLink, NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper,
-        OAuthClientId, OAuthRedirectUriId, OAuthSecretId, UserId, UserProviderId,
+        AccessGroupId, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail, ApiUserProvider,
+        LinkRequestId, LoginAttemptId, MagicLink, MagicLinkAttempt, MagicLinkAttemptId,
+        MagicLinkId, MagicLinkRedirectUri, MagicLinkRedirectUriId, MagicLinkSecret,
+        MagicLinkSecretId, MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
+        NewApiUserContactEmail, NewApiUserProvider, NewLoginAttempt, NewMagicLink,
+        NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, OAuthClientId,
+        OAuthRedirectUriId, OAuthSecretId, UserContactEmailId, UserId, UserProviderId,
     };
 
     use crate::{
@@ -814,6 +819,7 @@ pub(crate) mod test_mocks {
     pub struct MockStorage {
         pub api_user_store: Option<Arc<MockApiUserStore<VPermission>>>,
         pub api_user_token_store: Option<Arc<MockApiKeyStore<VPermission>>>,
+        pub api_user_contact_email_store: Option<Arc<MockApiUserContactEmailStore>>,
         pub api_user_provider_store: Option<Arc<MockApiUserProviderStore>>,
         pub device_token_store: Option<Arc<MockAccessTokenStore>>,
         pub login_attempt_store: Option<Arc<MockLoginAttemptStore>>,
@@ -834,6 +840,7 @@ pub(crate) mod test_mocks {
             Self {
                 api_user_store: None,
                 api_user_token_store: None,
+                api_user_contact_email_store: None,
                 api_user_provider_store: None,
                 device_token_store: None,
                 login_attempt_store: None,
@@ -932,6 +939,55 @@ pub(crate) mod test_mocks {
             id: &TypedUuid<ApiKeyId>,
         ) -> Result<Option<ApiKey<VPermission>>, v_model::storage::StoreError> {
             self.api_user_token_store.as_ref().unwrap().delete(id).await
+        }
+    }
+
+    #[async_trait]
+    impl ApiUserContactEmailStore for MockStorage {
+        async fn get(
+            &self,
+            id: &TypedUuid<UserContactEmailId>,
+            deleted: bool,
+        ) -> Result<Option<ApiUserContactEmail>, v_model::storage::StoreError> {
+            self.api_user_contact_email_store
+                .as_ref()
+                .unwrap()
+                .get(id, deleted)
+                .await
+        }
+
+        async fn list(
+            &self,
+            filter: v_model::storage::ApiUserContactEmailFilter,
+            pagination: &ListPagination,
+        ) -> Result<Vec<ApiUserContactEmail>, v_model::storage::StoreError> {
+            self.api_user_contact_email_store
+                .as_ref()
+                .unwrap()
+                .list(filter, pagination)
+                .await
+        }
+
+        async fn upsert(
+            &self,
+            provider: NewApiUserContactEmail,
+        ) -> Result<ApiUserContactEmail, v_model::storage::StoreError> {
+            self.api_user_contact_email_store
+                .as_ref()
+                .unwrap()
+                .upsert(provider)
+                .await
+        }
+
+        async fn delete(
+            &self,
+            id: &TypedUuid<UserContactEmailId>,
+        ) -> Result<Option<ApiUserContactEmail>, v_model::storage::StoreError> {
+            self.api_user_contact_email_store
+                .as_ref()
+                .unwrap()
+                .delete(id)
+                .await
         }
     }
 

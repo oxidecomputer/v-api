@@ -17,38 +17,39 @@ use tracing::instrument;
 
 use crate::{
     db::{
-        AccessGroupModel, ApiKeyModel, ApiUserAccessTokenModel, ApiUserModel, ApiUserProviderModel,
-        LinkRequestModel, LoginAttemptModel, MagicLinkAttemptModel, MagicLinkModel,
-        MagicLinkRedirectUriModel, MagicLinkSecretModel, MapperModel, OAuthClientModel,
-        OAuthClientRedirectUriModel, OAuthClientSecretModel,
+        AccessGroupModel, ApiKeyModel, ApiUserAccessTokenModel, ApiUserContactEmailModel,
+        ApiUserModel, ApiUserProviderModel, LinkRequestModel, LoginAttemptModel,
+        MagicLinkAttemptModel, MagicLinkModel, MagicLinkRedirectUriModel, MagicLinkSecretModel,
+        MapperModel, OAuthClientModel, OAuthClientRedirectUriModel, OAuthClientSecretModel,
     },
     permissions::Permission,
     schema::{
-        access_groups, api_key, api_user, api_user_access_token, api_user_provider, link_request,
-        login_attempt, magic_link_attempt, magic_link_client, magic_link_client_redirect_uri,
-        magic_link_client_secret, mapper, oauth_client, oauth_client_redirect_uri,
-        oauth_client_secret,
+        access_groups, api_key, api_user, api_user_access_token, api_user_contact_email,
+        api_user_provider, link_request, login_attempt, magic_link_attempt, magic_link_client,
+        magic_link_client_redirect_uri, magic_link_client_secret, mapper, oauth_client,
+        oauth_client_redirect_uri, oauth_client_secret,
     },
     schema_ext::MagicLinkAttemptState,
     storage::{LinkRequestFilter, LinkRequestStore, StoreError},
-    AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUser, ApiUserInfo,
-    ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt, LoginAttemptId, MagicLink,
-    MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri,
-    MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, Mapper, MapperId, NewAccessGroup,
-    NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, NewLinkRequest, NewLoginAttempt,
-    NewMagicLink, NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper,
-    NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
-    OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId, UserId,
-    UserProviderId,
+    AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUser,
+    ApiUserContactEmail, ApiUserInfo, ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt,
+    LoginAttemptId, MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId,
+    MagicLinkRedirectUri, MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, Mapper,
+    MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser, NewApiUserContactEmail,
+    NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMagicLink, NewMagicLinkAttempt,
+    NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, NewOAuthClient,
+    NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
+    OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId,
+    UserContactEmailId, UserId, UserProviderId,
 };
 
 use super::{
     AccessGroupFilter, AccessGroupStore, AccessTokenFilter, AccessTokenStore, ApiKeyFilter,
-    ApiKeyStore, ApiUserFilter, ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore,
-    ListPagination, LoginAttemptFilter, LoginAttemptStore, MagicLinkAttemptFilter,
-    MagicLinkAttemptStore, MagicLinkFilter, MagicLinkRedirectUriStore, MagicLinkSecretStore,
-    MagicLinkStore, MapperFilter, MapperStore, OAuthClientFilter, OAuthClientRedirectUriStore,
-    OAuthClientSecretStore, OAuthClientStore,
+    ApiKeyStore, ApiUserContactEmailFilter, ApiUserContactEmailStore, ApiUserFilter,
+    ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, ListPagination, LoginAttemptFilter,
+    LoginAttemptStore, MagicLinkAttemptFilter, MagicLinkAttemptStore, MagicLinkFilter,
+    MagicLinkRedirectUriStore, MagicLinkSecretStore, MagicLinkStore, MapperFilter, MapperStore,
+    OAuthClientFilter, OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore,
 };
 
 pub type DbPool = Pool<ConnectionManager<PgConnection>>;
@@ -114,8 +115,9 @@ where
     ) -> Result<Vec<ApiUserInfo<T>>, StoreError> {
         tracing::trace!("Lookup api users");
 
-        let mut query = api_user::dsl::api_user
-            .left_join(api_user_provider::dsl::api_user_provider)
+        let mut query = api_user::table
+            .left_join(api_user_provider::table)
+            .left_join(api_user_contact_email::table)
             .into_boxed();
 
         let ApiUserFilter {
@@ -153,24 +155,43 @@ where
             .offset(pagination.offset)
             .limit(pagination.limit)
             .order(api_user::created_at.asc())
-            .get_results_async::<(ApiUserModel<T>, Option<ApiUserProviderModel>)>(
-                &*self.pool.get().await?,
-            )
+            .get_results_async::<(
+                ApiUserModel<T>,
+                Option<ApiUserProviderModel>,
+                Option<ApiUserContactEmailModel>,
+            )>(&*self.pool.get().await?)
             .await?;
 
         let users = results
             .into_iter()
-            .fold(BTreeMap::new(), |mut acc, (user, provider)| {
-                let (_, providers): &mut (ApiUser<T>, Vec<ApiUserProvider>) =
-                    acc.entry(user.id).or_insert_with(|| (user.into(), vec![]));
-                if let Some(provider) = provider {
-                    providers.push(provider.into());
-                }
+            .fold(
+                BTreeMap::new(),
+                |mut acc, (user, provider, contact_email)| {
+                    let (_, providers, _): &mut (
+                        ApiUser<T>,
+                        Vec<ApiUserProvider>,
+                        Option<ApiUserContactEmail>,
+                    ) = acc.entry(user.id).or_insert_with(|| {
+                        (
+                            user.into(),
+                            vec![],
+                            contact_email.map(|contact| contact.into()),
+                        )
+                    });
 
-                acc
-            })
+                    if let Some(provider) = provider {
+                        providers.push(provider.into());
+                    }
+
+                    acc
+                },
+            )
             .into_values()
-            .map(|(user, providers)| ApiUserInfo { user, providers })
+            .map(|(user, providers, email)| ApiUserInfo {
+                user,
+                email,
+                providers,
+            })
             .collect::<Vec<_>>();
 
         tracing::trace!(count = ?users.len(), "Found api users");
@@ -319,6 +340,109 @@ where
             .await?;
 
         ApiKeyStore::get(self, id, true).await
+    }
+}
+
+#[async_trait]
+impl ApiUserContactEmailStore for PostgresStore {
+    async fn get(
+        &self,
+        id: &TypedUuid<UserContactEmailId>,
+        deleted: bool,
+    ) -> Result<Option<ApiUserContactEmail>, StoreError> {
+        let user = ApiUserContactEmailStore::list(
+            self,
+            ApiUserContactEmailFilter {
+                id: Some(vec![*id]),
+                api_user_id: None,
+                deleted,
+            },
+            &ListPagination::default().limit(1),
+        )
+        .await?;
+        Ok(user.into_iter().nth(0))
+    }
+
+    async fn list(
+        &self,
+        filter: ApiUserContactEmailFilter,
+        pagination: &ListPagination,
+    ) -> Result<Vec<ApiUserContactEmail>, StoreError> {
+        tracing::trace!("Lookup email contacts");
+
+        let mut query = api_user_contact_email::table.into_boxed();
+
+        let ApiUserContactEmailFilter {
+            id,
+            api_user_id,
+            deleted,
+        } = filter;
+
+        if let Some(id) = id {
+            query = query.filter(
+                api_user_contact_email::id
+                    .eq_any(id.into_iter().map(|provider| provider.into_untyped_uuid())),
+            );
+        }
+
+        if let Some(api_user_id) = api_user_id {
+            query = query.filter(
+                api_user_contact_email::api_user_id
+                    .eq_any(api_user_id.into_iter().map(|user| user.into_untyped_uuid())),
+            );
+        }
+
+        if !deleted {
+            query = query.filter(api_user_contact_email::deleted_at.is_null());
+        }
+
+        let results = query
+            .offset(pagination.offset)
+            .limit(pagination.limit)
+            .order(api_user_contact_email::created_at.desc())
+            .get_results_async::<ApiUserContactEmailModel>(&*self.pool.get().await?)
+            .await?;
+
+        tracing::trace!(count = ?results.len(), "Found email contacts");
+
+        Ok(results
+            .into_iter()
+            .map(|provider| provider.into())
+            .collect())
+    }
+
+    async fn upsert(
+        &self,
+        new_contact_email: NewApiUserContactEmail,
+    ) -> Result<ApiUserContactEmail, StoreError> {
+        let contact_email_model: ApiUserContactEmailModel =
+            insert_into(api_user_contact_email::table)
+                .values((
+                    api_user_contact_email::id.eq(new_contact_email.id.into_untyped_uuid()),
+                    api_user_contact_email::api_user_id
+                        .eq(new_contact_email.user_id.into_untyped_uuid()),
+                    api_user_contact_email::email.eq(new_contact_email.email),
+                ))
+                .on_conflict(api_user_contact_email::id)
+                .do_update()
+                .set((api_user_contact_email::email.eq(excluded(api_user_contact_email::email)),))
+                .get_result_async(&*self.pool.get().await?)
+                .await?;
+
+        Ok(contact_email_model.into())
+    }
+
+    async fn delete(
+        &self,
+        id: &TypedUuid<UserContactEmailId>,
+    ) -> Result<Option<ApiUserContactEmail>, StoreError> {
+        let _ = update(api_user_contact_email::table)
+            .filter(api_user_contact_email::id.eq(id.into_untyped_uuid()))
+            .set(api_user_contact_email::deleted_at.eq(Utc::now()))
+            .execute_async(&*self.pool.get().await?)
+            .await?;
+
+        ApiUserContactEmailStore::get(self, id, true).await
     }
 }
 

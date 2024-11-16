@@ -58,6 +58,17 @@ diesel::table! {
 }
 
 diesel::table! {
+    api_user_contact_email (id) {
+        id -> Uuid,
+        api_user_id -> Uuid,
+        email -> Varchar,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+        deleted_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
     api_user_provider (id) {
         id -> Uuid,
         api_user_id -> Uuid,
@@ -166,6 +177,7 @@ diesel::table! {
         max_activations -> Nullable<Int4>,
         depleted_at -> Nullable<Timestamptz>,
         created_at -> Timestamptz,
+        updated_at -> Timestamptz,
         deleted_at -> Nullable<Timestamptz>,
     }
 }
@@ -200,6 +212,7 @@ diesel::table! {
 
 diesel::joinable!(api_key -> api_user (api_user_id));
 diesel::joinable!(api_user_access_token -> api_user (api_user_id));
+diesel::joinable!(api_user_contact_email -> api_user (api_user_id));
 diesel::joinable!(api_user_provider -> api_user (api_user_id));
 diesel::joinable!(magic_link_attempt -> magic_link_client (magic_link_client_id));
 diesel::joinable!(magic_link_client_redirect_uri -> magic_link_client (magic_link_client_id));
@@ -212,6 +225,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     api_key,
     api_user,
     api_user_access_token,
+    api_user_contact_email,
     api_user_provider,
     link_request,
     login_attempt,

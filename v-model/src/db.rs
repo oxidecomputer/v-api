@@ -11,13 +11,26 @@ use uuid::Uuid;
 use crate::{
     permissions::Permissions,
     schema::{
-        access_groups, api_key, api_user, api_user_access_token, api_user_provider, link_request,
-        login_attempt, magic_link_attempt, magic_link_client, magic_link_client_redirect_uri,
-        magic_link_client_secret, mapper, oauth_client, oauth_client_redirect_uri,
-        oauth_client_secret,
+        access_groups, api_key, api_user, api_user_access_token, api_user_contact_email,
+        api_user_provider, link_request, login_attempt, magic_link_attempt, magic_link_client,
+        magic_link_client_redirect_uri, magic_link_client_secret, mapper, oauth_client,
+        oauth_client_redirect_uri, oauth_client_secret,
     },
     schema_ext::{LoginAttemptState, MagicLinkAttemptState},
 };
+
+#[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
+#[diesel(table_name = api_key)]
+pub struct ApiKeyModel<T> {
+    pub id: Uuid,
+    pub api_user_id: Uuid,
+    pub key_signature: String,
+    pub permissions: Option<Permissions<T>>,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
+}
 
 #[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
 #[diesel(table_name = api_user)]
@@ -31,13 +44,21 @@ pub struct ApiUserModel<T> {
 }
 
 #[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
-#[diesel(table_name = api_key)]
-pub struct ApiKeyModel<T> {
+#[diesel(table_name = api_user_access_token)]
+pub struct ApiUserAccessTokenModel {
     pub id: Uuid,
     pub api_user_id: Uuid,
-    pub key_signature: String,
-    pub permissions: Option<Permissions<T>>,
-    pub expires_at: DateTime<Utc>,
+    pub revoked_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
+#[diesel(table_name = api_user_contact_email)]
+pub struct ApiUserContactEmailModel {
+    pub id: Uuid,
+    pub api_user_id: Uuid,
+    pub email: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
@@ -55,16 +76,6 @@ pub struct ApiUserProviderModel {
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
     pub display_names: Vec<Option<String>>,
-}
-
-#[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
-#[diesel(table_name = api_user_access_token)]
-pub struct ApiUserAccessTokenModel {
-    pub id: Uuid,
-    pub api_user_id: Uuid,
-    pub revoked_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
@@ -184,6 +195,7 @@ pub struct MapperModel {
     pub max_activations: Option<i32>,
     pub depleted_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }
 

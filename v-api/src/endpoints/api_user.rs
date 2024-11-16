@@ -601,6 +601,7 @@ mod tests {
                         updated_at: Utc::now(),
                         deleted_at: None,
                     },
+                    email: None,
                     providers: vec![],
                 })
             });
@@ -694,6 +695,7 @@ mod tests {
                         updated_at: Utc::now(),
                         deleted_at: None,
                     },
+                    email: None,
                     providers: vec![],
                 })
             });
@@ -940,6 +942,7 @@ mod tests {
             .returning(move |_, _| {
                 Ok(Some(ApiUserInfo {
                     user: api_user.clone(),
+                    email: None,
                     providers: vec![],
                 }))
             });

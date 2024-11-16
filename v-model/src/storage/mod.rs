@@ -16,15 +16,15 @@ use uuid::Uuid;
 
 use crate::{
     schema_ext::{LoginAttemptState, MagicLinkAttemptState},
-    AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserInfo,
-    ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt, LoginAttemptId, MagicLink,
-    MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri,
+    AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail,
+    ApiUserInfo, ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt, LoginAttemptId,
+    MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri,
     MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, Mapper, MapperId, NewAccessGroup,
-    NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, NewLinkRequest, NewLoginAttempt,
-    NewMagicLink, NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper,
-    NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
-    OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId, UserId,
-    UserProviderId,
+    NewAccessToken, NewApiKey, NewApiUser, NewApiUserContactEmail, NewApiUserProvider,
+    NewLinkRequest, NewLoginAttempt, NewMagicLink, NewMagicLinkAttempt, NewMagicLinkRedirectUri,
+    NewMagicLinkSecret, NewMapper, NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret,
+    OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId,
+    OAuthSecretId, UserContactEmailId, UserId, UserProviderId,
 };
 
 pub mod postgres;
@@ -127,6 +127,36 @@ pub trait ApiKeyStore<T: Send + Sync> {
     ) -> Result<Vec<ApiKey<T>>, StoreError>;
     async fn upsert(&self, token: NewApiKey<T>) -> Result<ApiKey<T>, StoreError>;
     async fn delete(&self, id: &TypedUuid<ApiKeyId>) -> Result<Option<ApiKey<T>>, StoreError>;
+}
+
+#[derive(Debug, Default)]
+pub struct ApiUserContactEmailFilter {
+    pub id: Option<Vec<TypedUuid<UserContactEmailId>>>,
+    pub api_user_id: Option<Vec<TypedUuid<UserId>>>,
+    pub deleted: bool,
+}
+
+#[cfg_attr(feature = "mock", automock)]
+#[async_trait]
+pub trait ApiUserContactEmailStore {
+    async fn get(
+        &self,
+        id: &TypedUuid<UserContactEmailId>,
+        deleted: bool,
+    ) -> Result<Option<ApiUserContactEmail>, StoreError>;
+    async fn list(
+        &self,
+        filter: ApiUserContactEmailFilter,
+        pagination: &ListPagination,
+    ) -> Result<Vec<ApiUserContactEmail>, StoreError>;
+    async fn upsert(
+        &self,
+        new_contact_email: NewApiUserContactEmail,
+    ) -> Result<ApiUserContactEmail, StoreError>;
+    async fn delete(
+        &self,
+        id: &TypedUuid<UserContactEmailId>,
+    ) -> Result<Option<ApiUserContactEmail>, StoreError>;
 }
 
 #[derive(Debug, Default)]
