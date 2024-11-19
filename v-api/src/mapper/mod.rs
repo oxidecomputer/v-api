@@ -35,11 +35,14 @@ pub mod email_domain;
 pub mod github_username;
 
 #[async_trait]
+/// Mapping rules that determine permissions and groups for users
 pub trait MapperRule<T>: Send + Sync
 where
     T: VAppPermission,
 {
+    /// Determines the permissions for a given user.
     async fn permissions_for(&self, user: &UserInfo) -> Result<Permissions<T>, StoreError>;
+    /// Determines the access groups for a given user.
     async fn groups_for(
         &self,
         user: &UserInfo,
@@ -54,11 +57,15 @@ pub enum MappingEngineError {
     Other(Box<dyn StdError + Send + Sync + 'static>),
 }
 
+/// Interface for generating mapping rules from mapper configurations
 pub trait MappingEngine<T>: Send + Sync + 'static {
+    /// Creates a new mapping rule from a Mapper configuration
     fn create_mapping(&self, value: Mapper) -> Result<Box<dyn MapperRule<T>>, MappingEngineError>;
+    /// Validates whether the provided data represents a known mapping rule
     fn validate_mapping_data(&self, value: &Value) -> bool;
 }
 
+/// Default implementation of the MappingEngine trait
 pub struct DefaultMappingEngine<T> {
     caller: Caller<T>,
     group: GroupContext<T>,
@@ -73,12 +80,14 @@ where
     }
 }
 
+/// The default mapping rule configurations that are supported by the default mapping engine
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "rule", rename_all = "snake_case")]
 pub enum MappingRulesData<T> {
     Default(DefaultMapperData<T>),
     EmailAddress(EmailAddressMapperData<T>),
     EmailDomain(EmailDomainMapperData<T>),
+    #[serde(rename = "github_username")]
     GitHubUsername(GitHubUsernameMapperData<T>),
 }
 

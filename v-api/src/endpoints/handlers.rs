@@ -302,7 +302,7 @@ mod macros {
 
             // DEVICE CODE
 
-            // Get the metadata about an OAuth provider necessary to begin a device code exchange
+            /// Retrieve the metadata about an OAuth provider
             #[endpoint {
                 method = GET,
                 path = "/login/oauth/{provider}/device"
@@ -314,6 +314,7 @@ mod macros {
                 get_device_provider_op(&rqctx, path).await
             }
 
+            /// Exchange an OAuth device code request for an access token
             #[endpoint {
                 method = POST,
                 path = "/login/oauth/{provider}/device/exchange",
@@ -327,8 +328,9 @@ mod macros {
                 exchange_device_token_op(&rqctx, path, body).await
             }
 
-            // MAGIC LINK 
+            // MAGIC LINK
 
+            /// Send a new magic link authentication link
             #[endpoint {
                 method = POST,
                 path = "/login/magic/{channel}/send"
@@ -341,6 +343,7 @@ mod macros {
               magic_link_send_op(&rqctx, path, body).await
             }
 
+            /// Exchange a magic link access code for an access token
             #[endpoint {
                 method = POST,
                 path = "/login/magic/{channel}/exchange"
@@ -392,7 +395,7 @@ mod macros {
 
             // API USER
 
-            /// Retrieve the user information of the calling user
+            /// View details for the calling user
             #[endpoint {
                 method = GET,
                 path = "/self",
@@ -403,7 +406,7 @@ mod macros {
                 get_self_op(&rqctx).await
             }
 
-            /// Get user information for a given user id
+            /// View details for a user
             #[endpoint {
                 method = GET,
                 path = "/api-user/{user_id}",
@@ -415,7 +418,7 @@ mod macros {
                 get_api_user_op(&rqctx, path).await
             }
 
-            /// Create a new user with a given set of permissions
+            /// Create a new user
             #[endpoint {
                 method = POST,
                 path = "/api-user",
@@ -440,7 +443,7 @@ mod macros {
                 update_api_user_op(&rqctx, path.into_inner(), body.into_inner()).await
             }
 
-            /// List the active and expired API tokens for a given user
+            /// List api keys for a user
             #[endpoint {
                 method = GET,
                 path = "/api-user/{user_id}/token",
@@ -452,8 +455,7 @@ mod macros {
                 list_api_user_tokens_op(&rqctx, path.into_inner()).await
             }
 
-            // Create a new API token for a given user with a specific set of permissions and expiration. This
-            // is the only time that the returned token will be accessible
+            /// Create a new api key for a user
             #[endpoint {
                 method = POST,
                 path = "/api-user/{user_id}/token",
@@ -466,7 +468,7 @@ mod macros {
                 create_api_user_token_op(&rqctx, path.into_inner(), body.into_inner()).await
             }
 
-            // Get details for a specific API token
+            /// View details of an api key for a user
             #[endpoint {
                 method = GET,
                 path = "/api-user/{user_id}/token/{api_key_id}",
@@ -478,7 +480,7 @@ mod macros {
                 get_api_user_token_op(&rqctx, path.into_inner()).await
             }
 
-            // Revoke a specific API token so it can no longer be used
+            /// Revoke an api key for a user
             #[endpoint {
                 method = DELETE,
                 path = "/api-user/{user_id}/token/{api_key_id}",
@@ -490,6 +492,7 @@ mod macros {
                 delete_api_user_token_op(&rqctx, path.into_inner()).await
             }
 
+            /// Add a user to a group
             #[endpoint {
                 method = POST,
                 path = "/api-user/{user_id}/group",
@@ -502,6 +505,7 @@ mod macros {
                 add_api_user_to_group_op(&rqctx, path.into_inner(), body.into_inner()).await
             }
 
+            /// Remove a user from a group
             #[endpoint {
                 method = DELETE,
                 path = "/api-user/{user_id}/group/{group_id}",
@@ -528,6 +532,7 @@ mod macros {
 
             // GROUPS
 
+            /// List all groups
             #[endpoint {
                 method = GET,
                 path = "/group",
@@ -538,6 +543,7 @@ mod macros {
                 get_groups_op(&rqctx).await
             }
 
+            /// Create a group
             #[endpoint {
                 method = POST,
                 path = "/group",
@@ -549,6 +555,7 @@ mod macros {
                 create_group_op(&rqctx, body.into_inner()).await
             }
 
+            /// Update a group
             #[endpoint {
                 method = PUT,
                 path = "/group/{group_id}",
@@ -561,6 +568,7 @@ mod macros {
                 update_group_op(&rqctx, path.into_inner(), body.into_inner()).await
             }
 
+            /// Delete a group
             #[endpoint {
                 method = DELETE,
                 path = "/group/{group_id}",
@@ -574,6 +582,7 @@ mod macros {
 
             // MAPPERS
 
+            /// List all mappers
             #[endpoint {
                 method = GET,
                 path = "/mapper",
@@ -585,6 +594,7 @@ mod macros {
                 get_mappers_op(&rqctx, query.into_inner()).await
             }
 
+            /// Create a mapper
             #[endpoint {
                 method = POST,
                 path = "/mapper",
@@ -596,6 +606,7 @@ mod macros {
                 create_mapper_op(&rqctx, body.into_inner()).await
             }
 
+            /// Delete a mapper
             #[endpoint {
                 method = DELETE,
                 path = "/mapper/{mapper_id}",
@@ -611,6 +622,7 @@ mod macros {
             use v_api::endpoints::login::local::{local_login_op, LocalLogin};
 
             #[cfg(feature = "local-dev")]
+            /// Login as a local development user
             #[endpoint {
                 method = POST,
                 path = "/login/local"
