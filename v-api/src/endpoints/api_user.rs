@@ -19,7 +19,8 @@ use uuid::Uuid;
 use v_model::{
     permissions::{Caller, Permission, PermissionStorage, Permissions},
     storage::{ApiUserProviderFilter, ListPagination},
-    AccessGroupId, ApiKeyId, ApiUser, ApiUserProvider, NewApiKey, NewApiUser, UserId,
+    AccessGroupId, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserProvider, NewApiKey, NewApiUser,
+    UserId,
 };
 
 use crate::{
@@ -243,6 +244,46 @@ where
             })
             .collect(),
     ))
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ApiUserEmailUpdateParams {
+    email: String,
+}
+
+#[instrument(skip(rqctx, body), err(Debug))]
+pub async fn set_api_user_contact_email_op<T>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+    path: ApiUserPath,
+    body: ApiUserEmailUpdateParams,
+) -> Result<HttpResponseOk<ApiUserContactEmail>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+{
+    let (ctx, caller) = rqctx.as_ctx().await?;
+    set_api_user_contact_email_inner(ctx, caller, path, body).await
+}
+
+#[instrument(skip(ctx, body))]
+pub async fn set_api_user_contact_email_inner<T>(
+    ctx: &VContext<T>,
+    caller: Caller<T>,
+    path: ApiUserPath,
+    body: ApiUserEmailUpdateParams,
+) -> Result<HttpResponseOk<ApiUserContactEmail>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+{
+    tracing::info!("Setting contact email for user");
+
+    let email = ctx
+        .user
+        .set_api_user_contact_email(&caller, path.user_id, &body.email)
+        .await?;
+
+    tracing::info!("Set contact email for user");
+
+    Ok(HttpResponseOk(email))
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
