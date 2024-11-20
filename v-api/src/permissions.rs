@@ -20,7 +20,5 @@ impl<T> VAppPermissionResponse for T where T: Permission {}
 
 #[v_api(From(VPermission))]
 #[partial(VPermissionResponse, attributes(#[serde(tag = "kind", content = "value")]))]
-#[derive(
-    Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub enum VPermission {}
