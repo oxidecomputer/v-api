@@ -325,7 +325,7 @@ pub fn v_api(attr: TokenStream, input: TokenStream) -> TokenStream {
 
     // TODO: Inspect existing derive and add only the missing derive attributes
     // #[derive(
-    //     Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema, PartialOrd, Ord,
+    //     Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
     // )]
 
     quote! {
@@ -441,7 +441,7 @@ fn from_system_permission_tokens(
                         VPermission::ManageMagicLinkClientsAll => Self::ManageMagicLinkClientsAll,
 
                         VPermission::CreateAccessToken => Self::CreateAccessToken,
-                        VPermission::Removed => Self::Removed,
+                        VPermission::Unsupported(inner) => Self::Unsupported(inner),
                     }
                 }
             }

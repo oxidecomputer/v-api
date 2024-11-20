@@ -10,7 +10,7 @@ use v_api_permission_derive::v_api;
 
 #[v_api(From(VPermission))]
 #[derive(
-    Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, JsonSchema,
+    Debug, Clone, Hash, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
 )]
 enum Permissions {
     None,

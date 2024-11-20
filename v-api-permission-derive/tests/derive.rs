@@ -25,8 +25,6 @@ fn test_derive() {
         serde::Serialize,
         serde::Deserialize,
         schemars::JsonSchema,
-        PartialOrd,
-        Ord,
     )]
     enum AppPermissions {
         #[v_api(contract(kind = append, variant = CreateItems))]

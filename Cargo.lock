@@ -2847,6 +2847,7 @@ dependencies = [
  "quote",
  "schemars",
  "serde",
+ "serde_json",
  "syn",
  "uuid",
  "v-api",
