@@ -722,7 +722,7 @@ fn system_permission_tokens() -> TokenStream {
             CreateAccessToken,
 
             #[serde(untagged)]
-            Removed(serde_json::Value),
+            Unsupported(serde_json::Value),
         }
     }
     .into()
