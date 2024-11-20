@@ -416,7 +416,7 @@ where
                 Ok((user, user_provider))
             }
             1 => {
-                tracing::info!("Found an existing user. Ensuring mapped permissions and groups.");
+                tracing::info!("Found an existing user provider. Ensuring mapped permissions and groups for user.");
 
                 // This branch ensures that there is a 0th indexed item
                 let mut provider = api_user_providers.into_iter().nth(0).unwrap();
@@ -428,11 +428,14 @@ where
 
                 tracing::info!(?provider.id, "Updating provider for user");
 
-                self.user
+                let provider = self
+                    .user
                     .update_api_user_provider(caller, provider.clone().into())
                     .await
                     .map_err(|err| err.into())
                     .to_resource_result()?;
+
+                tracing::info!(?provider.id, ?provider.user_id, "Updating found user permissions and groups");
 
                 // Update the found user to ensure it has at least the mapped permissions and groups
                 let user = self
@@ -441,18 +444,23 @@ where
                     .await
                     .map_err(|err| ApiError::from(err))
                     .to_resource_result()?;
+
+                tracing::info!(?user.user.id, "Updating found user permissions and groups");
+
                 let mut update: NewApiUser<T> = user.user.into();
                 update.permissions.append(&mut mapped_permissions);
                 update.groups.append(&mut mapped_groups);
 
-                Ok((
-                    self.user
-                        .update_api_user(caller, update)
-                        .await
-                        .map_err(|err| ApiError::from(err))
-                        .to_resource_result()?,
-                    provider,
-                ))
+                let updated_user = self
+                    .user
+                    .update_api_user(caller, update)
+                    .await
+                    .map_err(|err| ApiError::from(err))
+                    .to_resource_result()?;
+
+                tracing::info!(?updated_user.user.id, "Updated user permissions and groups");
+
+                Ok((updated_user, provider))
             }
             _ => {
                 // If we found more than one provider, then we have encountered an inconsistency in
