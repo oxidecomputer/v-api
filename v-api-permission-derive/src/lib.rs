@@ -721,8 +721,8 @@ fn system_permission_tokens() -> TokenStream {
 
             CreateAccessToken,
 
-            #[serde(other)]
-            Removed,
+            #[serde(untagged)]
+            Removed(serde_json::Value),
         }
     }
     .into()
