@@ -587,15 +587,16 @@ mod tests {
     use v_model::{
         permissions::{Caller, Permissions},
         storage::{ApiKeyFilter, ListPagination, MockApiKeyStore, MockApiUserStore, StoreError},
-        ApiKey, ApiUser, ApiUserInfo, NewApiUser,
+        ApiKey, ApiUser, ApiUserInfo, ApiUserProvider, NewApiUser,
     };
 
     use crate::{
         context::test_mocks::{mock_context, MockStorage},
         endpoints::api_user::{
             create_api_user_inner, create_api_user_token_inner, delete_api_user_token_inner,
-            get_api_user_token_inner, list_api_user_tokens_inner, update_api_user_inner,
-            ApiKeyCreateParams, ApiUserPath, ApiUserTokenPath,
+            get_api_user_token_inner, list_api_user_tokens_inner, set_api_user_contact_email_inner,
+            update_api_user_inner, ApiKeyCreateParams, ApiUserEmailUpdateParams, ApiUserPath,
+            ApiUserTokenPath,
         },
         permissions::{VPermission, VPermissionResponse},
         util::tests::get_status,
@@ -1433,5 +1434,160 @@ mod tests {
 
         assert!(resp.is_err());
         assert_eq!(get_status(&resp), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn test_set_api_user_contact_email() {
+        let user = mock_user();
+
+        let mut store = MockApiUserStore::new();
+        let get_user = user.clone();
+        store.expect_get().returning(move |_id, _deleted| {
+            Ok(Some(ApiUserInfo {
+                user: ApiUser {
+                    id: get_user.id,
+                    permissions: get_user.permissions.clone(),
+                    groups: BTreeSet::default(),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    deleted_at: None,
+                },
+                email: None,
+                providers: vec![ApiUserProvider {
+                    id: TypedUuid::default(),
+                    user_id: get_user.id,
+                    provider: "custom".to_string(),
+                    provider_id: "123".to_string(),
+                    emails: vec!["user@company".to_string()],
+                    display_names: vec![],
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    deleted_at: None,
+                }],
+            }))
+        });
+
+        let mut storage = MockStorage::new();
+        storage.api_user_store = Some(Arc::new(store));
+
+        let ctx = mock_context(Arc::new(storage)).await;
+
+        // 1. Fail to update due to no access
+        let no_permissions = Caller {
+            id: user.id,
+            permissions: Permissions::new(),
+            extensions: HashMap::default(),
+        };
+        let resp = set_api_user_contact_email_inner(
+            &ctx,
+            no_permissions,
+            ApiUserPath { user_id: user.id },
+            ApiUserEmailUpdateParams {
+                email: "user-update@company".to_string(),
+            },
+        )
+        .await;
+
+        assert!(resp.is_err());
+        assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
+
+        // 2. Fail due to lack of write permission
+        let no_write_permissions = Caller {
+            id: user.id,
+            permissions: vec![VPermission::ManageApiUser(user.id)].into(),
+            extensions: HashMap::default(),
+        };
+        let resp = set_api_user_contact_email_inner(
+            &ctx,
+            no_write_permissions,
+            ApiUserPath { user_id: user.id },
+            ApiUserEmailUpdateParams {
+                email: "user-update@company".to_string(),
+            },
+        )
+        .await;
+
+        assert!(resp.is_err());
+        assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
+
+        // store
+        //     .expect_upsert()
+        //     .withf(|x: &NewApiUser<VPermission>| {
+        //         x.permissions.can(&VPermission::CreateApiUser.into())
+        //     })
+        //     .returning(|user| {
+        //         Ok(ApiUserInfo {
+        //             user: ApiUser {
+        //                 id: user.id,
+        //                 permissions: user.permissions,
+        //                 groups: BTreeSet::new(),
+        //                 created_at: Utc::now(),
+        //                 updated_at: Utc::now(),
+        //                 deleted_at: None,
+        //             },
+        //             email: None,
+        //             providers: vec![],
+        //         })
+        //     });
+        // store
+        //     .expect_upsert()
+        //     .withf(|x: &NewApiUser<VPermission>| {
+        //         x.permissions.can(&VPermission::GetApiUsersAll.into())
+        //     })
+        //     .returning(|_| Err(StoreError::Unknown));
+
+        // let mut storage = MockStorage::new();
+        // storage.api_user_store = Some(Arc::new(store));
+
+        // let ctx = mock_context(Arc::new(storage)).await;
+
+        // let user1 = mock_user();
+
+        // // 1. Fail to create due to lack of permissions
+        // let no_permissions = Caller {
+        //     id: user1.id,
+        //     permissions: Permissions::new(),
+        //     extensions: HashMap::default(),
+        // };
+
+        // let resp = create_api_user_inner::<VPermission, VPermissionResponse>(
+        //     &ctx,
+        //     no_permissions,
+        //     successful_update.clone(),
+        // )
+        // .await;
+
+        // assert!(resp.is_err());
+        // assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
+
+        // let user2 = mock_user();
+
+        // // 2. Succeed in creating new api user
+        // let with_permissions = Caller {
+        //     id: user2.id,
+        //     permissions: vec![VPermission::CreateApiUser].into(),
+        //     extensions: HashMap::default(),
+        // };
+
+        // let resp = create_api_user_inner::<VPermission, VPermissionResponse>(
+        //     &ctx,
+        //     with_permissions.clone(),
+        //     successful_update.clone(),
+        // )
+        // .await;
+
+        // assert!(resp.is_ok());
+        // assert_eq!(get_status(&resp), StatusCode::CREATED);
+
+        // // 3. Handle storage failure and return error
+        // let resp = create_api_user_inner::<VPermission, VPermissionResponse>(
+        //     &ctx,
+        //     with_permissions,
+        //     failure_update.clone(),
+        // )
+        // .await;
+
+        // assert!(resp.is_err());
+        // assert_eq!(get_status(&resp), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }
