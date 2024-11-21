@@ -61,6 +61,7 @@ pub struct Claims {
 impl Claims {
     pub fn new<T>(
         ctx: &VContext<T>,
+        id: Option<TypedUuid<AccessTokenId>>,
         user: &TypedUuid<UserId>,
         provider: &TypedUuid<UserProviderId>,
         scope: Option<Vec<String>>,
@@ -77,7 +78,7 @@ impl Claims {
             scp: scope,
             exp: expires_at.timestamp(),
             nbf: Utc::now().timestamp(),
-            jti: TypedUuid::new_v4(),
+            jti: id.unwrap_or_default(),
         }
     }
 }

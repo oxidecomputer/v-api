@@ -308,7 +308,7 @@ where
     ) -> Claims {
         let expires_at =
             Utc::now() + TimeDelta::try_seconds(self.auth.default_jwt_expiration()).unwrap();
-        Claims::new(self, &api_user, &api_user_provider, scope, expires_at)
+        Claims::new(self, None, &api_user, &api_user_provider, scope, expires_at)
     }
 
     pub fn insert_oauth_provider(
@@ -605,8 +605,11 @@ mod tests {
     use std::{collections::BTreeSet, ops::Add, sync::Arc};
     use v_model::{
         permissions::Permissions,
-        storage::{AccessGroupFilter, ListPagination, MockAccessGroupStore, MockApiUserStore},
-        AccessGroup, ApiUser, ApiUserInfo, ApiUserProvider, UserId,
+        storage::{
+            AccessGroupFilter, ListPagination, MockAccessGroupStore, MockAccessTokenStore,
+            MockApiUserStore,
+        },
+        AccessGroup, AccessToken, AccessTokenId, ApiUser, ApiUserInfo, ApiUserProvider, UserId,
     };
 
     use crate::{
@@ -614,16 +617,18 @@ mod tests {
             jwt::{Claims, Jwt},
             AuthToken,
         },
+        context::user::UserContextError,
         permissions::VPermission,
     };
 
     use super::{
         test_mocks::{mock_context, MockStorage},
-        VContext,
+        VContext, VContextCallerError,
     };
 
     async fn create_token(
         ctx: &VContext<VPermission>,
+        token_id: TypedUuid<AccessTokenId>,
         user_id: TypedUuid<UserId>,
         scope: Vec<String>,
     ) -> AuthToken {
@@ -651,6 +656,7 @@ mod tests {
         let user_token = ctx
             .sign_jwt(&Claims::new(
                 ctx,
+                Some(token_id),
                 &user.id,
                 &provider.id,
                 Some(scope),
@@ -668,6 +674,7 @@ mod tests {
     async fn test_jwt_permissions() {
         let mut storage = MockStorage::new();
 
+        // Initialize a test environment with a user belonging to a group
         let group_id = TypedUuid::new_v4();
         let group_permissions: Permissions<VPermission> = vec![VPermission::CreateGroup].into();
         let group = AccessGroup {
@@ -713,19 +720,48 @@ mod tests {
             .with(eq(user.user.id), eq(false))
             .returning(move |_, _| Ok(Some(user.clone())));
 
+        let mut token_store = MockAccessTokenStore::new();
+        let valid_token_id = TypedUuid::new_v4();
+        token_store
+            .expect_get()
+            .with(eq(valid_token_id), eq(false))
+            .returning(move |_, _| {
+                Ok(Some(AccessToken {
+                    id: valid_token_id,
+                    user_id: user_id,
+                    revoked_at: None,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                }))
+            });
+        let invalid_token_id = TypedUuid::new_v4();
+        token_store
+            .expect_get()
+            .with(eq(invalid_token_id), eq(false))
+            .returning(move |_, _| Ok(None));
+
         storage.access_group_store = Some(Arc::new(group_store));
         storage.api_user_store = Some(Arc::new(user_store));
+        storage.access_token_store = Some(Arc::new(token_store));
+
         let ctx = mock_context(Arc::new(storage)).await;
 
-        let token_with_no_scope = create_token(&ctx, user_id, vec![]).await;
+        // Construct a new token for test for the user without any scopes
+        let token_with_no_scope = create_token(&ctx, valid_token_id, user_id, vec![]).await;
+
+        // Verify the token
         let permissions = ctx
             .get_caller_from_token(Some(&token_with_no_scope))
             .await
             .unwrap();
+
+        // Ensure the verified token has no permissions
         assert_eq!(Permissions::<VPermission>::new(), permissions.permissions);
 
+        // Construct a new token for test for the user with scopes
         let token_with_read_user_info = create_token(
             &ctx,
+            valid_token_id,
             user_id,
             vec![
                 "group:info:w".to_string(),
@@ -734,10 +770,16 @@ mod tests {
             ],
         )
         .await;
+
+        // Verify the token
         let permissions = ctx
             .get_caller_from_token(Some(&token_with_read_user_info))
             .await
             .unwrap();
+
+        // Ensure the verified token has permission matching the intersection of the scopes
+        // and the users permissions. Notably the user does not have any user permissions
+        // and therefore the user:info:r scope confers no permissions
         assert_eq!(
             Permissions::<VPermission>::from(vec![
                 VPermission::CreateGroup,
@@ -745,6 +787,32 @@ mod tests {
             ]),
             permissions.permissions
         );
+
+        // Construct a new token for test for the user that has been revoked
+        let missing_token = create_token(
+            &ctx,
+            invalid_token_id,
+            user_id,
+            vec![
+                "group:info:w".to_string(),
+                "mapper:r".to_string(),
+                "user:info:r".to_string(),
+            ],
+        )
+        .await;
+
+        // Verify the token
+        let verification = ctx.get_caller_from_token(Some(&missing_token)).await;
+
+        // The token verification should have failed at this point
+        assert!(verification.is_err());
+        match verification.unwrap_err() {
+            VContextCallerError::Caller(UserContextError::InvalidToken) => (),
+            other => panic!(
+                "Exected to receive UserContextError::InvalidToken error. Instead found {:?}",
+                other
+            ),
+        }
     }
 }
 
@@ -826,7 +894,7 @@ pub(crate) mod test_mocks {
         pub api_user_store: Option<Arc<MockApiUserStore<VPermission>>>,
         pub api_user_token_store: Option<Arc<MockApiKeyStore<VPermission>>>,
         pub api_user_provider_store: Option<Arc<MockApiUserProviderStore>>,
-        pub device_token_store: Option<Arc<MockAccessTokenStore>>,
+        pub access_token_store: Option<Arc<MockAccessTokenStore>>,
         pub login_attempt_store: Option<Arc<MockLoginAttemptStore>>,
         pub oauth_client_store: Option<Arc<MockOAuthClientStore>>,
         pub oauth_client_secret_store: Option<Arc<MockOAuthClientSecretStore>>,
@@ -846,7 +914,7 @@ pub(crate) mod test_mocks {
                 api_user_store: None,
                 api_user_token_store: None,
                 api_user_provider_store: None,
-                device_token_store: None,
+                access_token_store: None,
                 login_attempt_store: None,
                 oauth_client_store: None,
                 oauth_client_secret_store: None,
@@ -1014,7 +1082,7 @@ pub(crate) mod test_mocks {
             id: &TypedUuid<AccessTokenId>,
             revoked: bool,
         ) -> Result<Option<v_model::AccessToken>, v_model::storage::StoreError> {
-            self.device_token_store
+            self.access_token_store
                 .as_ref()
                 .unwrap()
                 .get(id, revoked)
@@ -1026,7 +1094,7 @@ pub(crate) mod test_mocks {
             filter: v_model::storage::AccessTokenFilter,
             pagination: &ListPagination,
         ) -> Result<Vec<v_model::AccessToken>, v_model::storage::StoreError> {
-            self.device_token_store
+            self.access_token_store
                 .as_ref()
                 .unwrap()
                 .list(filter, pagination)
@@ -1037,7 +1105,7 @@ pub(crate) mod test_mocks {
             &self,
             token: NewAccessToken,
         ) -> Result<v_model::AccessToken, v_model::storage::StoreError> {
-            self.device_token_store
+            self.access_token_store
                 .as_ref()
                 .unwrap()
                 .upsert(token)
