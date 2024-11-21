@@ -41,8 +41,8 @@ use crate::{
     mapper::DefaultMappingEngine,
     permissions::{VAppPermission, VPermission},
     util::response::{
-        bad_request, client_error, internal_error, resource_error, resource_restricted,
-        ResourceResult, ToResourceResult, ToResourceResultOpt,
+        client_error, internal_error, resource_error, resource_restricted, ResourceResult,
+        ToResourceResult, ToResourceResultOpt,
     },
 };
 
@@ -195,7 +195,7 @@ impl From<UserContextError> for HttpError {
             UserContextError::InvalidToken => {
                 client_error(StatusCode::UNAUTHORIZED, "Failed to authenticate")
             }
-            UserContextError::Scope(_) => bad_request("Invalid scope"),
+            UserContextError::Scope(_) => client_error(StatusCode::UNAUTHORIZED, "Invalid scope"),
             UserContextError::Storage(_) => internal_error("Internal storage failed"),
         }
     }
