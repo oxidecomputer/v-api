@@ -49,6 +49,8 @@ pub enum UserContextError {
     FailedToAuthenticate,
     #[error("Supplied API key is invalid")]
     InvalidKey,
+    #[error("Supplied API token has an unknown id or has been revoked")]
+    InvalidToken,
     #[error("Invalid scope: {0}")]
     Scope(#[from] PermissionError),
     #[error("Inner storage failure: {0}")]
@@ -251,6 +253,13 @@ where
                     Some(scp) => BasePermissions::Restricted(<T as AsScope>::from_scope(scp.iter())?),
                     None => BasePermissions::Full,
                 };
+
+                // Verify that the access token has not been revoked and is known
+                let token = AccessTokenStore::get(&*self.storage, &jwt.claims.jti, false).await?;
+                if token.is_none() {
+                    Err(UserContextError::InvalidToken)?
+                }
+
                 Ok((jwt.claims.sub, permissions))
             }
         }?)

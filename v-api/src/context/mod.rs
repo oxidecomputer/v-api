@@ -192,6 +192,9 @@ impl From<UserContextError> for HttpError {
             UserContextError::InvalidKey => {
                 client_error(StatusCode::UNAUTHORIZED, "Failed to authenticate")
             }
+            UserContextError::InvalidToken => {
+                client_error(StatusCode::UNAUTHORIZED, "Failed to authenticate")
+            }
             UserContextError::Scope(_) => bad_request("Invalid scope"),
             UserContextError::Storage(_) => internal_error("Internal storage failed"),
         }
