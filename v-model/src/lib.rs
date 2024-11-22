@@ -40,6 +40,10 @@ pub struct ApiUserInfo<T> {
 }
 
 impl<T> ApiUserInfo<T> {
+    pub fn contact_email(&self) -> Option<&str> {
+        self.email.as_ref().map(|email| email.email.as_str())
+    }
+
     pub fn owns_email(&self, email: &str) -> bool {
         self.providers.iter().any(|provider| {
             provider
