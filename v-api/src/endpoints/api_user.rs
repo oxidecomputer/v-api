@@ -591,7 +591,6 @@ mod tests {
             MockApiUserStore, StoreError,
         },
         ApiKey, ApiUser, ApiUserContactEmail, ApiUserInfo, ApiUserProvider, NewApiUser,
-        NewApiUserContactEmail,
     };
 
     use crate::{
