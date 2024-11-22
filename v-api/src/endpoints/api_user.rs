@@ -19,7 +19,8 @@ use uuid::Uuid;
 use v_model::{
     permissions::{Caller, Permission, PermissionStorage, Permissions},
     storage::{ApiUserProviderFilter, ListPagination},
-    AccessGroupId, ApiKeyId, ApiUser, ApiUserProvider, NewApiKey, NewApiUser, UserId,
+    AccessGroupId, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserProvider, NewApiKey, NewApiUser,
+    UserId,
 };
 
 use crate::{
@@ -243,6 +244,46 @@ where
             })
             .collect(),
     ))
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ApiUserEmailUpdateParams {
+    email: String,
+}
+
+#[instrument(skip(rqctx, body), err(Debug))]
+pub async fn set_api_user_contact_email_op<T>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+    path: ApiUserPath,
+    body: ApiUserEmailUpdateParams,
+) -> Result<HttpResponseOk<ApiUserContactEmail>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+{
+    let (ctx, caller) = rqctx.as_ctx().await?;
+    set_api_user_contact_email_inner(ctx, caller, path, body).await
+}
+
+#[instrument(skip(ctx, body))]
+pub async fn set_api_user_contact_email_inner<T>(
+    ctx: &VContext<T>,
+    caller: Caller<T>,
+    path: ApiUserPath,
+    body: ApiUserEmailUpdateParams,
+) -> Result<HttpResponseOk<ApiUserContactEmail>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+{
+    tracing::info!("Setting contact email for user");
+
+    let email = ctx
+        .user
+        .set_api_user_contact_email(&caller, path.user_id, &body.email)
+        .await?;
+
+    tracing::info!("Set contact email for user");
+
+    Ok(HttpResponseOk(email))
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -545,16 +586,20 @@ mod tests {
     use newtype_uuid::TypedUuid;
     use v_model::{
         permissions::{Caller, Permissions},
-        storage::{ApiKeyFilter, ListPagination, MockApiKeyStore, MockApiUserStore, StoreError},
-        ApiKey, ApiUser, ApiUserInfo, NewApiUser,
+        storage::{
+            ApiKeyFilter, ListPagination, MockApiKeyStore, MockApiUserContactEmailStore,
+            MockApiUserStore, StoreError,
+        },
+        ApiKey, ApiUser, ApiUserContactEmail, ApiUserInfo, ApiUserProvider, NewApiUser,
     };
 
     use crate::{
         context::test_mocks::{mock_context, MockStorage},
         endpoints::api_user::{
             create_api_user_inner, create_api_user_token_inner, delete_api_user_token_inner,
-            get_api_user_token_inner, list_api_user_tokens_inner, update_api_user_inner,
-            ApiKeyCreateParams, ApiUserPath, ApiUserTokenPath,
+            get_api_user_token_inner, list_api_user_tokens_inner, set_api_user_contact_email_inner,
+            update_api_user_inner, ApiKeyCreateParams, ApiUserEmailUpdateParams, ApiUserPath,
+            ApiUserTokenPath,
         },
         permissions::{VPermission, VPermissionResponse},
         util::tests::get_status,
@@ -601,6 +646,7 @@ mod tests {
                         updated_at: Utc::now(),
                         deleted_at: None,
                     },
+                    email: None,
                     providers: vec![],
                 })
             });
@@ -694,6 +740,7 @@ mod tests {
                         updated_at: Utc::now(),
                         deleted_at: None,
                     },
+                    email: None,
                     providers: vec![],
                 })
             });
@@ -940,6 +987,7 @@ mod tests {
             .returning(move |_, _| {
                 Ok(Some(ApiUserInfo {
                     user: api_user.clone(),
+                    email: None,
                     providers: vec![],
                 }))
             });
@@ -1389,5 +1437,141 @@ mod tests {
 
         assert!(resp.is_err());
         assert_eq!(get_status(&resp), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn test_set_api_user_contact_email() {
+        let user = mock_user();
+
+        let mut user_store = MockApiUserStore::new();
+        let get_user = user.clone();
+        user_store
+            .expect_get()
+            .with(eq(get_user.id), eq(false))
+            .returning(move |_id, _deleted| {
+                Ok(Some(ApiUserInfo {
+                    user: ApiUser {
+                        id: get_user.id,
+                        permissions: get_user.permissions.clone(),
+                        groups: BTreeSet::default(),
+                        created_at: Utc::now(),
+                        updated_at: Utc::now(),
+                        deleted_at: None,
+                    },
+                    email: None,
+                    providers: vec![ApiUserProvider {
+                        id: TypedUuid::default(),
+                        user_id: get_user.id,
+                        provider: "custom".to_string(),
+                        provider_id: "123".to_string(),
+                        emails: vec!["user@company".to_string()],
+                        display_names: vec![],
+                        created_at: Utc::now(),
+                        updated_at: Utc::now(),
+                        deleted_at: None,
+                    }],
+                }))
+            });
+        let mut email_store = MockApiUserContactEmailStore::new();
+        email_store
+            .expect_upsert()
+            .withf(move |arg| arg.user_id == user.id && arg.email == "user@company".to_string())
+            .returning(|new| {
+                Ok(ApiUserContactEmail {
+                    id: new.id,
+                    user_id: new.user_id,
+                    email: new.email,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    deleted_at: None,
+                })
+            });
+
+        let mut storage = MockStorage::new();
+        storage.api_user_store = Some(Arc::new(user_store));
+        storage.api_user_contact_email_store = Some(Arc::new(email_store));
+
+        let ctx = mock_context(Arc::new(storage)).await;
+
+        // 1. Fail to update due to no access
+        let no_permissions = Caller {
+            id: user.id,
+            permissions: Permissions::new(),
+            extensions: HashMap::default(),
+        };
+        let resp = set_api_user_contact_email_inner(
+            &ctx,
+            no_permissions,
+            ApiUserPath { user_id: user.id },
+            ApiUserEmailUpdateParams {
+                email: "user@company".to_string(),
+            },
+        )
+        .await;
+
+        assert!(resp.is_err());
+        assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
+
+        // 2. Fail due to lack of write permission
+        let no_write_permissions = Caller {
+            id: user.id,
+            permissions: vec![VPermission::GetApiUser(user.id)].into(),
+            extensions: HashMap::default(),
+        };
+        let resp = set_api_user_contact_email_inner(
+            &ctx,
+            no_write_permissions,
+            ApiUserPath { user_id: user.id },
+            ApiUserEmailUpdateParams {
+                email: "user@company".to_string(),
+            },
+        )
+        .await;
+
+        assert!(resp.is_err());
+        assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
+
+        // 4. Fail to update to non-owned email
+        let write_permission = Caller {
+            id: user.id,
+            permissions: vec![VPermission::GetApiUser(user.id)].into(),
+            extensions: HashMap::default(),
+        };
+        let resp = set_api_user_contact_email_inner(
+            &ctx,
+            write_permission,
+            ApiUserPath { user_id: user.id },
+            ApiUserEmailUpdateParams {
+                email: "user-other@company".to_string(),
+            },
+        )
+        .await;
+
+        assert!(resp.is_err());
+        assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
+
+        // 5. Succeed in creating email
+        let write_permission = Caller {
+            id: user.id,
+            permissions: vec![
+                VPermission::GetApiUser(user.id),
+                VPermission::ManageApiUser(user.id),
+            ]
+            .into(),
+            extensions: HashMap::default(),
+        };
+        let resp = set_api_user_contact_email_inner(
+            &ctx,
+            write_permission,
+            ApiUserPath { user_id: user.id },
+            ApiUserEmailUpdateParams {
+                email: "user@company".to_string(),
+            },
+        )
+        .await;
+
+        assert!(resp.is_ok());
+        assert_eq!(get_status(&resp), StatusCode::OK);
+        assert_eq!("user@company".to_string(), resp.unwrap().0.email);
     }
 }

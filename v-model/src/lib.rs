@@ -4,9 +4,9 @@
 
 use chrono::{DateTime, Utc};
 use db::{
-    AccessGroupModel, ApiKeyModel, ApiUserAccessTokenModel, ApiUserModel, ApiUserProviderModel,
-    LinkRequestModel, LoginAttemptModel, MagicLinkAttemptModel, MagicLinkModel,
-    MagicLinkRedirectUriModel, MagicLinkSecretModel, MapperModel, OAuthClientModel,
+    AccessGroupModel, ApiKeyModel, ApiUserAccessTokenModel, ApiUserContactEmailModel, ApiUserModel,
+    ApiUserProviderModel, LinkRequestModel, LoginAttemptModel, MagicLinkAttemptModel,
+    MagicLinkModel, MagicLinkRedirectUriModel, MagicLinkSecretModel, MapperModel, OAuthClientModel,
     OAuthClientRedirectUriModel, OAuthClientSecretModel,
 };
 use newtype_uuid::{GenericUuid, TypedUuid, TypedUuidKind, TypedUuidTag};
@@ -35,7 +35,20 @@ pub use {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ApiUserInfo<T> {
     pub user: ApiUser<T>,
+    pub email: Option<ApiUserContactEmail>,
     pub providers: Vec<ApiUserProvider>,
+}
+
+impl<T> ApiUserInfo<T> {
+    pub fn owns_email(&self, email: &str) -> bool {
+        self.providers.iter().any(|provider| {
+            provider
+                .emails
+                .iter()
+                .map(|s| s.as_str())
+                .any(|s| s == email)
+        })
+    }
 }
 
 #[derive(JsonSchema)]
@@ -71,6 +84,42 @@ impl<T> From<ApiUserModel<T>> for ApiUser<T> {
                 .into_iter()
                 .filter_map(|g| g.map(TypedUuid::from_untyped_uuid))
                 .collect(),
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+            deleted_at: value.deleted_at,
+        }
+    }
+}
+
+#[derive(JsonSchema)]
+pub enum UserContactEmailId {}
+impl TypedUuidKind for UserContactEmailId {
+    fn tag() -> TypedUuidTag {
+        const TAG: TypedUuidTag = TypedUuidTag::new("user-contact-email");
+        TAG
+    }
+}
+
+#[partial(NewApiUserContactEmail)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ApiUserContactEmail {
+    pub id: TypedUuid<UserProviderId>,
+    pub user_id: TypedUuid<UserId>,
+    pub email: String,
+    #[partial(NewApiUserContactEmail(skip))]
+    pub created_at: DateTime<Utc>,
+    #[partial(NewApiUserContactEmail(skip))]
+    pub updated_at: DateTime<Utc>,
+    #[partial(NewApiUserContactEmail(skip))]
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+impl From<ApiUserContactEmailModel> for ApiUserContactEmail {
+    fn from(value: ApiUserContactEmailModel) -> Self {
+        ApiUserContactEmail {
+            id: TypedUuid::from_untyped_uuid(value.id),
+            user_id: TypedUuid::from_untyped_uuid(value.api_user_id),
+            email: value.email,
             created_at: value.created_at,
             updated_at: value.updated_at,
             deleted_at: value.deleted_at,
@@ -654,6 +703,8 @@ pub struct Mapper {
     #[partial(NewMapper(skip))]
     pub created_at: DateTime<Utc>,
     #[partial(NewMapper(skip))]
+    pub updated_at: DateTime<Utc>,
+    #[partial(NewMapper(skip))]
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
@@ -667,6 +718,7 @@ impl From<MapperModel> for Mapper {
             max_activations: value.max_activations,
             depleted_at: value.depleted_at,
             created_at: value.created_at,
+            updated_at: value.updated_at,
             deleted_at: value.deleted_at,
         }
     }
@@ -707,5 +759,56 @@ impl From<LinkRequestModel> for LinkRequest {
             expires_at: value.expires_at,
             completed_at: value.completed_at,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use chrono::Utc;
+    use newtype_uuid::TypedUuid;
+
+    use crate::{ApiUser, ApiUserContactEmail, ApiUserInfo, ApiUserProvider};
+
+    #[test]
+    fn test_user_owns_email() {
+        let api_user_id = TypedUuid::new_v4();
+        let user = ApiUserInfo {
+            user: ApiUser::<()> {
+                id: api_user_id,
+                permissions: Vec::new().into(),
+                groups: BTreeSet::default(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                deleted_at: None,
+            },
+            email: Some(ApiUserContactEmail {
+                id: TypedUuid::new_v4(),
+                user_id: api_user_id,
+                email: "not-user@company".to_string(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                deleted_at: None,
+            }),
+            providers: vec![ApiUserProvider {
+                id: TypedUuid::new_v4(),
+                user_id: api_user_id,
+                provider: "local".to_string(),
+                provider_id: "123".to_string(),
+                emails: vec!["user@company".to_string()],
+                display_names: vec![],
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                deleted_at: None,
+            }],
+        };
+
+        // Users own email addresses defined by their providers
+        assert!(user.owns_email("user@company"));
+        assert!(!user.owns_email("user@company-two"));
+
+        // But they do not own emails defined by their email contact
+        assert!(!user.owns_email("not-user@company"));
     }
 }

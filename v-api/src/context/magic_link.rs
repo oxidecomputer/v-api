@@ -534,7 +534,7 @@ mod tests {
                 "all",
                 "",
                 Utc::now().add(Duration::seconds(60)),
-                "ducks@oxidecomputer.com",
+                "user@company",
             )
             .await;
 
@@ -600,7 +600,7 @@ mod tests {
                 "all",
                 "",
                 Utc::now().add(Duration::seconds(60)),
-                "ducks@oxidecomputer.com",
+                "user@company",
             )
             .await
             .expect("Magic link attempt created");
@@ -669,7 +669,7 @@ mod tests {
                 "all",
                 "",
                 Utc::now().add(Duration::seconds(60)),
-                "ducks@oxidecomputer.com",
+                "user@company",
             )
             .await
             .expect("Magic link attempt created");

@@ -17,11 +17,12 @@ use v_model::{
     permissions::{AsScope, Caller, Permission, PermissionError, PermissionStorage},
     storage::{
         AccessGroupFilter, AccessGroupStore, AccessTokenStore, ApiKeyFilter, ApiKeyStore,
-        ApiUserFilter, ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, ListPagination,
-        StoreError,
+        ApiUserContactEmailStore, ApiUserFilter, ApiUserProviderFilter, ApiUserProviderStore,
+        ApiUserStore, ListPagination, StoreError,
     },
-    AccessGroupId, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserInfo, ApiUserProvider, ArcMap,
-    NewAccessToken, NewApiKey, NewApiUser, NewApiUserProvider, Permissions, UserId, UserProviderId,
+    AccessGroupId, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserInfo,
+    ApiUserProvider, ArcMap, NewAccessToken, NewApiKey, NewApiUser, NewApiUserContactEmail,
+    NewApiUserProvider, Permissions, UserId, UserProviderId,
 };
 
 use crate::{
@@ -492,6 +493,37 @@ where
         });
 
         Ok(tokens)
+    }
+
+    pub async fn set_api_user_contact_email(
+        &self,
+        caller: &Caller<T>,
+        user_id: TypedUuid<UserId>,
+        email: &str,
+    ) -> ResourceResult<ApiUserContactEmail, StoreError> {
+        if caller.any(&[
+            &VPermission::ManageApiUser(user_id).into(),
+            &VPermission::ManageApiUsersAll.into(),
+        ]) {
+            let user = self.get_api_user(caller, &user_id).await?;
+
+            if user.owns_email(email) {
+                ApiUserContactEmailStore::upsert(
+                    &*self.storage,
+                    NewApiUserContactEmail {
+                        id: user.email.map(|email| email.id).unwrap_or_default(),
+                        user_id,
+                        email: email.to_string(),
+                    },
+                )
+                .await
+                .to_resource_result()
+            } else {
+                resource_restricted()
+            }
+        } else {
+            resource_restricted()
+        }
     }
 
     pub async fn get_api_user_provider(

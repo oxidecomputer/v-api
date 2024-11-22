@@ -13,16 +13,16 @@ mod macros {
                 RequestContext, TypedBody, Body,
             };
             use http::Response;
-            use v_model::{Mapper, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret, AccessGroup, ApiUser, MagicLink, MagicLinkRedirectUri, MagicLinkSecret};
+            use v_model::{Mapper, ApiUserContactEmail, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret, AccessGroup, ApiUser, MagicLink, MagicLinkRedirectUri, MagicLinkSecret};
 
             use v_api::endpoints::{
                 api_user::{
                     add_api_user_to_group_op, create_api_user_op, create_api_user_token_op,
                     delete_api_user_token_op, get_api_user_op, get_api_user_token_op, get_self_op,
-                    link_provider_op, list_api_user_tokens_op, remove_api_user_from_group_op,
+                    link_provider_op, list_api_user_tokens_op, remove_api_user_from_group_op, set_api_user_contact_email_op,
                     update_api_user_op, AddGroupBody, ApiKeyCreateParams, ApiKeyResponse, ApiUserPath,
                     ApiUserProviderLinkPayload, ApiUserRemoveGroupPath, ApiUserTokenPath,
-                    ApiUserUpdateParams, GetUserResponse, InitialApiKeyResponse,
+                    ApiUserUpdateParams, GetUserResponse, InitialApiKeyResponse, ApiUserEmailUpdateParams
                 },
                 api_user_provider::{
                     create_link_token_op, ApiUserLinkRequestPayload, ApiUserLinkRequestResponse,
@@ -492,6 +492,19 @@ mod macros {
                 delete_api_user_token_op(&rqctx, path.into_inner()).await
             }
 
+            /// Set the contact email for a user
+            #[endpoint {
+                method = PUT,
+                path = "/api-user/{user_id}/contact/email",
+            }]
+            pub async fn set_api_user_contact_email(
+                rqctx: RequestContext<$context_type>,
+                path: Path<ApiUserPath>,
+                body: TypedBody<ApiUserEmailUpdateParams>,
+            ) -> Result<HttpResponseOk<ApiUserContactEmail>, HttpError> {
+                set_api_user_contact_email_op(&rqctx, path.into_inner(), body.into_inner()).await
+            }
+
             /// Add a user to a group
             #[endpoint {
                 method = POST,
@@ -653,6 +666,8 @@ mod macros {
             $api.register(create_api_user)
                 .expect("Failed to register endpoint");
             $api.register(update_api_user)
+                .expect("Failed to register endpoint");
+            $api.register(set_api_user_contact_email)
                 .expect("Failed to register endpoint");
             $api.register(list_api_user_tokens)
                 .expect("Failed to register endpoint");
