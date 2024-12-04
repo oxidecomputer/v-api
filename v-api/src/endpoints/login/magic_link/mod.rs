@@ -175,7 +175,7 @@ pub async fn magic_link_exchange_op<T>(
 where
     T: VAppPermission + PermissionStorage,
 {
-    let (ctx, _) = rqctx.as_ctx().await?;
+    let ctx = rqctx.v_ctx();
     let body = body.into_inner();
 
     // Any caller may consume a magic link by supplying the attempt secret
