@@ -332,7 +332,7 @@ where
             .get(&builder_target)
             .ok_or_else(move || MagicLinkSendError::NoMessageBuilder(builder_target))
             .to_resource_result()?
-            .create_message(recipient, &url)
+            .create_message(recipient, key.expose_secret(), &url)
             .ok_or(MagicLinkSendError::FailedToBuildMessage)
             .to_resource_result()?;
 
@@ -418,7 +418,7 @@ where
 }
 
 pub trait MagicLinkMessage: Send + Sync {
-    fn create_message(&self, recipient: &str, url: &Url) -> Option<Message>;
+    fn create_message(&self, recipient: &str, token: &str, url: &Url) -> Option<Message>;
 }
 
 #[cfg(test)]
@@ -452,7 +452,7 @@ mod tests {
 
     struct TestMessageBuilder {}
     impl MagicLinkMessage for TestMessageBuilder {
-        fn create_message(&self, recipient: &str, url: &Url) -> Option<Message> {
+        fn create_message(&self, recipient: &str, _token: &str, url: &Url) -> Option<Message> {
             Some(Message {
                 recipient: recipient.to_string(),
                 subject: None,
