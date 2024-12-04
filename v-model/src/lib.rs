@@ -621,7 +621,7 @@ pub struct MagicLinkAttempt {
     pub medium: String,
     pub channel: String,
     pub redirect_uri: String,
-    pub scope: String,
+    pub scope: Option<String>,
     pub nonce_signature: String,
     pub expiration: DateTime<Utc>,
     #[partial(NewMagicLinkAttempt(skip))]

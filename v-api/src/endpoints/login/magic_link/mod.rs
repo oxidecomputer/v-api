@@ -42,7 +42,7 @@ pub struct MagicLinkSendRequest {
     recipient: String,
     redirect_uri: Url,
     expires_in: i64,
-    scope: String,
+    scope: Option<String>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -87,7 +87,7 @@ async fn magic_link_send_op_inner<T>(
     recipient: String,
     redirect_uri: Url,
     expires_in: i64,
-    scope: String,
+    scope: Option<String>,
 ) -> Result<MagicLinkSendResponse, HttpError>
 where
     T: VAppPermission + PermissionStorage,
@@ -118,7 +118,7 @@ where
             &redirect_uri,
             medium,
             channel,
-            &scope,
+            scope.as_deref(),
             Utc::now().add(Duration::seconds(expires_in)),
             &recipient,
         )
@@ -213,16 +213,14 @@ where
 
         let scope = attempt
             .scope
-            .split(' ')
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>();
+            .map(|scope| scope.split(' ').map(|s| s.to_string()).collect::<Vec<_>>());
 
         let token = ctx
             .generate_access_token(
                 &ctx.builtin_registration_user(),
                 &api_user_info.user.id,
                 &api_user_provider.id,
-                Some(scope),
+                scope,
             )
             .await?;
 
