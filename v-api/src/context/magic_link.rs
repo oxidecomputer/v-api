@@ -399,16 +399,20 @@ where
         }
     }
 
+    #[instrument]
     fn inspect_failed_transition(
         attempt: MagicLinkAttempt,
         signature: &str,
         state: MagicLinkAttemptState,
     ) -> ResourceResult<MagicLinkAttempt, MagicLinkTransitionError> {
         if attempt.nonce_signature != signature {
+            tracing::info!("Nonce signature does not match stored signature");
             Err(MagicLinkTransitionError::Nonce).to_resource_result()
         } else if attempt.attempt_state != state {
+            tracing::info!("Attempt is not in a valid state to transition");
             Err(MagicLinkTransitionError::State(attempt.attempt_state)).to_resource_result()
         } else if attempt.expiration <= Utc::now() {
+            tracing::info!("Attempt is expired");
             Err(MagicLinkTransitionError::Expired).to_resource_result()
         } else {
             tracing::error!(id = ?attempt.id, "Unknown error occurred in attempting to determine magic link transition failure");

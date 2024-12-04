@@ -18,10 +18,7 @@ use v_model::{
 
 use crate::{
     authn::{key::RawKey, Signer},
-    context::{
-        magic_link::{MagicLinkSendError, MagicLinkTransitionError},
-        VContextWithCaller,
-    },
+    context::magic_link::{MagicLinkSendError, MagicLinkTransitionError},
     endpoints::login::{ExternalUserId, UserInfo},
     permissions::VAppPermission,
     response::{bad_request, internal_error, to_internal_error, ResourceError},
