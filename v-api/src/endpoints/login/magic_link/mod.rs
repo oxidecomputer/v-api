@@ -59,7 +59,7 @@ pub async fn magic_link_send_op<T>(
 where
     T: VAppPermission + PermissionStorage,
 {
-    let (ctx, _) = rqctx.as_ctx().await?;
+    let ctx = rqctx.v_ctx();
     let path = path.into_inner();
     let body = body.into_inner();
 
