@@ -15,7 +15,7 @@ bb8 = "0.8.6"
 chrono = "0.4.38"
 cookie = { version = "0.18.1" }
 crc32c = "0.6.8"
-diesel = { version = "2.2.5", features = ["postgres"] }
+diesel = { version = "2.2.6", features = ["postgres"] }
 diesel_migrations = { version = "2.2.0" }
 dropshot = { version = "0.14.0" }
 google-cloudkms1 = "6.0.0"
