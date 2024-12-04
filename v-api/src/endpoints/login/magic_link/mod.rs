@@ -213,9 +213,7 @@ where
 
         let scope = attempt
             .scope
-            .map(|scope| scope.split(' ')
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>());
+            .map(|scope| scope.split(' ').map(|s| s.to_string()).collect::<Vec<_>>());
 
         let token = ctx
             .generate_access_token(
