@@ -260,13 +260,13 @@ where
         signature: &str,
         redirect_uri: &Url,
     ) -> ResourceResult<MagicLink, StoreError> {
-        tracing::debug!("Looking up magic link client");
-
         let filter = MagicLinkFilter {
             signature: Some(vec![signature.to_string()]),
             redirect_uri: Some(vec![redirect_uri.to_string()]),
             ..Default::default()
         };
+
+        tracing::debug!(?filter, "Looking up magic link client");
 
         MagicLinkStore::list(&*self.storage, filter, &ListPagination::latest())
             .await

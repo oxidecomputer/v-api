@@ -287,7 +287,7 @@ pub trait OAuthClientRedirectUriStore {
     ) -> Result<Option<OAuthClientRedirectUri>, StoreError>;
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct MagicLinkFilter {
     pub id: Option<Vec<TypedUuid<MagicLinkId>>>,
     pub signature: Option<Vec<String>>,
