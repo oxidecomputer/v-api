@@ -8,7 +8,7 @@ use dropshot::{HttpError, RequestContext, ServerContext};
 use http::StatusCode;
 use jsonwebtoken::jwk::JwkSet;
 use newtype_uuid::TypedUuid;
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, future::Future, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
 use user::{RegisteredAccessToken, UserContextError};
@@ -151,7 +151,9 @@ pub trait VContextWithCaller<T>
 where
     T: Permission,
 {
-    async fn as_ctx(&self) -> Result<(&VContext<T>, Caller<T>), VContextCallerError>;
+    fn as_ctx(
+        &self,
+    ) -> impl Future<Output = Result<(&VContext<T>, Caller<T>), VContextCallerError>>;
 }
 
 #[derive(Debug, Error)]
