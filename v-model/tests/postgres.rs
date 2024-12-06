@@ -12,9 +12,9 @@ use diesel::{
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use v_api_installer::run_migrations;
 use std::ops::{Add, Sub};
 use uuid::Uuid;
+use v_api_installer::run_migrations;
 use v_model::{
     schema_ext::MagicLinkAttemptState,
     storage::{
