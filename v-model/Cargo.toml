@@ -27,3 +27,4 @@ uuid = { workspace = true, features = ["v4", "serde"]  }
 [dev-dependencies]
 diesel_migrations = { version = "2.2.0", features = ["postgres"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+v-api-installer = { path = "../v-api-installer" }

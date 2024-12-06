@@ -6,15 +6,13 @@ use std::collections::BTreeSet;
 
 use chrono::{Duration, TimeDelta, Utc};
 use diesel::{
-    migration::{Migration, MigrationSource},
-    pg::Pg,
     r2d2::{ConnectionManager, ManageConnection},
     sql_query, PgConnection, RunQueryDsl,
 };
-use diesel_migrations::{embed_migrations, EmbeddedMigrations};
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use v_api_installer::run_migrations;
 use std::ops::{Add, Sub};
 use uuid::Uuid;
 use v_model::{
@@ -25,8 +23,6 @@ use v_model::{
     },
     NewApiKey, NewApiUser, NewMagicLink, NewMagicLinkAttempt, UserId,
 };
-
-const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 
 fn leakable_dbs() -> Vec<String> {
     let leaks = std::env::var("LEAK_TEST_DB").unwrap_or_else(|_| String::new());
@@ -69,16 +65,15 @@ impl TestDb {
             should_drop,
         };
 
-        sql_query(&format!("CREATE DATABASE {}", db.db_name))
+        println!("Creating database {}", db.db_name);
+        let create_result = sql_query(&format!("CREATE DATABASE {}", db.db_name))
             .execute(&mut db.conn())
             .unwrap();
+        println!("Created database {:?}", create_result);
 
-        let mut conn = db.db_conn();
-        let migrations: Vec<Box<dyn Migration<Pg>>> = MIGRATIONS.migrations().unwrap();
-
-        for migration in migrations {
-            migration.run(&mut conn).unwrap();
-        }
+        println!("Running migrations on {}", db.url());
+        run_migrations(&db.url());
+        println!("Ran migrtations on {}", db.url());
 
         db
     }
@@ -89,11 +84,6 @@ impl TestDb {
 
     fn conn(&self) -> PgConnection {
         let conn: ConnectionManager<PgConnection> = ConnectionManager::new(&self.db_base);
-        conn.connect().unwrap()
-    }
-
-    fn db_conn(&self) -> PgConnection {
-        let conn: ConnectionManager<PgConnection> = ConnectionManager::new(&self.url());
         conn.connect().unwrap()
     }
 }
