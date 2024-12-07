@@ -12,13 +12,18 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations};
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("../v-model/migrations");
 
+pub fn migrations() -> Vec<Box<dyn Migration<Pg>>> {
+    MIGRATIONS.migrations().unwrap()
+}
+
 pub fn run_migrations(url: &str) {
     let mut conn = db_conn(&url);
+    run_migrations_on_conn(&mut conn);
+}
 
-    let migrations: Vec<Box<dyn Migration<Pg>>> = MIGRATIONS.migrations().unwrap();
-
-    for migration in migrations {
-        migration.run(&mut conn).unwrap();
+pub fn run_migrations_on_conn(conn: &mut PgConnection) {
+    for migration in migrations() {
+        migration.run(conn).unwrap();
     }
 }
 
