@@ -17,7 +17,7 @@ cookie = { version = "0.18.1" }
 crc32c = "0.6.8"
 diesel = { version = "2.2.6", features = ["postgres"] }
 diesel_migrations = { version = "2.2.0" }
-dropshot = { version = "0.14.0" }
+dropshot = { version = "0.15.1" }
 google-cloudkms1 = "6.0.0"
 heck = "0.5.0"
 hex = "0.4.3"
