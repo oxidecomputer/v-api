@@ -1592,7 +1592,7 @@ dependencies = [
 [[package]]
 name = "partial-struct"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/partial-struct#55f441b60a01e2ec092dfeb8e454844177d8afb7"
+source = "git+https://github.com/oxidecomputer/partial-struct#7a45b60d01b24a0a140be8de85b1f61eaa6208e3"
 dependencies = [
  "proc-macro2",
  "quote",
