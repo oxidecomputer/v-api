@@ -4,8 +4,7 @@
 
 use auth::AuthContext;
 use chrono::{TimeDelta, Utc};
-use dropshot::{HttpError, RequestContext, ServerContext};
-use http::StatusCode;
+use dropshot::{ClientErrorStatusCode, HttpError, RequestContext, ServerContext};
 use jsonwebtoken::jwk::JwkSet;
 use newtype_uuid::TypedUuid;
 use std::{fmt::Debug, future::Future, sync::Arc};
@@ -190,16 +189,21 @@ impl From<UserContextError> for HttpError {
         tracing::info!(?error, "Failed to authenticate caller");
 
         match error {
-            UserContextError::FailedToAuthenticate => {
-                client_error(StatusCode::UNAUTHORIZED, "Failed to authenticate")
+            UserContextError::FailedToAuthenticate => client_error(
+                ClientErrorStatusCode::UNAUTHORIZED,
+                "Failed to authenticate",
+            ),
+            UserContextError::InvalidKey => client_error(
+                ClientErrorStatusCode::UNAUTHORIZED,
+                "Failed to authenticate",
+            ),
+            UserContextError::InvalidToken => client_error(
+                ClientErrorStatusCode::UNAUTHORIZED,
+                "Failed to authenticate",
+            ),
+            UserContextError::Scope(_) => {
+                client_error(ClientErrorStatusCode::UNAUTHORIZED, "Invalid scope")
             }
-            UserContextError::InvalidKey => {
-                client_error(StatusCode::UNAUTHORIZED, "Failed to authenticate")
-            }
-            UserContextError::InvalidToken => {
-                client_error(StatusCode::UNAUTHORIZED, "Failed to authenticate")
-            }
-            UserContextError::Scope(_) => client_error(StatusCode::UNAUTHORIZED, "Invalid scope"),
             UserContextError::Storage(_) => internal_error("Internal storage failed"),
         }
     }

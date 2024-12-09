@@ -3,8 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use chrono::{Duration, Utc};
-use dropshot::{HttpError, HttpResponseOk, Path, RequestContext, TypedBody};
-use http::StatusCode;
+use dropshot::{
+    ClientErrorStatusCode, ErrorStatusCode, HttpError, HttpResponseOk, Path, RequestContext,
+    TypedBody,
+};
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -235,19 +237,22 @@ impl From<MagicLinkTransitionError> for HttpError {
     fn from(value: MagicLinkTransitionError) -> Self {
         match value {
             MagicLinkTransitionError::Expired => HttpError {
-                status_code: StatusCode::CONFLICT,
+                headers: None,
+                status_code: ClientErrorStatusCode::CONFLICT.into(),
                 error_code: Some("expired".to_string()),
                 external_message: "Magic link attempt is expired".to_string(),
                 internal_message: "Magic link attempt is expired".to_string(),
             },
             MagicLinkTransitionError::Nonce => HttpError {
-                status_code: StatusCode::CONFLICT,
+                headers: None,
+                status_code: ClientErrorStatusCode::CONFLICT.into(),
                 error_code: Some("invalid_nonce".to_string()),
                 external_message: "Supplied nonce is invalid".to_string(),
                 internal_message: "Supplied nonce is invalid".to_string(),
             },
             MagicLinkTransitionError::State(state) => HttpError {
-                status_code: StatusCode::CONFLICT,
+                headers: None,
+                status_code: ClientErrorStatusCode::CONFLICT.into(),
                 error_code: Some("invalid_state".to_string()),
                 external_message: "Magic link has already been sent or completed".to_string(),
                 internal_message: format!(
@@ -257,7 +262,8 @@ impl From<MagicLinkTransitionError> for HttpError {
             },
             MagicLinkTransitionError::Storage(err) => ResourceError::InternalError(err).into(),
             MagicLinkTransitionError::Unknown => HttpError {
-                status_code: StatusCode::INTERNAL_SERVER_ERROR,
+                headers: None,
+                status_code: ErrorStatusCode::INTERNAL_SERVER_ERROR,
                 error_code: None,
                 external_message: "".to_string(),
                 internal_message: "Unknown error occurred".to_string(),

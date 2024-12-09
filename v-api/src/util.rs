@@ -43,25 +43,24 @@ pub mod request {
 }
 
 pub mod response {
-    use dropshot::HttpError;
-    use http::StatusCode;
+    use dropshot::{ClientErrorStatusCode, HttpError};
     use std::{error::Error, fmt::Debug};
     use thiserror::Error;
     use tracing::instrument;
 
     pub fn conflict() -> HttpError {
-        client_error(StatusCode::CONFLICT, "Already exists")
+        client_error(ClientErrorStatusCode::CONFLICT, "Already exists")
     }
 
     pub fn unauthorized() -> HttpError {
-        client_error(StatusCode::UNAUTHORIZED, "Unauthorized")
+        client_error(ClientErrorStatusCode::UNAUTHORIZED, "Unauthorized")
     }
 
     pub fn forbidden() -> HttpError {
-        client_error(StatusCode::FORBIDDEN, "Unauthorized")
+        client_error(ClientErrorStatusCode::FORBIDDEN, "Unauthorized")
     }
 
-    pub fn client_error<S>(status_code: StatusCode, message: S) -> HttpError
+    pub fn client_error<S>(status_code: ClientErrorStatusCode, message: S) -> HttpError
     where
         S: ToString,
     {
@@ -259,7 +258,7 @@ pub mod tests {
     {
         match res {
             Ok(_) => T::STATUS_CODE,
-            Err(err) => err.status_code,
+            Err(err) => err.status_code.as_status(),
         }
     }
 

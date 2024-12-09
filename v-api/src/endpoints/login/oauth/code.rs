@@ -5,7 +5,7 @@
 use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
 use chrono::{TimeDelta, Utc};
 use dropshot::{
-    http_response_temporary_redirect, Body, HttpError, HttpResponseOk,
+    http_response_temporary_redirect, Body, ClientErrorStatusCode, HttpError, HttpResponseOk,
     HttpResponseTemporaryRedirect, Path, Query, RequestContext, RequestInfo, TypedBody,
 };
 use http::{
@@ -85,7 +85,8 @@ impl From<OAuthError> for HttpError {
     fn from(value: OAuthError) -> Self {
         let serialized = serde_json::to_string(&value).unwrap();
         HttpError {
-            status_code: StatusCode::BAD_REQUEST,
+            headers: None,
+            status_code: ClientErrorStatusCode::BAD_REQUEST.into(),
             error_code: None,
             external_message: serialized.clone(),
             internal_message: serialized,
