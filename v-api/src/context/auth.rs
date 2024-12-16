@@ -81,8 +81,16 @@ where
         self.unauthenticated_caller.clone()
     }
 
+    pub fn builtin_unauthenticated_caller_mut(&mut self) -> &mut Caller<T> {
+        &mut self.unauthenticated_caller
+    }
+
     pub fn builtin_registration_user(&self) -> Caller<T> {
         self.registration_caller.clone()
+    }
+
+    pub fn builtin_registration_user_mut(&mut self) -> &mut Caller<T> {
+        &mut self.registration_caller
     }
 
     pub fn default_jwt_expiration(&self) -> i64 {

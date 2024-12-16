@@ -304,8 +304,40 @@ where
         self.auth.builtin_unauthenticated_caller()
     }
 
+    pub fn add_unauthenticated_caller_permission(&mut self, permission: T) -> &mut Self {
+        self.auth
+            .builtin_unauthenticated_caller_mut()
+            .permissions
+            .insert(permission);
+        self
+    }
+
+    pub fn remove_unauthenticated_caller_permission(&mut self, permission: &T) -> &mut Self {
+        self.auth
+            .builtin_unauthenticated_caller_mut()
+            .permissions
+            .remove(permission);
+        self
+    }
+
     pub fn builtin_registration_user(&self) -> Caller<T> {
         self.auth.builtin_registration_user()
+    }
+
+    pub fn add_registration_caller_permission(&mut self, permission: T) -> &mut Self {
+        self.auth
+            .builtin_registration_user_mut()
+            .permissions
+            .insert(permission);
+        self
+    }
+
+    pub fn remove_registration_caller_permission(&mut self, permission: &T) -> &mut Self {
+        self.auth
+            .builtin_registration_user_mut()
+            .permissions
+            .remove(permission);
+        self
     }
 
     pub fn generate_claims(
