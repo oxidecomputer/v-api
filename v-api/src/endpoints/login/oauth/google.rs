@@ -71,6 +71,7 @@ struct GoogleUserInfo {
 
 #[derive(Debug, Deserialize)]
 struct GoogleProfile {
+    #[serde(default)]
     names: Vec<GoogleProfileName>,
 }
 
