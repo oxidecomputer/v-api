@@ -72,11 +72,14 @@ impl From<ConnectionError> for PostgresError {
 }
 
 impl PostgresStore {
-    pub async fn new(url: &str) -> Result<Self, PostgresError> {
+    pub async fn new(
+        url: &str
+    ) -> Result<Self, PostgresError> {
         let manager = ConnectionManager::<PgConnection>::new(url);
 
         Ok(Self {
             pool: Pool::builder()
+                .max_size(50)
                 .connection_timeout(Duration::from_secs(5))
                 .build(manager)
                 .await?,
