@@ -84,6 +84,12 @@ impl PostgresStore {
     }
 }
 
+impl From<DbPool> for PostgresStore {
+    fn from(value: DbPool) -> Self {
+        Self { pool: value }
+    }
+}
+
 #[async_trait]
 impl<T> ApiUserStore<T> for PostgresStore
 where
