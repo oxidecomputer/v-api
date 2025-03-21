@@ -72,9 +72,7 @@ impl From<ConnectionError> for PostgresError {
 }
 
 impl PostgresStore {
-    pub async fn new(
-        url: &str
-    ) -> Result<Self, PostgresError> {
+    pub async fn new(url: &str) -> Result<Self, PostgresError> {
         let manager = ConnectionManager::<PgConnection>::new(url);
 
         Ok(Self {
