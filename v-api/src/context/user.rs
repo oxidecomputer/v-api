@@ -511,7 +511,10 @@ where
                 ApiUserContactEmailStore::upsert(
                     &*self.storage,
                     NewApiUserContactEmail {
-                        id: user.email.map(|email| email.id).unwrap_or_default(),
+                        id: user
+                            .email
+                            .map(|email| email.id)
+                            .unwrap_or_else(|| TypedUuid::new_v4()),
                         user_id,
                         email: email.to_string(),
                     },

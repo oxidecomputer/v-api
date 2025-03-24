@@ -430,7 +430,7 @@ impl ApiUserContactEmailStore for PostgresStore {
                         .eq(new_contact_email.user_id.into_untyped_uuid()),
                     api_user_contact_email::email.eq(new_contact_email.email),
                 ))
-                .on_conflict(api_user_contact_email::id)
+                .on_conflict(api_user_contact_email::api_user_id)
                 .do_update()
                 .set((api_user_contact_email::email.eq(excluded(api_user_contact_email::email)),))
                 .get_result_async(&*self.pool.get().await?)
