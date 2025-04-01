@@ -6,12 +6,12 @@ use async_trait::async_trait;
 use http::Method;
 use hyper::{body::Bytes, header::HeaderValue, header::AUTHORIZATION};
 use oauth2::{
-    basic::BasicClient, url::ParseError, AuthUrl, ClientId, ClientSecret, RedirectUrl,
-    RevocationUrl, TokenUrl,
+    basic::BasicClient, url::ParseError, AuthUrl, ClientId, EndpointMaybeSet, EndpointNotSet,
+    EndpointSet, RedirectUrl, RevocationUrl, TokenUrl,
 };
 use reqwest::Request;
 use schemars::JsonSchema;
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
 use thiserror::Error;
@@ -37,8 +37,26 @@ pub enum OAuthProviderError {
 #[derive(Debug)]
 pub enum ClientType {
     Device,
-    Web { prefix: String },
+    Web,
 }
+
+#[derive(Debug)]
+pub struct WebClientConfig {
+    prefix: String,
+}
+
+pub type WebClient = BasicClient<
+    // HasAuthUrl
+    EndpointSet,
+    // HasDeviceAuthUrl
+    EndpointNotSet,
+    // HasIntrospectionUrl
+    EndpointNotSet,
+    // HasRevocationUrl
+    EndpointMaybeSet,
+    // HasTokenUrl
+    EndpointSet,
+>;
 
 pub struct OAuthPublicCredentials {
     client_id: String,
@@ -80,33 +98,21 @@ pub trait OAuthProvider: ExtractUserInfo + Debug + Send + Sync {
         }
     }
 
-    fn as_client(&self, client_type: &ClientType) -> Result<BasicClient, ParseError> {
-        let mut client = BasicClient::new(
-            ClientId::new(self.client_id(client_type).to_string()),
-            self.client_secret(client_type)
-                .map(|s| ClientSecret::new(s.expose_secret().to_string())),
-            AuthUrl::new(self.auth_url_endpoint().to_string())?,
-            Some(TokenUrl::new(self.token_exchange_endpoint().to_string())?),
-        );
-
-        if let Some(revocation_endpoint) = self.token_revocation_endpoint() {
-            client =
-                client.set_revocation_uri(RevocationUrl::new(revocation_endpoint.to_string())?);
-        }
-
-        // If we are asked for a web client we need to attach a redirect uri
-        Ok(match client_type {
-            ClientType::Web { prefix } => {
-                let redirect_url = RedirectUrl::new(format!(
-                    "{}/login/oauth/{}/code/callback",
-                    prefix,
-                    self.name()
-                ))?;
-
-                client.set_redirect_uri(redirect_url)
-            }
-            _ => client,
-        })
+    fn as_web_client(&self, config: &WebClientConfig) -> Result<WebClient, ParseError> {
+        let client = BasicClient::new(ClientId::new(self.client_id(&ClientType::Web).to_string()))
+            .set_auth_uri(AuthUrl::new(self.auth_url_endpoint().to_string())?)
+            .set_token_uri(TokenUrl::new(self.token_exchange_endpoint().to_string())?)
+            .set_revocation_url_option(
+                self.token_revocation_endpoint()
+                    .map(|s| RevocationUrl::new(s.to_string()))
+                    .transpose()?,
+            )
+            .set_redirect_uri(RedirectUrl::new(format!(
+                "{}/login/oauth/{}/code/callback",
+                &config.prefix,
+                self.name()
+            ))?);
+        Ok(client)
     }
 }
 

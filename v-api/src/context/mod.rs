@@ -260,9 +260,7 @@ where
     }
 
     pub fn web_client(&self) -> ClientType {
-        ClientType::Web {
-            prefix: self.public_url.to_string(),
-        }
+        ClientType::Web
     }
 
     pub fn set_storage(&mut self, storage: Arc<dyn VApiStorage<T>>) {

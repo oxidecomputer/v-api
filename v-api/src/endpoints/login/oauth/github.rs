@@ -60,7 +60,10 @@ impl GitHubOAuthProvider {
             }),
             additional_scopes: additional_scopes.unwrap_or_default(),
             default_headers: headers,
-            client: reqwest::Client::new(),
+            client: reqwest::ClientBuilder::new()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("Static client must build"),
         }
     }
 

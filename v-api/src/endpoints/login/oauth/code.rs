@@ -15,8 +15,7 @@ use http::{
 use hyper::Response;
 use newtype_uuid::TypedUuid;
 use oauth2::{
-    reqwest::async_http_client, AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier,
-    Scope, TokenResponse,
+    AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope, TokenResponse,
 };
 use schemars::JsonSchema;
 use secrecy::SecretString;
@@ -31,7 +30,7 @@ use v_model::{
     LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient, OAuthClientId,
 };
 
-use super::{OAuthProvider, OAuthProviderNameParam, UserInfoProvider};
+use super::{OAuthProvider, OAuthProviderNameParam, UserInfoProvider, WebClientConfig};
 use crate::{
     authn::key::RawKey,
     context::{ApiContext, VContext},
@@ -248,7 +247,7 @@ fn oauth_redirect_response(
     // constructing a new client on every request. That said, we need to ensure the client does not
     // maintain state between requests
     let client = provider
-        .as_client(&ClientType::Web {
+        .as_web_client(&WebClientConfig {
             prefix: public_url.to_string(),
         })
         .map_err(to_internal_error)?;
@@ -507,7 +506,7 @@ where
 
     // Now that the attempt has been confirmed, use it to fetch user information form the remote
     // provider
-    let info = fetch_user_info(&ctx.web_client(), &*provider, &attempt).await?;
+    let info = fetch_user_info(ctx.public_url(), &ctx.web_client(), &*provider, &attempt).await?;
 
     tracing::debug!("Retrieved user information from remote provider");
 
@@ -651,12 +650,17 @@ fn verify_login_attempt(
 
 #[instrument(skip(attempt))]
 async fn fetch_user_info(
+    public_url: &str,
     client_type: &ClientType,
     provider: &dyn OAuthProvider,
     attempt: &LoginAttempt,
 ) -> Result<UserInfo, HttpError> {
     // Exchange the stored authorization code with the remote provider for a remote access token
-    let client = provider.as_client(client_type).map_err(to_internal_error)?;
+    let client = provider
+        .as_web_client(&WebClientConfig {
+            prefix: public_url.to_string(),
+        })
+        .map_err(to_internal_error)?;
 
     let mut request = client.exchange_code(AuthorizationCode::new(
         attempt
@@ -673,7 +677,7 @@ async fn fetch_user_info(
     }
 
     let response = request
-        .request_async(async_http_client)
+        .request_async(provider.client())
         .await
         .map_err(to_internal_error)?;
 
@@ -694,7 +698,7 @@ async fn fetch_user_info(
         client
             .revoke_token(response.access_token().into())
             .map_err(internal_error)?
-            .request_async(async_http_client)
+            .request_async(provider.client())
             .await
             .map_err(internal_error)?;
     }
