@@ -469,6 +469,8 @@ where
         .await
         .map_err(ApiError::OAuth)?;
 
+    tracing::debug!("Attempting code exchange");
+
     // Verify the submitted client credentials
     authorize_code_exchange(
         &ctx,
@@ -561,6 +563,8 @@ where
         });
     }
 
+    tracing::debug!(grant_type, "Verified grant type");
+
     let client_secret = RawKey::try_from(client_secret).map_err(|err| {
         tracing::warn!(?err, "Failed to parse OAuth client secret");
 
@@ -572,6 +576,8 @@ where
         }
     })?;
 
+    tracing::debug!("Constructed client secret");
+
     if !client.is_secret_valid(&client_secret, ctx.signer()) {
         Err(OAuthError {
             error: OAuthErrorCode::InvalidClient,
@@ -580,6 +586,8 @@ where
             state: None,
         })
     } else {
+        tracing::debug!("Verified client secret validity");
+
         Ok(())
     }
 }

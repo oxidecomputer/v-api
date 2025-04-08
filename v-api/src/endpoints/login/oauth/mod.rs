@@ -6,12 +6,12 @@ use async_trait::async_trait;
 use http::Method;
 use hyper::{body::Bytes, header::HeaderValue, header::AUTHORIZATION};
 use oauth2::{
-    basic::BasicClient, url::ParseError, AuthUrl, ClientId, EndpointMaybeSet, EndpointNotSet,
-    EndpointSet, RedirectUrl, RevocationUrl, TokenUrl,
+    basic::BasicClient, url::ParseError, AuthUrl, ClientId, ClientSecret, EndpointMaybeSet,
+    EndpointNotSet, EndpointSet, RedirectUrl, RevocationUrl, TokenUrl,
 };
 use reqwest::Request;
 use schemars::JsonSchema;
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
 use thiserror::Error;
@@ -99,19 +99,25 @@ pub trait OAuthProvider: ExtractUserInfo + Debug + Send + Sync {
     }
 
     fn as_web_client(&self, config: &WebClientConfig) -> Result<WebClient, ParseError> {
-        let client = BasicClient::new(ClientId::new(self.client_id(&ClientType::Web).to_string()))
-            .set_auth_uri(AuthUrl::new(self.auth_url_endpoint().to_string())?)
-            .set_token_uri(TokenUrl::new(self.token_exchange_endpoint().to_string())?)
-            .set_revocation_url_option(
-                self.token_revocation_endpoint()
-                    .map(|s| RevocationUrl::new(s.to_string()))
-                    .transpose()?,
-            )
-            .set_redirect_uri(RedirectUrl::new(format!(
-                "{}/login/oauth/{}/code/callback",
-                &config.prefix,
-                self.name()
-            ))?);
+        let mut client =
+            BasicClient::new(ClientId::new(self.client_id(&ClientType::Web).to_string()))
+                .set_auth_uri(AuthUrl::new(self.auth_url_endpoint().to_string())?)
+                .set_token_uri(TokenUrl::new(self.token_exchange_endpoint().to_string())?)
+                .set_revocation_url_option(
+                    self.token_revocation_endpoint()
+                        .map(|s| RevocationUrl::new(s.to_string()))
+                        .transpose()?,
+                )
+                .set_redirect_uri(RedirectUrl::new(format!(
+                    "{}/login/oauth/{}/code/callback",
+                    &config.prefix,
+                    self.name()
+                ))?);
+
+        if let Some(secret) = self.client_secret(&ClientType::Web) {
+            client = client.set_client_secret(ClientSecret::new(secret.expose_secret().to_string()))
+        }
+
         Ok(client)
     }
 }
