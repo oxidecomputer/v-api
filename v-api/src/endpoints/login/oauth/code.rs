@@ -5,9 +5,11 @@
 use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
 use chrono::{TimeDelta, Utc};
 use dropshot::{
-    http_response_temporary_redirect, Body, ClientErrorStatusCode, HttpError, HttpResponseOk,
-    HttpResponseTemporaryRedirect, Path, Query, RequestContext, RequestInfo, TypedBody,
+    http_response_temporary_redirect, Body, ClientErrorStatusCode, ExclusiveExtractor, HttpError,
+    HttpResponseOk, HttpResponseTemporaryRedirect, Path, Query, RequestContext, RequestInfo,
+    SharedExtractor, TypedBody,
 };
+use dropshot_authorization_header::basic::BasicAuth;
 use http::{
     header::{LOCATION, SET_COOKIE},
     HeaderValue, StatusCode,
@@ -18,7 +20,7 @@ use oauth2::{
     AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope, TokenResponse,
 };
 use schemars::JsonSchema;
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fmt::Debug, ops::Add};
@@ -121,7 +123,7 @@ where
 {
     let client = ctx
         .oauth
-        .get_oauth_client(&ctx.builtin_registration_user(), &client_id)
+        .get_oauth_client(&ctx.builtin_registration_user(), client_id)
         .await
         .map_err(|err| {
             tracing::error!(?err, "Failed to lookup OAuth client");
@@ -437,8 +439,8 @@ where
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct OAuthAuthzCodeExchangeBody {
-    pub client_id: TypedUuid<OAuthClientId>,
-    pub client_secret: OpenApiSecretString,
+    pub client_id: Option<TypedUuid<OAuthClientId>>,
+    pub client_secret: Option<OpenApiSecretString>,
     pub redirect_uri: String,
     pub grant_type: String,
     pub code: String,
@@ -464,6 +466,34 @@ where
     let ctx = rqctx.v_ctx();
     let path = path.into_inner();
     let body = body.into_inner();
+
+    let (client_id, client_secret) =
+        if let (Some(client_id), Some(client_secret)) = (body.client_id, body.client_secret) {
+            Ok::<_, HttpError>((client_id, client_secret))
+        } else {
+            // Attempt to extract basic authorization credentials from the request if they were not
+            // present in the request body
+            let auth = <BasicAuth as SharedExtractor>::from_request(rqctx)
+                .await
+                .tap_err(|err| {
+                    tracing::warn!(?err, "Failed to extract basic authentication values");
+                });
+            let (client_id, client_secret) = match auth {
+                Ok(auth) if auth.username().is_some() && auth.password().is_some() => Ok((
+                    auth.username().unwrap().to_string(),
+                    auth.password().unwrap().to_string(),
+                )),
+                _ => Err(internal_error(
+                    "Missing client id and client secret from authz code exchange",
+                )),
+            }?;
+
+            Ok((
+                client_id.parse().map_err(to_internal_error)?,
+                OpenApiSecretString(client_secret.into()),
+            ))
+        }?;
+
     let provider = ctx
         .get_oauth_provider(&path.provider)
         .await
@@ -475,8 +505,8 @@ where
     authorize_code_exchange(
         &ctx,
         &body.grant_type,
-        &body.client_id,
-        &body.client_secret.0,
+        client_id,
+        &client_secret.0,
         &body.redirect_uri,
     )
     .await?;
@@ -499,7 +529,7 @@ where
     // Verify that the login attempt is valid and matches the submitted client credentials
     verify_login_attempt(
         &attempt,
-        &body.client_id,
+        client_id,
         &body.redirect_uri,
         body.pkce_verifier.as_deref(),
     )?;
@@ -544,7 +574,7 @@ where
 async fn authorize_code_exchange<T>(
     ctx: &VContext<T>,
     grant_type: &str,
-    client_id: &TypedUuid<OAuthClientId>,
+    client_id: TypedUuid<OAuthClientId>,
     client_secret: &SecretString,
     redirect_uri: &str,
 ) -> Result<(), OAuthError>
@@ -594,11 +624,11 @@ where
 
 fn verify_login_attempt(
     attempt: &LoginAttempt,
-    client_id: &TypedUuid<OAuthClientId>,
+    client_id: TypedUuid<OAuthClientId>,
     redirect_uri: &str,
     pkce_verifier: Option<&str>,
 ) -> Result<(), OAuthError> {
-    if attempt.client_id != *client_id {
+    if attempt.client_id != client_id {
         Err(OAuthError {
             error: OAuthErrorCode::InvalidGrant,
             error_description: Some("Invalid client id".to_string()),
@@ -1238,7 +1268,7 @@ mod tests {
             authorize_code_exchange(
                 &ctx,
                 "authorization_code",
-                &wrong_client_id,
+                wrong_client_id,
                 &client_secret,
                 &redirect_uri,
             )
@@ -1253,7 +1283,7 @@ mod tests {
             authorize_code_exchange(
                 &ctx,
                 "authorization_code",
-                &client_id,
+                client_id,
                 &client_secret,
                 "wrong-callback-destination",
             )
@@ -1268,7 +1298,7 @@ mod tests {
             authorize_code_exchange(
                 &ctx,
                 "authorization_code",
-                &client_id,
+                client_id,
                 &client_secret,
                 &redirect_uri,
             )
@@ -1299,7 +1329,7 @@ mod tests {
             authorize_code_exchange(
                 &ctx,
                 "not_authorization_code",
-                &client_id,
+                client_id,
                 &client_secret,
                 &redirect_uri
             )
@@ -1313,7 +1343,7 @@ mod tests {
             authorize_code_exchange(
                 &ctx,
                 "authorization_code",
-                &client_id,
+                client_id,
                 &client_secret,
                 &redirect_uri
             )
@@ -1351,7 +1381,7 @@ mod tests {
             authorize_code_exchange(
                 &ctx,
                 "authorization_code",
-                &client_id,
+                client_id,
                 &"too-short".to_string().into(),
                 &redirect_uri
             )
@@ -1365,7 +1395,7 @@ mod tests {
             authorize_code_exchange(
                 &ctx,
                 "authorization_code",
-                &client_id,
+                client_id,
                 &invalid_secret.into(),
                 &redirect_uri
             )
@@ -1379,7 +1409,7 @@ mod tests {
             authorize_code_exchange(
                 &ctx,
                 "authorization_code",
-                &client_id,
+                client_id,
                 &client_secret,
                 &redirect_uri
             )
@@ -1425,7 +1455,7 @@ mod tests {
             },
             verify_login_attempt(
                 &bad_client_id,
-                &attempt.client_id,
+                attempt.client_id,
                 &attempt.redirect_uri,
                 Some(verifier.secret().as_str()),
             )
@@ -1446,7 +1476,7 @@ mod tests {
             },
             verify_login_attempt(
                 &bad_redirect_uri,
-                &attempt.client_id,
+                attempt.client_id,
                 &attempt.redirect_uri,
                 Some(verifier.secret().as_str()),
             )
@@ -1467,7 +1497,7 @@ mod tests {
             },
             verify_login_attempt(
                 &unconfirmed_state,
-                &attempt.client_id,
+                attempt.client_id,
                 &attempt.redirect_uri,
                 Some(verifier.secret().as_str()),
             )
@@ -1488,7 +1518,7 @@ mod tests {
             },
             verify_login_attempt(
                 &already_used_state,
-                &attempt.client_id,
+                attempt.client_id,
                 &attempt.redirect_uri,
                 Some(verifier.secret().as_str()),
             )
@@ -1509,7 +1539,7 @@ mod tests {
             },
             verify_login_attempt(
                 &failed_state,
-                &attempt.client_id,
+                attempt.client_id,
                 &attempt.redirect_uri,
                 Some(verifier.secret().as_str()),
             )
@@ -1530,7 +1560,7 @@ mod tests {
             },
             verify_login_attempt(
                 &expired,
-                &attempt.client_id,
+                attempt.client_id,
                 &attempt.redirect_uri,
                 Some(verifier.secret().as_str()),
             )
@@ -1548,7 +1578,7 @@ mod tests {
             },
             verify_login_attempt(
                 &missing_pkce,
-                &attempt.client_id,
+                attempt.client_id,
                 &attempt.redirect_uri,
                 None,
             )
@@ -1569,7 +1599,7 @@ mod tests {
             },
             verify_login_attempt(
                 &invalid_pkce,
-                &attempt.client_id,
+                attempt.client_id,
                 &attempt.redirect_uri,
                 Some(verifier.secret().as_str()),
             )
@@ -1580,7 +1610,7 @@ mod tests {
             (),
             verify_login_attempt(
                 &attempt,
-                &attempt.client_id,
+                attempt.client_id,
                 &attempt.redirect_uri,
                 Some(verifier.secret().as_str()),
             )
