@@ -7,6 +7,7 @@ use std::fmt::Debug;
 pub use async_bb8_diesel::{ConnectionError, PoolError};
 use async_trait::async_trait;
 use bb8::RunError;
+use diesel::result::{DatabaseErrorKind, Error as DieselError};
 pub use diesel::result::Error as DbError;
 #[cfg(feature = "mock")]
 use mockall::automock;
@@ -41,6 +42,18 @@ pub enum StoreError {
     InvariantFailed(String),
     #[error("Unknown error")]
     Unknown,
+}
+
+impl StoreError {
+    pub fn is_unique_conflict_err(&self) -> bool {
+        match self {
+            Self::Db(DieselError::DatabaseError(
+                DatabaseErrorKind::UniqueViolation,
+                _,
+            )) => true,
+            _ => false
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
