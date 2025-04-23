@@ -7,8 +7,8 @@ use std::fmt::Debug;
 pub use async_bb8_diesel::{ConnectionError, PoolError};
 use async_trait::async_trait;
 use bb8::RunError;
-use diesel::result::{DatabaseErrorKind, Error as DieselError};
 pub use diesel::result::Error as DbError;
+use diesel::result::{DatabaseErrorKind, Error as DieselError};
 #[cfg(feature = "mock")]
 use mockall::automock;
 use newtype_uuid::TypedUuid;
@@ -47,11 +47,8 @@ pub enum StoreError {
 impl StoreError {
     pub fn is_unique_conflict_err(&self) -> bool {
         match self {
-            Self::Db(DieselError::DatabaseError(
-                DatabaseErrorKind::UniqueViolation,
-                _,
-            )) => true,
-            _ => false
+            Self::Db(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => true,
+            _ => false,
         }
     }
 }
