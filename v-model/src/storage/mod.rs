@@ -34,21 +34,23 @@ pub mod postgres;
 pub enum StoreError {
     #[error("Connection failure: {0}")]
     Conn(#[from] RunError<ConnectionError>),
+    #[error("Database failure due to uniqueness constraint")]
+    Conflict,
     #[error("Database failure: {0}")]
-    Db(#[from] DbError),
-    #[error("Connection pool failure: {0}")]
-    Pool(#[from] PoolError),
+    Db(DbError),
     #[error("Database invariant failed to hold")]
     InvariantFailed(String),
+    #[error("Connection pool failure: {0}")]
+    Pool(#[from] PoolError),
     #[error("Unknown error")]
     Unknown,
 }
 
-impl StoreError {
-    pub fn is_unique_conflict_err(&self) -> bool {
-        match self {
-            Self::Db(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => true,
-            _ => false,
+impl From<DbError> for StoreError {
+    fn from(value: DbError) -> Self {
+        match value {
+            DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _) => Self::Conflict,
+            _ => Self::Db(value),
         }
     }
 }
