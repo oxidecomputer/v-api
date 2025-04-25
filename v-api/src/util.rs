@@ -2,14 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use diesel::result::{DatabaseErrorKind, Error as DieselError};
 use google_cloudkms1::{
     hyper_rustls::{HttpsConnector, HttpsConnectorBuilder},
     hyper_util::client::legacy::{connect::HttpConnector, Client},
     hyper_util::rt::TokioExecutor,
     CloudKMS,
 };
-use v_model::storage::StoreError;
 
 use crate::authn::CloudKmsError;
 
@@ -48,8 +46,6 @@ pub mod response {
     use thiserror::Error;
     use tracing::instrument;
     use v_model::storage::StoreError;
-
-    use super::is_uniqueness_error;
 
     pub fn conflict() -> HttpError {
         client_error(ClientErrorStatusCode::CONFLICT, "Already exists")
@@ -137,39 +133,33 @@ pub mod response {
         }
     }
 
-    impl From<StoreError> for ResourceError<StoreError> {
+    impl<T> From<StoreError> for ResourceError<T>
+    where
+        T: From<StoreError>,
+    {
         fn from(value: StoreError) -> Self {
-            if is_uniqueness_error(&value) {
-                ResourceError::Conflict
-            } else {
-                ResourceError::InternalError(value)
+            match value {
+                StoreError::Conflict => ResourceError::Conflict,
+                _ => ResourceError::InternalError(value.into()),
             }
         }
     }
 
-    pub trait ToResourceResultOpt<T, E> {
-        fn opt_to_resource_result(self) -> ResourceResult<T, E>;
+    pub trait OptionalResource<T, E> {
+        fn optional<F>(self) -> ResourceResult<T, F>
+        where
+            F: From<E>;
     }
 
-    impl<T, E> ToResourceResultOpt<T, E> for Result<Option<T>, E> {
-        fn opt_to_resource_result(self) -> ResourceResult<T, E> {
+    impl<T, E> OptionalResource<T, E> for Result<Option<T>, E> {
+        fn optional<F>(self) -> ResourceResult<T, F>
+        where
+            F: From<E>,
+        {
             match self {
-                Ok(Some(value)) => ResourceResult::Ok(value),
-                Ok(None) => resource_not_found(),
-                Err(err) => resource_error(err),
-            }
-        }
-    }
-
-    pub trait ToResourceResult<T, E> {
-        fn to_resource_result(self) -> ResourceResult<T, E>;
-    }
-
-    impl<T, E> ToResourceResult<T, E> for Result<T, E> {
-        fn to_resource_result(self) -> ResourceResult<T, E> {
-            match self {
-                Ok(value) => ResourceResult::Ok(value),
-                Err(err) => resource_error(err),
+                Ok(Some(v)) => Ok(v),
+                Ok(None) => Err(ResourceError::DoesNotExist),
+                Err(e) => Err(ResourceError::InternalError(e.into())),
             }
         }
     }
@@ -198,13 +188,6 @@ pub mod response {
                 ResourceError::Restricted => forbidden(),
             }
         }
-    }
-}
-
-pub fn is_uniqueness_error(err: &StoreError) -> bool {
-    match err {
-        StoreError::Db(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => true,
-        _ => false,
     }
 }
 

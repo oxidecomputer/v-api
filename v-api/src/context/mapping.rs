@@ -15,7 +15,7 @@ use crate::{
     endpoints::login::UserInfo,
     mapper::MappingEngine,
     permissions::{VAppPermission, VPermission},
-    response::{resource_restricted, ResourceResult, ToResourceResult, ToResourceResultOpt},
+    response::{resource_restricted, OptionalResource, ResourceResult},
     VApiStorage,
 };
 
@@ -61,13 +61,12 @@ where
         included_depleted: bool,
     ) -> ResourceResult<Vec<Mapper>, StoreError> {
         if caller.can(&VPermission::GetMappersAll.into()) {
-            MapperStore::list(
+            Ok(MapperStore::list(
                 &*self.storage,
                 MapperFilter::default().depleted(included_depleted),
                 &ListPagination::unlimited(),
             )
-            .await
-            .to_resource_result()
+            .await?)
         } else {
             resource_restricted()
         }
@@ -79,9 +78,7 @@ where
         new_mapper: &NewMapper,
     ) -> ResourceResult<Mapper, StoreError> {
         if caller.can(&VPermission::CreateMapper.into()) {
-            MapperStore::upsert(&*self.storage, new_mapper)
-                .await
-                .to_resource_result()
+            Ok(MapperStore::upsert(&*self.storage, new_mapper).await?)
         } else {
             resource_restricted()
         }
@@ -96,9 +93,7 @@ where
             &VPermission::ManageMapper(*id).into(),
             &VPermission::ManageMappersAll.into(),
         ]) {
-            MapperStore::delete(&*self.storage, id)
-                .await
-                .opt_to_resource_result()
+            MapperStore::delete(&*self.storage, id).await.optional()
         } else {
             resource_restricted()
         }
@@ -129,7 +124,7 @@ where
                     Ok(mapping) => {
                         tracing::trace!(?mapper.name, "Applying mapping");
                         (
-                            mapping.permissions_for(&info).await.to_resource_result()?,
+                            mapping.permissions_for(&info).await?,
                             mapping.groups_for(&info).await?,
                         )
                     }

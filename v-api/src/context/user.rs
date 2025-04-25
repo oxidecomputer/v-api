@@ -27,14 +27,11 @@ use v_model::{
 
 use crate::{
     authn::{
-        jwt::{Claims, JwtSigner},
+        jwt::{Claims, JwtSigner, JwtSignerError},
         AuthToken, Signer,
     },
-    error::ApiError,
     permissions::{VAppPermission, VPermission},
-    response::{
-        resource_restricted, ResourceError, ResourceResult, ToResourceResult, ToResourceResultOpt,
-    },
+    response::{resource_restricted, OptionalResource, ResourceError, ResourceResult},
     VApiStorage,
 };
 
@@ -52,6 +49,8 @@ pub enum UserContextError {
     InvalidKey,
     #[error("Supplied API token has an unknown id or has been revoked")]
     InvalidToken,
+    #[error("JWT credential failed")]
+    Jwt(#[from] JwtSignerError),
     #[error("Invalid scope: {0}")]
     Scope(#[from] PermissionError),
     #[error("Inner storage failure: {0}")]
@@ -330,7 +329,7 @@ where
         ]) {
             let mut info = ApiUserStore::get(&*self.storage, id, false)
                 .await
-                .opt_to_resource_result()?;
+                .optional()?;
 
             let extensions = self.get_extensions(&info.user).await;
 
@@ -354,9 +353,7 @@ where
         filter: ApiUserFilter,
         pagination: &ListPagination,
     ) -> ResourceResult<Vec<ApiUserInfo<T>>, StoreError> {
-        let mut users = ApiUserStore::list(&*self.storage, filter, pagination)
-            .await
-            .to_resource_result()?;
+        let mut users = ApiUserStore::list(&*self.storage, filter, pagination).await?;
 
         users.retain(|info| {
             caller.any(&[
@@ -382,9 +379,7 @@ where
                 groups: groups,
             };
             new_user.permissions = <T as PermissionStorage>::contract(&new_user.permissions);
-            ApiUserStore::upsert(&*self.storage, new_user)
-                .await
-                .to_resource_result()
+            Ok(ApiUserStore::upsert(&*self.storage, new_user).await?)
         } else {
             resource_restricted()
         }
@@ -401,9 +396,7 @@ where
             &VPermission::ManageApiUsersAll.into(),
         ]) {
             api_user.permissions = <T as PermissionStorage>::contract(&api_user.permissions);
-            ApiUserStore::upsert(&*self.storage, api_user)
-                .await
-                .to_resource_result()
+            Ok(ApiUserStore::upsert(&*self.storage, api_user).await?)
         } else {
             resource_restricted()
         }
@@ -445,9 +438,7 @@ where
             &VPermission::CreateApiKey(*api_user_id).into(),
             &VPermission::CreateApiKeyAll.into(),
         ]) {
-            ApiKeyStore::upsert(&*self.storage, token)
-                .await
-                .to_resource_result()
+            Ok(ApiKeyStore::upsert(&*self.storage, token).await?)
         } else {
             resource_restricted()
         }
@@ -464,7 +455,7 @@ where
         ]) {
             ApiKeyStore::get(&*self.storage, api_key_id, false)
                 .await
-                .opt_to_resource_result()
+                .optional()
         } else {
             resource_restricted()
         }
@@ -486,8 +477,7 @@ where
             },
             pagination,
         )
-        .await
-        .to_resource_result()?;
+        .await?;
 
         tokens.retain(|token| {
             caller.any(&[
@@ -512,7 +502,7 @@ where
             let user = self.get_api_user(caller, &user_id).await?;
 
             if user.owns_email(email) {
-                ApiUserContactEmailStore::upsert(
+                Ok(ApiUserContactEmailStore::upsert(
                     &*self.storage,
                     NewApiUserContactEmail {
                         id: user
@@ -523,8 +513,7 @@ where
                         email: email.to_string(),
                     },
                 )
-                .await
-                .to_resource_result()
+                .await?)
             } else {
                 resource_restricted()
             }
@@ -545,7 +534,7 @@ where
         ]) {
             ApiUserProviderStore::get(&*self.storage, provider_id, false)
                 .await
-                .opt_to_resource_result()
+                .optional()
         } else {
             resource_restricted()
         }
@@ -557,9 +546,7 @@ where
         filter: ApiUserProviderFilter,
         pagination: &ListPagination,
     ) -> ResourceResult<Vec<ApiUserProvider>, StoreError> {
-        let mut providers = ApiUserProviderStore::list(&*self.storage, filter, pagination)
-            .await
-            .to_resource_result()?;
+        let mut providers = ApiUserProviderStore::list(&*self.storage, filter, pagination).await?;
 
         providers.retain(|provider| {
             caller.any(&[
@@ -580,9 +567,7 @@ where
             &VPermission::ManageApiUser(api_user_provider.user_id).into(),
             &VPermission::ManageApiUsersAll.into(),
         ]) {
-            ApiUserProviderStore::upsert(&*self.storage, api_user_provider)
-                .await
-                .to_resource_result()
+            Ok(ApiUserProviderStore::upsert(&*self.storage, api_user_provider).await?)
         } else {
             resource_restricted()
         }
@@ -592,14 +577,12 @@ where
         &self,
         caller: &Caller<T>,
         id: &TypedUuid<ApiKeyId>,
-    ) -> ResourceResult<ApiKey<T>, StoreError> {
+    ) -> ResourceResult<ApiKey<T>, UserContextError> {
         if caller.any(&[
             &VPermission::ManageApiKey(*id).into(),
             &VPermission::ManageApiKeysAll.into(),
         ]) {
-            ApiKeyStore::delete(&*self.storage, id)
-                .await
-                .opt_to_resource_result()
+            Ok(ApiKeyStore::delete(&*self.storage, id).await.optional()?)
         } else {
             resource_restricted()
         }
@@ -609,11 +592,9 @@ where
         &self,
         caller: &Caller<T>,
         access_token: NewAccessToken,
-    ) -> ResourceResult<AccessToken, StoreError> {
+    ) -> ResourceResult<AccessToken, UserContextError> {
         if caller.can(&VPermission::CreateAccessToken.into()) {
-            AccessTokenStore::upsert(&*self.storage, access_token)
-                .await
-                .to_resource_result()
+            Ok(AccessTokenStore::upsert(&*self.storage, access_token).await?)
         } else {
             resource_restricted()
         }
@@ -659,7 +640,7 @@ where
         signer: &JwtSigner,
         api_user: &TypedUuid<UserId>,
         claims: &Claims,
-    ) -> Result<RegisteredAccessToken, ApiError> {
+    ) -> ResourceResult<RegisteredAccessToken, UserContextError> {
         let token = self
             .create_access_token(
                 caller,
@@ -671,7 +652,10 @@ where
             )
             .await?;
 
-        let signed = signer.sign(&claims).await?;
+        let signed = signer
+            .sign(&claims)
+            .await
+            .map_err(|err| ResourceError::InternalError(UserContextError::Jwt(err)))?;
         Ok(RegisteredAccessToken {
             access_token: token,
             signed_token: signed,

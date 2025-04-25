@@ -12,7 +12,7 @@ use v_model::{
 
 use crate::{
     permissions::{VAppPermission, VPermission},
-    response::{resource_restricted, ResourceResult, ToResourceResult, ToResourceResultOpt},
+    response::{resource_restricted, OptionalResource, ResourceResult},
     VApiStorage,
 };
 
@@ -42,8 +42,7 @@ where
             AccessGroupFilter::default(),
             &ListPagination::unlimited(),
         )
-        .await
-        .to_resource_result()?;
+        .await?;
         groups.retain(|group| {
             caller.any(&[
                 &VPermission::GetGroupsAll.into(),
@@ -60,9 +59,7 @@ where
         group: NewAccessGroup<T>,
     ) -> ResourceResult<AccessGroup<T>, StoreError> {
         if caller.can(&VPermission::CreateGroup.into()) {
-            AccessGroupStore::upsert(&*self.storage, &group)
-                .await
-                .to_resource_result()
+            Ok(AccessGroupStore::upsert(&*self.storage, &group).await?)
         } else {
             resource_restricted()
         }
@@ -77,9 +74,7 @@ where
             &VPermission::ManageGroup(group.id).into(),
             &VPermission::ManageGroupsAll.into(),
         ]) {
-            AccessGroupStore::upsert(&*self.storage, &group)
-                .await
-                .to_resource_result()
+            Ok(AccessGroupStore::upsert(&*self.storage, &group).await?)
         } else {
             resource_restricted()
         }
@@ -96,7 +91,7 @@ where
         ]) {
             AccessGroupStore::delete(&*self.storage, group_id)
                 .await
-                .opt_to_resource_result()
+                .optional()
         } else {
             resource_restricted()
         }

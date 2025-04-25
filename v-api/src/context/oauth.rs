@@ -16,7 +16,7 @@ use v_model::{
 
 use crate::{
     permissions::{VAppPermission, VPermission},
-    response::{resource_restricted, ResourceResult, ToResourceResult, ToResourceResultOpt},
+    response::{resource_restricted, OptionalResource, ResourceResult},
     VApiStorage,
 };
 
@@ -42,14 +42,13 @@ where
         caller: &Caller<T>,
     ) -> ResourceResult<OAuthClient, StoreError> {
         if caller.can(&VPermission::CreateOAuthClient.into()) {
-            OAuthClientStore::upsert(
+            Ok(OAuthClientStore::upsert(
                 &*self.storage,
                 NewOAuthClient {
                     id: TypedUuid::new_v4(),
                 },
             )
-            .await
-            .to_resource_result()
+            .await?)
         } else {
             resource_restricted()
         }
@@ -66,7 +65,7 @@ where
         ]) {
             OAuthClientStore::get(&*self.storage, id, false)
                 .await
-                .opt_to_resource_result()
+                .optional()
         } else {
             resource_restricted()
         }
@@ -84,8 +83,7 @@ where
             },
             &ListPagination::default(),
         )
-        .await
-        .to_resource_result()?;
+        .await?;
 
         clients.retain(|client| {
             caller.any(&[
@@ -108,7 +106,7 @@ where
             &VPermission::ManageOAuthClient(*client_id).into(),
             &VPermission::ManageOAuthClientsAll.into(),
         ]) {
-            OAuthClientSecretStore::upsert(
+            Ok(OAuthClientSecretStore::upsert(
                 &*self.storage,
                 NewOAuthClientSecret {
                     id: *id,
@@ -116,8 +114,7 @@ where
                     secret_signature: secret.to_string(),
                 },
             )
-            .await
-            .to_resource_result()
+            .await?)
         } else {
             resource_restricted()
         }
@@ -135,7 +132,7 @@ where
         ]) {
             OAuthClientSecretStore::delete(&*self.storage, id)
                 .await
-                .opt_to_resource_result()
+                .optional()
         } else {
             resource_restricted()
         }
@@ -151,7 +148,7 @@ where
             &VPermission::ManageOAuthClient(*client_id).into(),
             &VPermission::ManageOAuthClientsAll.into(),
         ]) {
-            OAuthClientRedirectUriStore::upsert(
+            Ok(OAuthClientRedirectUriStore::upsert(
                 &*self.storage,
                 NewOAuthClientRedirectUri {
                     id: TypedUuid::new_v4(),
@@ -159,8 +156,7 @@ where
                     redirect_uri: uri.to_string(),
                 },
             )
-            .await
-            .to_resource_result()
+            .await?)
         } else {
             resource_restricted()
         }
@@ -178,7 +174,7 @@ where
         ]) {
             OAuthClientRedirectUriStore::delete(&*self.storage, id)
                 .await
-                .opt_to_resource_result()
+                .optional()
         } else {
             resource_restricted()
         }

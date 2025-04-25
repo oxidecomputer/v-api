@@ -29,8 +29,8 @@ use crate::{
     messenger::{Message, Messenger, MessengerError},
     permissions::{VAppPermission, VPermission},
     response::{
-        resource_restricted, ResourceErrorInner, ResourceResult, ToResourceResult,
-        ToResourceResultOpt,
+        resource_error, resource_restricted, OptionalResource, ResourceError, ResourceErrorInner,
+        ResourceResult,
     },
 };
 
@@ -113,14 +113,13 @@ where
         caller: &Caller<T>,
     ) -> ResourceResult<MagicLink, StoreError> {
         if caller.can(&VPermission::CreateMagicLinkClient.into()) {
-            MagicLinkStore::upsert(
+            Ok(MagicLinkStore::upsert(
                 &*self.storage,
                 NewMagicLink {
                     id: TypedUuid::new_v4(),
                 },
             )
-            .await
-            .to_resource_result()
+            .await?)
         } else {
             resource_restricted()
         }
@@ -137,7 +136,7 @@ where
         ]) {
             MagicLinkStore::get(&*self.storage, id, false)
                 .await
-                .opt_to_resource_result()
+                .optional()
         } else {
             resource_restricted()
         }
@@ -157,8 +156,7 @@ where
             },
             &ListPagination::default(),
         )
-        .await
-        .to_resource_result()?;
+        .await?;
 
         clients.retain(|client| {
             caller.any(&[
@@ -181,7 +179,7 @@ where
             &VPermission::ManageMagicLinkClient(*client_id).into(),
             &VPermission::ManageMagicLinkClientsAll.into(),
         ]) {
-            MagicLinkSecretStore::upsert(
+            Ok(MagicLinkSecretStore::upsert(
                 &*self.storage,
                 NewMagicLinkSecret {
                     id: *id,
@@ -189,8 +187,7 @@ where
                     secret_signature: secret.to_string(),
                 },
             )
-            .await
-            .to_resource_result()
+            .await?)
         } else {
             resource_restricted()
         }
@@ -208,7 +205,7 @@ where
         ]) {
             MagicLinkSecretStore::delete(&*self.storage, id)
                 .await
-                .opt_to_resource_result()
+                .optional()
         } else {
             resource_restricted()
         }
@@ -224,7 +221,7 @@ where
             &VPermission::ManageMagicLinkClient(*client_id).into(),
             &VPermission::ManageMagicLinkClientsAll.into(),
         ]) {
-            MagicLinkRedirectUriStore::upsert(
+            Ok(MagicLinkRedirectUriStore::upsert(
                 &*self.storage,
                 NewMagicLinkRedirectUri {
                     id: TypedUuid::new_v4(),
@@ -232,8 +229,7 @@ where
                     redirect_uri: uri.to_string(),
                 },
             )
-            .await
-            .to_resource_result()
+            .await?)
         } else {
             resource_restricted()
         }
@@ -251,7 +247,7 @@ where
         ]) {
             MagicLinkRedirectUriStore::delete(&*self.storage, id)
                 .await
-                .opt_to_resource_result()
+                .optional()
         } else {
             resource_restricted()
         }
@@ -274,7 +270,7 @@ where
         MagicLinkStore::list(&*self.storage, filter, &ListPagination::latest())
             .await
             .map(|mut results| results.pop())
-            .opt_to_resource_result()
+            .optional()
     }
 
     pub async fn find_login_attempt(
@@ -286,7 +282,7 @@ where
         MagicLinkAttemptStore::list(&*self.storage, filter, &ListPagination::latest())
             .await
             .map(|mut results| results.pop())
-            .opt_to_resource_result()
+            .optional()
     }
 
     #[instrument(skip(self, key, signer, redirect_uri, recipient), err(Debug))]
@@ -306,8 +302,8 @@ where
         let key = key
             .sign(signer)
             .await
-            .map_err(|err| err.into())
-            .to_resource_result()?;
+            .map_err(ResourceError::InternalError)
+            .inner_err_into()?;
         let (signature, key) = (key.signature().to_string(), key.key());
 
         tracing::debug!("Constructing login signature");
@@ -315,8 +311,8 @@ where
             .sign(recipient.as_bytes())
             .await
             .map(|bytes| hex::encode(&bytes))
-            .map_err(|err| err.into())
-            .to_resource_result()?;
+            .map_err(ResourceError::InternalError)
+            .inner_err_into()?;
 
         tracing::debug!("Appending login key to redirect target");
         let mut url = redirect_uri.clone();
@@ -334,24 +330,24 @@ where
             .message_builders
             .get(&builder_target)
             .ok_or_else(move || MagicLinkSendError::NoMessageBuilder(builder_target))
-            .to_resource_result()?
+            .map_err(ResourceError::InternalError)?
             .create_message(recipient, key.expose_secret(), &url)
             .ok_or(MagicLinkSendError::FailedToBuildMessage)
-            .to_resource_result()?;
+            .map_err(ResourceError::InternalError)?;
 
         tracing::info!("Sending magic link login attempt message");
         let sender_target = target.clone();
         self.messengers
             .get(&sender_target)
             .ok_or_else(move || MagicLinkSendError::NoMessageSender(sender_target))
-            .to_resource_result()?
+            .map_err(ResourceError::InternalError)?
             .send(message)
             .await
-            .to_resource_result()
+            .map_err(ResourceError::InternalError)
             .inner_err_into()?;
 
         tracing::info!("Storing magic link attempt");
-        MagicLinkAttemptStore::upsert(
+        Ok(MagicLinkAttemptStore::upsert(
             &*self.storage,
             NewMagicLinkAttempt {
                 id: TypedUuid::new_v4(),
@@ -366,9 +362,7 @@ where
                 expiration,
             },
         )
-        .await
-        .to_resource_result()
-        .inner_err_into()
+        .await?)
     }
 
     pub async fn complete_login_attempt(
@@ -383,9 +377,7 @@ where
             MagicLinkAttemptState::Sent,
             MagicLinkAttemptState::Complete,
         )
-        .await
-        .to_resource_result()
-        .inner_err_into()?;
+        .await?;
 
         // If the transition did not return a model then we need to inspect the model and determine
         // why it failed
@@ -394,10 +386,13 @@ where
             None => {
                 let attempt = MagicLinkAttemptStore::get(&*self.storage, &attempt_id)
                     .await
-                    .opt_to_resource_result()
-                    .inner_err_into()?;
+                    .optional()?;
 
-                Self::inspect_failed_transition(attempt, signature, MagicLinkAttemptState::Sent)
+                resource_error(Self::inspect_failed_transition(
+                    attempt,
+                    signature,
+                    MagicLinkAttemptState::Sent,
+                ))
             }
         }
     }
@@ -407,19 +402,19 @@ where
         attempt: MagicLinkAttempt,
         signature: &str,
         state: MagicLinkAttemptState,
-    ) -> ResourceResult<MagicLinkAttempt, MagicLinkTransitionError> {
+    ) -> MagicLinkTransitionError {
         if attempt.nonce_signature != signature {
             tracing::info!("Nonce signature does not match stored signature");
-            Err(MagicLinkTransitionError::Nonce).to_resource_result()
+            MagicLinkTransitionError::Nonce
         } else if attempt.attempt_state != state {
             tracing::info!("Attempt is not in a valid state to transition");
-            Err(MagicLinkTransitionError::State(attempt.attempt_state)).to_resource_result()
+            MagicLinkTransitionError::State(attempt.attempt_state)
         } else if attempt.expiration <= Utc::now() {
             tracing::info!("Attempt is expired");
-            Err(MagicLinkTransitionError::Expired).to_resource_result()
+            MagicLinkTransitionError::Expired
         } else {
             tracing::error!(id = ?attempt.id, "Unknown error occurred in attempting to determine magic link transition failure");
-            Err(MagicLinkTransitionError::Unknown).to_resource_result()
+            MagicLinkTransitionError::Unknown
         }
     }
 }

@@ -17,10 +17,6 @@ use crate::{
     context::{ApiContext, VContextWithCaller},
     permissions::{VAppPermission, VPermission},
     response::bad_request,
-    util::{
-        is_uniqueness_error,
-        response::{conflict, ResourceError},
-    },
 };
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -80,15 +76,7 @@ where
             )
             .await;
 
-        res.map(HttpResponseCreated).map_err(|err| {
-            if let ResourceError::InternalError(err) = &err {
-                if is_uniqueness_error(&err) {
-                    return conflict();
-                }
-            }
-
-            HttpError::from(err)
-        })
+        Ok(HttpResponseCreated(res?))
     } else {
         Err(bad_request("Invalid rule payload"))
     }

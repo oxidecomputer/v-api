@@ -39,9 +39,9 @@ use crate::{
     error::{ApiError, AppError},
     mapper::DefaultMappingEngine,
     permissions::{VAppPermission, VPermission},
+    response::{OptionalResource, ResourceErrorInner},
     util::response::{
         client_error, internal_error, resource_error, resource_restricted, ResourceResult,
-        ToResourceResult, ToResourceResultOpt,
     },
 };
 
@@ -201,6 +201,7 @@ impl From<UserContextError> for HttpError {
                 ClientErrorStatusCode::UNAUTHORIZED,
                 "Failed to authenticate",
             ),
+            UserContextError::Jwt(_) => internal_error("Credential signing failed"),
             UserContextError::Scope(_) => {
                 client_error(ClientErrorStatusCode::UNAUTHORIZED, "Invalid scope")
             }
@@ -406,15 +407,13 @@ where
             .user
             .list_api_user_provider(caller, filter, &ListPagination::latest())
             .await
-            .map_err(|err| ApiError::from(err))
-            .to_resource_result()?;
+            .inner_err_into()?;
 
         let (mut mapped_permissions, mut mapped_groups) = self
             .mapping
             .get_mapped_fields(caller, &info)
             .await
-            .map_err(|err| ApiError::from(err))
-            .to_resource_result()?;
+            .inner_err_into()?;
 
         tracing::debug!(?mapped_permissions, "Computed mapping permissions");
         tracing::debug!(?mapped_groups, "Computed mapped groups");
@@ -431,8 +430,7 @@ where
                     .user
                     .create_api_user(caller, mapped_permissions, mapped_groups)
                     .await
-                    .map_err(|err| ApiError::from(err))
-                    .to_resource_result()?;
+                    .inner_err_into()?;
 
                 let user_provider = self
                     .user
@@ -451,8 +449,7 @@ where
                         },
                     )
                     .await
-                    .map_err(|err| ApiError::from(err))
-                    .to_resource_result()?;
+                    .inner_err_into()?;
 
                 Ok((user, user_provider))
             }
@@ -473,8 +470,7 @@ where
                     .user
                     .update_api_user_provider(caller, provider.clone().into())
                     .await
-                    .map_err(|err| err.into())
-                    .to_resource_result()?;
+                    .inner_err_into()?;
 
                 tracing::info!(?provider.id, ?provider.user_id, "Updating found user permissions and groups");
 
@@ -483,8 +479,7 @@ where
                     .user
                     .get_api_user(caller, &provider.user_id)
                     .await
-                    .map_err(|err| ApiError::from(err))
-                    .to_resource_result()?;
+                    .inner_err_into()?;
 
                 tracing::info!(?user.user.id, "Updating found user permissions and groups");
 
@@ -496,8 +491,7 @@ where
                     .user
                     .update_api_user(caller, update)
                     .await
-                    .map_err(|err| ApiError::from(err))
-                    .to_resource_result()?;
+                    .inner_err_into()?;
 
                 tracing::info!(?updated_user.user.id, "Updated user permissions and groups");
 
@@ -532,7 +526,8 @@ where
             .user
             .register_access_token(caller, self.jwt_signer(), &api_user, &claims)
             .await
-            .to_resource_result()?;
+            // TODO: FIXME
+            .unwrap();
 
         tracing::info!(api_user_id = ?api_user, "Generated access token");
 
@@ -556,14 +551,12 @@ where
             // data store traits
             let info = ApiUserStore::get(&*self.storage, api_user_id, false)
                 .await
-                .opt_to_resource_result()?;
+                .optional()?;
 
             let mut update: NewApiUser<T> = info.user.into();
             update.groups.insert(*group_id);
 
-            ApiUserStore::upsert(&*self.storage, update)
-                .await
-                .to_resource_result()
+            Ok(ApiUserStore::upsert(&*self.storage, update).await?)
         } else {
             resource_restricted()
         }
@@ -586,14 +579,12 @@ where
             // data store traits
             let info = ApiUserStore::get(&*self.storage, api_user_id, false)
                 .await
-                .opt_to_resource_result()?;
+                .optional()?;
 
             let mut update: NewApiUser<T> = info.user.into();
             update.groups.retain(|id| id != group_id);
 
-            ApiUserStore::upsert(&*self.storage, update)
-                .await
-                .to_resource_result()
+            Ok(ApiUserStore::upsert(&*self.storage, update).await?)
         } else {
             resource_restricted()
         }
@@ -622,13 +613,12 @@ where
             let source_user_id = link_request.source_user_id;
             let mut update_request: NewLinkRequest = link_request.into();
             update_request.completed_at = Some(Utc::now());
-            LinkRequestStore::upsert(&*self.storage, &update_request)
-                .await
-                .to_resource_result()?;
+            LinkRequestStore::upsert(&*self.storage, &update_request).await?;
 
-            ApiUserProviderStore::transfer(&*self.storage, provider.into(), source_user_id)
-                .await
-                .to_resource_result()
+            Ok(
+                ApiUserProviderStore::transfer(&*self.storage, provider.into(), source_user_id)
+                    .await?,
+            )
         } else {
             resource_restricted()
         }

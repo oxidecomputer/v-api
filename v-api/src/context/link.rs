@@ -17,7 +17,7 @@ use crate::{
         Signer,
     },
     permissions::{VAppPermission, VPermission},
-    response::{resource_restricted, ResourceResult, ToResourceResult},
+    response::{resource_restricted, ResourceResult},
     VApiStorage,
 };
 
@@ -59,7 +59,7 @@ where
             let secret = RawKey::generate::<8>(link_id.as_untyped_uuid());
             let signed = secret.sign(signer).await.unwrap();
 
-            LinkRequestStore::upsert(
+            Ok(LinkRequestStore::upsert(
                 &*self.storage,
                 &NewLinkRequest {
                     id: link_id,
@@ -72,8 +72,7 @@ where
                 },
             )
             .await
-            .map(|_| signed)
-            .to_resource_result()
+            .map(|_| signed)?)
         } else {
             resource_restricted()
         }

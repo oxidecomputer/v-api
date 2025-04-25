@@ -10,7 +10,7 @@ use crate::{
     authn::{jwt::JwtSignerError, SigningKeyError},
     endpoints::login::{oauth::OAuthProviderError, LoginError},
     response::conflict,
-    util::response::{forbidden, internal_error, not_found, ResourceError},
+    util::response::{forbidden, internal_error, not_found},
 };
 
 #[derive(Debug, Error)]
@@ -52,17 +52,6 @@ impl From<ApiError> for HttpError {
             ApiError::NotFound => not_found(""),
             ApiError::OAuth(_) => internal_error("OAuth provider failed"),
             ApiError::Storage(_) => internal_error("Internal storage failed"),
-        }
-    }
-}
-
-impl From<ResourceError<StoreError>> for ApiError {
-    fn from(value: ResourceError<StoreError>) -> Self {
-        match value {
-            ResourceError::Conflict => ApiError::Conflict,
-            ResourceError::DoesNotExist => ApiError::NotFound,
-            ResourceError::InternalError(err) => ApiError::Storage(err),
-            ResourceError::Restricted => ApiError::Forbidden,
         }
     }
 }
