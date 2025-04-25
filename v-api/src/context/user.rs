@@ -174,6 +174,10 @@ where
 
                 Ok(caller)
             }
+            Err(ResourceError::Conflict) => {
+                tracing::error!("User lookup resulted in a conflict. This should be impossible!");
+                Err(UserContextError::FailedToAuthenticate)
+            }
             Err(ResourceError::DoesNotExist) => {
                 tracing::error!("User for verified token does not exist");
                 Err(UserContextError::FailedToAuthenticate)

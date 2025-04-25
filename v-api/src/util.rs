@@ -101,6 +101,8 @@ pub mod response {
 
     #[derive(Debug, Error)]
     pub enum ResourceError<E> {
+        #[error("Resource operation resulted in a conflict")]
+        Conflict,
         #[error("Resource does not exist")]
         DoesNotExist,
         #[error("Caller does not have required access")]
@@ -115,6 +117,7 @@ pub mod response {
             F: From<E>,
         {
             match self {
+                ResourceError::Conflict => ResourceError::Conflict,
                 ResourceError::DoesNotExist => ResourceError::DoesNotExist,
                 ResourceError::Restricted => ResourceError::Restricted,
                 ResourceError::InternalError(inner) => ResourceError::InternalError(inner.into()),
@@ -123,6 +126,7 @@ pub mod response {
 
         pub fn map<G, F: FnOnce(E) -> G>(self, op: F) -> ResourceError<G> {
             match self {
+                ResourceError::Conflict => ResourceError::Conflict,
                 ResourceError::DoesNotExist => ResourceError::DoesNotExist,
                 ResourceError::Restricted => ResourceError::Restricted,
                 ResourceError::InternalError(inner) => ResourceError::InternalError(op(inner)),
@@ -175,6 +179,7 @@ pub mod response {
     {
         fn from(value: ResourceError<E>) -> Self {
             match value {
+                ResourceError::Conflict => conflict(),
                 ResourceError::DoesNotExist => not_found(""),
                 ResourceError::InternalError(err) => to_internal_error(err),
                 ResourceError::Restricted => forbidden(),

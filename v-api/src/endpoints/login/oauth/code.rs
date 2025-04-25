@@ -5,7 +5,7 @@
 use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
 use chrono::{TimeDelta, Utc};
 use dropshot::{
-    http_response_temporary_redirect, Body, ClientErrorStatusCode, ExclusiveExtractor, HttpError,
+    http_response_temporary_redirect, Body, ClientErrorStatusCode, HttpError,
     HttpResponseOk, HttpResponseTemporaryRedirect, Path, Query, RequestContext, RequestInfo,
     SharedExtractor, TypedBody,
 };
@@ -20,7 +20,7 @@ use oauth2::{
     AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope, TokenResponse,
 };
 use schemars::JsonSchema;
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fmt::Debug, ops::Add};

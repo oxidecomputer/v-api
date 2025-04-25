@@ -7,9 +7,7 @@ use thiserror::Error;
 use v_model::storage::StoreError;
 
 use crate::{
-    authn::{jwt::JwtSignerError, SigningKeyError},
-    endpoints::login::{oauth::OAuthProviderError, LoginError},
-    util::response::{forbidden, internal_error, not_found, ResourceError},
+    authn::{jwt::JwtSignerError, SigningKeyError}, endpoints::login::{oauth::OAuthProviderError, LoginError}, response::conflict, util::response::{forbidden, internal_error, not_found, ResourceError}
 };
 
 #[derive(Debug, Error)]
@@ -22,6 +20,8 @@ pub enum AppError {
 
 #[derive(Debug, Error)]
 pub enum ApiError {
+    #[error("Resource operation conflicts with existing system state")]
+    Conflict,
     #[error("Caller does not have the required permissions")]
     Forbidden,
     #[error("JWT credential failed: {0}")]
@@ -41,6 +41,7 @@ pub enum ApiError {
 impl From<ApiError> for HttpError {
     fn from(error: ApiError) -> Self {
         match error {
+            ApiError::Conflict => conflict(),
             ApiError::Forbidden => forbidden(),
             ApiError::Jwt(_) => internal_error("JWT operation failed"),
             ApiError::Key(_) => internal_error("User credential signing failed"),
@@ -55,6 +56,7 @@ impl From<ApiError> for HttpError {
 impl From<ResourceError<StoreError>> for ApiError {
     fn from(value: ResourceError<StoreError>) -> Self {
         match value {
+            ResourceError::Conflict => ApiError::Conflict,
             ResourceError::DoesNotExist => ApiError::NotFound,
             ResourceError::InternalError(err) => ApiError::Storage(err),
             ResourceError::Restricted => ApiError::Forbidden,
