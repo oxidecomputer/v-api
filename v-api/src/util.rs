@@ -114,25 +114,25 @@ pub mod response {
         InternalError(#[source] E),
     }
 
-    impl<E> ResourceError<E> {
-        pub fn inner_into<F>(self) -> ResourceError<F>
+    pub trait ResourceErrorInner<T, E> {
+        fn inner_err_into<F>(self) -> ResourceResult<T, F>
+        where
+            F: From<E>;
+    }
+
+    impl<T, E> ResourceErrorInner<T, E> for ResourceResult<T, E> {
+        fn inner_err_into<F>(self) -> ResourceResult<T, F>
         where
             F: From<E>,
         {
             match self {
-                ResourceError::Conflict => ResourceError::Conflict,
-                ResourceError::DoesNotExist => ResourceError::DoesNotExist,
-                ResourceError::Restricted => ResourceError::Restricted,
-                ResourceError::InternalError(inner) => ResourceError::InternalError(inner.into()),
-            }
-        }
-
-        pub fn map<G, F: FnOnce(E) -> G>(self, op: F) -> ResourceError<G> {
-            match self {
-                ResourceError::Conflict => ResourceError::Conflict,
-                ResourceError::DoesNotExist => ResourceError::DoesNotExist,
-                ResourceError::Restricted => ResourceError::Restricted,
-                ResourceError::InternalError(inner) => ResourceError::InternalError(op(inner)),
+                Ok(v) => Ok(v),
+                Err(ResourceError::Conflict) => Err(ResourceError::Conflict),
+                Err(ResourceError::DoesNotExist) => Err(ResourceError::DoesNotExist),
+                Err(ResourceError::Restricted) => Err(ResourceError::Restricted),
+                Err(ResourceError::InternalError(inner)) => {
+                    Err(ResourceError::InternalError(inner.into()))
+                }
             }
         }
     }

@@ -28,7 +28,10 @@ use crate::{
     },
     messenger::{Message, Messenger, MessengerError},
     permissions::{VAppPermission, VPermission},
-    response::{resource_restricted, ResourceResult, ToResourceResult, ToResourceResultOpt},
+    response::{
+        resource_restricted, ResourceErrorInner, ResourceResult, ToResourceResult,
+        ToResourceResultOpt,
+    },
 };
 
 use super::VApiStorage;
@@ -345,7 +348,7 @@ where
             .send(message)
             .await
             .to_resource_result()
-            .map_err(|err| err.inner_into())?;
+            .inner_err_into()?;
 
         tracing::info!("Storing magic link attempt");
         MagicLinkAttemptStore::upsert(
@@ -365,7 +368,7 @@ where
         )
         .await
         .to_resource_result()
-        .map_err(|err| err.inner_into())
+        .inner_err_into()
     }
 
     pub async fn complete_login_attempt(
@@ -382,7 +385,7 @@ where
         )
         .await
         .to_resource_result()
-        .map_err(|err| err.inner_into())?;
+        .inner_err_into()?;
 
         // If the transition did not return a model then we need to inspect the model and determine
         // why it failed
@@ -392,7 +395,7 @@ where
                 let attempt = MagicLinkAttemptStore::get(&*self.storage, &attempt_id)
                     .await
                     .opt_to_resource_result()
-                    .map_err(|err| err.inner_into())?;
+                    .inner_err_into()?;
 
                 Self::inspect_failed_transition(attempt, signature, MagicLinkAttemptState::Sent)
             }
