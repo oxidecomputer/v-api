@@ -7,7 +7,10 @@ use thiserror::Error;
 use v_model::storage::StoreError;
 
 use crate::{
-    authn::{jwt::JwtSignerError, SigningKeyError}, endpoints::login::{oauth::OAuthProviderError, LoginError}, response::conflict, util::response::{forbidden, internal_error, not_found, ResourceError}
+    authn::{jwt::JwtSignerError, SigningKeyError},
+    endpoints::login::{oauth::OAuthProviderError, LoginError},
+    response::conflict,
+    util::response::{forbidden, internal_error, not_found, ResourceError},
 };
 
 #[derive(Debug, Error)]

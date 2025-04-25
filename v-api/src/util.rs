@@ -47,6 +47,9 @@ pub mod response {
     use std::{error::Error, fmt::Debug};
     use thiserror::Error;
     use tracing::instrument;
+    use v_model::storage::StoreError;
+
+    use super::is_uniqueness_error;
 
     pub fn conflict() -> HttpError {
         client_error(ClientErrorStatusCode::CONFLICT, "Already exists")
@@ -130,6 +133,16 @@ pub mod response {
                 ResourceError::DoesNotExist => ResourceError::DoesNotExist,
                 ResourceError::Restricted => ResourceError::Restricted,
                 ResourceError::InternalError(inner) => ResourceError::InternalError(op(inner)),
+            }
+        }
+    }
+
+    impl From<StoreError> for ResourceError<StoreError> {
+        fn from(value: StoreError) -> Self {
+            if is_uniqueness_error(&value) {
+                ResourceError::Conflict
+            } else {
+                ResourceError::InternalError(value)
             }
         }
     }
