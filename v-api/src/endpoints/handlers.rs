@@ -672,6 +672,8 @@ mod macros {
             // User Management
             $api.register(get_self)
                 .expect("Failed to register endpoint");
+            $api.register(list_api_users)
+                .expect("Failed to register endpoint");
             $api.register(get_api_user)
                 .expect("Failed to register endpoint");
             $api.register(create_api_user)
