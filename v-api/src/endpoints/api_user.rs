@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeSet;
+use std::collections::{hash_map::Entry, BTreeSet, HashMap};
 
 use chrono::{DateTime, Utc};
 use dropshot::{
@@ -18,7 +18,7 @@ use tracing::instrument;
 use uuid::Uuid;
 use v_model::{
     permissions::{Caller, Permission, PermissionStorage, Permissions},
-    storage::{ApiUserProviderFilter, ListPagination},
+    storage::{ApiUserFilter, ApiUserProviderFilter, ListPagination},
     AccessGroupId, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserProvider, NewApiKey, NewApiUser,
     UserId,
 };
@@ -116,6 +116,57 @@ where
 
     tracing::trace!(user = ?serde_json::to_string(&info.user), "Found user");
     Ok(HttpResponseOk(GetUserResponse::new(info.user, providers)))
+}
+
+#[instrument(skip(rqctx), err(Debug))]
+pub async fn list_api_user_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+) -> Result<HttpResponseOk<Vec<GetUserResponse<U>>>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+    U: VAppPermissionResponse + From<T> + JsonSchema,
+{
+    let (ctx, caller) = rqctx.as_ctx().await?;
+    let info = ctx
+        .user
+        .list_api_user(
+            &caller,
+            ApiUserFilter::default(),
+            &ListPagination::unlimited(),
+        )
+        .await?;
+
+    let mut filter = ApiUserProviderFilter::default();
+    filter.api_user_id = Some(info.iter().map(|info| info.user.id).collect());
+    let providers: HashMap<TypedUuid<UserId>, Vec<ApiUserProvider>> = ctx
+        .user
+        .list_api_user_provider(&caller, filter, &ListPagination::default().limit(10))
+        .await?
+        .into_iter()
+        .fold(HashMap::new(), |mut map, provider| {
+            let entry = map.entry(provider.user_id);
+            match entry {
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().push(provider);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(vec![provider]);
+                }
+            }
+            map
+        });
+
+    tracing::trace!(users = info.len(), "Found users");
+
+    let responses = info
+        .into_iter()
+        .map(|info| {
+            let providers = providers.get(&info.user.id).cloned().unwrap_or_default();
+            GetUserResponse::new(info.user, providers)
+        })
+        .collect();
+
+    Ok(HttpResponseOk(responses))
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]

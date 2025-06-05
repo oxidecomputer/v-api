@@ -18,7 +18,7 @@ mod macros {
             use v_api::endpoints::{
                 api_user::{
                     add_api_user_to_group_op, create_api_user_op, create_api_user_token_op,
-                    delete_api_user_token_op, get_api_user_op, get_api_user_token_op, get_self_op,
+                    delete_api_user_token_op, get_api_user_op, list_api_user_op, get_api_user_token_op, get_self_op,
                     link_provider_op, list_api_user_tokens_op, remove_api_user_from_group_op, set_api_user_contact_email_op,
                     update_api_user_op, AddGroupBody, ApiKeyCreateParams, ApiKeyResponse, ApiUserPath,
                     ApiUserProviderLinkPayload, ApiUserRemoveGroupPath, ApiUserTokenPath,
@@ -404,6 +404,17 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
             ) -> Result<HttpResponseOk<GetUserResponse<$permission_type>>, HttpError> {
                 get_self_op(&rqctx).await
+            }
+
+            /// List details for users
+            #[endpoint {
+                method = GET,
+                path = "/api-user",
+            }]
+            pub async fn list_api_user(
+                rqctx: RequestContext<$context_type>,
+            ) -> Result<HttpResponseOk<Vec<GetUserResponse<$permission_type>>>, HttpError> {
+                list_api_user_op(&rqctx).await
             }
 
             /// View details for a user
