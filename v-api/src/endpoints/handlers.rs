@@ -411,7 +411,7 @@ mod macros {
                 method = GET,
                 path = "/api-user",
             }]
-            pub async fn list_api_user(
+            pub async fn list_api_users(
                 rqctx: RequestContext<$context_type>,
             ) -> Result<HttpResponseOk<Vec<GetUserResponse<$permission_type>>>, HttpError> {
                 list_api_user_op(&rqctx).await
