@@ -848,9 +848,12 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod test_mocks {
     use async_trait::async_trait;
-    use newtype_uuid::TypedUuid;
-    use std::sync::Arc;
+    use chrono::Utc;
+    use newtype_uuid::{GenericUuid, TypedUuid};
+    use std::{collections::HashMap, sync::Arc};
+    use uuid::Uuid;
     use v_model::{
+        permissions::Caller,
         schema_ext::MagicLinkAttemptState,
         storage::{
             AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore,
@@ -865,11 +868,11 @@ pub(crate) mod test_mocks {
             MockOAuthClientStore, OAuthClientRedirectUriStore, OAuthClientSecretStore,
             OAuthClientStore, StoreError,
         },
-        AccessGroupId, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail, ApiUserProvider,
-        LinkRequestId, LoginAttemptId, MagicLink, MagicLinkAttempt, MagicLinkAttemptId,
-        MagicLinkId, MagicLinkRedirectUri, MagicLinkRedirectUriId, MagicLinkSecret,
-        MagicLinkSecretId, MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
-        NewApiUserContactEmail, NewApiUserProvider, NewLoginAttempt, NewMagicLink,
+        AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail,
+        ApiUserProvider, LinkRequestId, LoginAttemptId, MagicLink, MagicLinkAttempt,
+        MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri, MagicLinkRedirectUriId,
+        MagicLinkSecret, MagicLinkSecretId, MapperId, NewAccessGroup, NewAccessToken, NewApiKey,
+        NewApiUser, NewApiUserContactEmail, NewApiUserProvider, NewLoginAttempt, NewMagicLink,
         NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, OAuthClientId,
         OAuthRedirectUriId, OAuthSecretId, UserContactEmailId, UserId, UserProviderId,
     };
@@ -1577,5 +1580,50 @@ pub(crate) mod test_mocks {
                 .transition(id, signature, from, to)
                 .await
         }
+    }
+
+    #[tokio::test]
+    async fn test_generate_access_token_calls_store() {
+        let mut storage = MockStorage::new();
+
+        // Test data
+        let api_user_id = TypedUuid::new_v4();
+        let api_user_provider_id = TypedUuid::new_v4();
+
+        // Setup the mock expectation for upsert
+        let mut access_token_store = MockAccessTokenStore::new();
+        access_token_store
+            .expect_upsert()
+            .withf(move |token| token.user_id == api_user_id && token.id != TypedUuid::default())
+            .times(1)
+            .returning(move |token| {
+                Ok(AccessToken {
+                    id: token.id,
+                    user_id: token.user_id,
+                    revoked_at: None,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                })
+            });
+        storage.access_token_store = Some(Arc::new(access_token_store));
+
+        let ctx = mock_context(Arc::new(storage)).await;
+
+        // Call the function
+        let result = ctx
+            .generate_access_token(
+                &Caller {
+                    id: TypedUuid::from_untyped_uuid(Uuid::new_v4()),
+                    permissions: vec![VPermission::CreateAccessToken].into(),
+                    extensions: HashMap::default(),
+                },
+                &api_user_id,
+                &api_user_provider_id,
+                None,
+            )
+            .await;
+
+        // Verify the call succeeded
+        assert!(result.is_ok());
     }
 }

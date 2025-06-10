@@ -78,7 +78,7 @@ impl Claims {
             scp: scope,
             exp: expires_at.timestamp(),
             nbf: Utc::now().timestamp(),
-            jti: id.unwrap_or_default(),
+            jti: id.unwrap_or_else(|| TypedUuid::new_v4()),
         }
     }
 }
