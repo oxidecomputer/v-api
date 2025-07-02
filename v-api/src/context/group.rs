@@ -44,10 +44,13 @@ where
         )
         .await?;
         groups.retain(|group| {
-            caller.any(&[
-                &VPermission::GetGroupsAll.into(),
-                &VPermission::GetGroup(group.id).into(),
-            ])
+            caller.any(
+                &mut [
+                    VPermission::GetGroupsAll.into(),
+                    VPermission::GetGroup(group.id).into(),
+                ]
+                .iter(),
+            )
         });
 
         Ok(groups)
@@ -70,10 +73,13 @@ where
         caller: &Caller<T>,
         group: NewAccessGroup<T>,
     ) -> ResourceResult<AccessGroup<T>, StoreError> {
-        if caller.any(&[
-            &VPermission::ManageGroup(group.id).into(),
-            &VPermission::ManageGroupsAll.into(),
-        ]) {
+        if caller.any(
+            &mut [
+                VPermission::ManageGroup(group.id).into(),
+                VPermission::ManageGroupsAll.into(),
+            ]
+            .iter(),
+        ) {
             Ok(AccessGroupStore::upsert(&*self.storage, &group).await?)
         } else {
             resource_restricted()
@@ -85,10 +91,13 @@ where
         caller: &Caller<T>,
         group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<AccessGroup<T>, StoreError> {
-        if caller.any(&[
-            &VPermission::ManageGroup(*group_id).into(),
-            &VPermission::ManageGroupsAll.into(),
-        ]) {
+        if caller.any(
+            &mut [
+                VPermission::ManageGroup(*group_id).into(),
+                VPermission::ManageGroupsAll.into(),
+            ]
+            .iter(),
+        ) {
             AccessGroupStore::delete(&*self.storage, group_id)
                 .await
                 .optional()

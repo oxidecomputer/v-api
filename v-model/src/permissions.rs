@@ -50,11 +50,17 @@ where
         &self.id == id
     }
 
-    pub fn all(&self, permissions: &[&T]) -> bool {
+    pub fn all<'a, U>(&self, permissions: &mut U) -> bool
+    where
+        U: Iterator<Item = &'a T>,
+    {
         self.permissions.all(permissions)
     }
 
-    pub fn any(&self, permissions: &[&T]) -> bool {
+    pub fn any<'a, U>(&self, permissions: &mut U) -> bool
+    where
+        U: Iterator<Item = &'a T>,
+    {
         self.permissions.any(permissions)
     }
 
@@ -120,12 +126,18 @@ where
         Self(Vec::new())
     }
 
-    pub fn all(&self, permissions: &[&T]) -> bool {
-        permissions.iter().all(|p| self.can(p))
+    pub fn all<'a, U>(&self, permissions: &mut U) -> bool
+    where
+        U: Iterator<Item = &'a T>,
+    {
+        permissions.all(|p| self.can(p))
     }
 
-    pub fn any(&self, permissions: &[&T]) -> bool {
-        permissions.iter().any(|p| self.can(p))
+    pub fn any<'a, U>(&self, permissions: &mut U) -> bool
+    where
+        U: Iterator<Item = &'a T>,
+    {
+        permissions.any(|p| self.can(p))
     }
 
     pub fn can(&self, permission: &T) -> bool {

@@ -540,10 +540,13 @@ where
         api_user_id: &TypedUuid<UserId>,
         group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.any(&[
-            &VPermission::ManageGroupMembership(*group_id).into(),
-            &VPermission::ManageGroupMembershipsAll.into(),
-        ]) {
+        if caller.any(
+            &mut [
+                VPermission::ManageGroupMembership(*group_id).into(),
+                VPermission::ManageGroupMembershipsAll.into(),
+            ]
+            .iter(),
+        ) {
             // TODO: This needs to be wrapped in a transaction. That requires reworking the way the
             // store traits are handled. Ideally we could have an API that still abstracts away the
             // underlying connection management while allowing for transactions. Possibly something
@@ -568,10 +571,13 @@ where
         api_user_id: &TypedUuid<UserId>,
         group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.any(&[
-            &VPermission::ManageGroupMembership(*group_id).into(),
-            &VPermission::ManageGroupMembershipsAll.into(),
-        ]) {
+        if caller.any(
+            &mut [
+                VPermission::ManageGroupMembership(*group_id).into(),
+                VPermission::ManageGroupMembershipsAll.into(),
+            ]
+            .iter(),
+        ) {
             // TODO: This needs to be wrapped in a transaction. That requires reworking the way the
             // store traits are handled. Ideally we could have an API that still abstracts away the
             // underlying connection management while allowing for transactions. Possibly something

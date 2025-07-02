@@ -89,10 +89,13 @@ where
         caller: &Caller<T>,
         id: &TypedUuid<MapperId>,
     ) -> ResourceResult<Mapper, StoreError> {
-        if caller.any(&[
-            &VPermission::ManageMapper(*id).into(),
-            &VPermission::ManageMappersAll.into(),
-        ]) {
+        if caller.any(
+            &mut [
+                VPermission::ManageMapper(*id).into(),
+                VPermission::ManageMappersAll.into(),
+            ]
+            .iter(),
+        ) {
             MapperStore::delete(&*self.storage, id).await.optional()
         } else {
             resource_restricted()
