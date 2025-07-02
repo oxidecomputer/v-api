@@ -51,7 +51,7 @@ where
         &self.id == id
     }
 
-    pub fn all<U, V>(&self, permissions: &mut U) -> bool
+    pub fn all<U, V>(&self, permissions: U) -> bool
     where
         U: Iterator<Item = V>,
         V: Borrow<T>,
@@ -129,7 +129,7 @@ where
         Self(Vec::new())
     }
 
-    pub fn all<U, V>(&self, permissions: &mut U) -> bool
+    pub fn all<U, V>(&self, mut permissions: U) -> bool
     where
         U: Iterator<Item = V>,
         V: Borrow<T>,
