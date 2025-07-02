@@ -4,6 +4,7 @@
 
 use std::{
     any::{Any, TypeId},
+    borrow::Borrow,
     collections::{BTreeSet, HashMap},
     fmt::Debug,
     sync::Arc,
@@ -50,16 +51,18 @@ where
         &self.id == id
     }
 
-    pub fn all<'a, U>(&self, permissions: &mut U) -> bool
+    pub fn all<U, V>(&self, permissions: &mut U) -> bool
     where
-        U: Iterator<Item = &'a T>,
+        U: Iterator<Item = V>,
+        V: Borrow<T>,
     {
         self.permissions.all(permissions)
     }
 
-    pub fn any<'a, U>(&self, permissions: &mut U) -> bool
+    pub fn any<U, V>(&self, permissions: U) -> bool
     where
-        U: Iterator<Item = &'a T>,
+        U: Iterator<Item = V>,
+        V: Borrow<T>,
     {
         self.permissions.any(permissions)
     }
@@ -126,18 +129,20 @@ where
         Self(Vec::new())
     }
 
-    pub fn all<'a, U>(&self, permissions: &mut U) -> bool
+    pub fn all<U, V>(&self, permissions: &mut U) -> bool
     where
-        U: Iterator<Item = &'a T>,
+        U: Iterator<Item = V>,
+        V: Borrow<T>,
     {
-        permissions.all(|p| self.can(p))
+        permissions.all(|p| self.can(p.borrow()))
     }
 
-    pub fn any<'a, U>(&self, permissions: &mut U) -> bool
+    pub fn any<U, V>(&self, mut permissions: U) -> bool
     where
-        U: Iterator<Item = &'a T>,
+        U: Iterator<Item = V>,
+        V: Borrow<T>,
     {
-        permissions.any(|p| self.can(p))
+        permissions.any(|p| self.can(p.borrow()))
     }
 
     pub fn can(&self, permission: &T) -> bool {
