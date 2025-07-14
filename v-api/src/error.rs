@@ -17,6 +17,8 @@ use crate::{
 pub enum AppError {
     #[error("At least one JWT signing key must be configured")]
     NoConfiguredJwtKeys,
+    #[error("Configured key is invalid")]
+    InvalidKey(#[from] JwtSignerError),
     #[error(transparent)]
     SignerError(#[from] SigningKeyError),
 }

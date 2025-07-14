@@ -15,6 +15,7 @@ crc32c = { workspace = true }
 diesel = { workspace = true }
 dropshot = { workspace = true }
 dropshot-authorization-header = { path = "../dropshot-authorization-header" }
+futures = { workspace = true }
 google-cloudkms1 = { workspace = true }
 hex = { workspace = true }
 http = { workspace = true }

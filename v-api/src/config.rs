@@ -66,11 +66,19 @@ impl Default for JwtConfig {
     }
 }
 
+#[derive(Debug, Deserialize, PartialEq)]
+pub enum KeyFunction {
+    All,
+    Verify,
+    Sign,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum AsymmetricKey {
     Local {
         kid: String,
+        function: KeyFunction,
         // #[serde(with = "serde_bytes")]
         private: String,
         public: String,
@@ -80,6 +88,7 @@ pub enum AsymmetricKey {
     // },
     Ckms {
         kid: String,
+        function: KeyFunction,
         version: u16,
         key: String,
         keyring: String,

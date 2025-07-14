@@ -20,14 +20,14 @@ use rsa::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{fmt::Debug, sync::Arc};
+use std::{f64::consts::E, fmt::Debug, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
 use v_model::permissions::PermissionStorage;
 
 use crate::{
     authn::key::RawKey,
-    config::AsymmetricKey,
+    config::{AsymmetricKey, KeyFunction},
     context::ApiContext,
     permissions::VAppPermission,
     util::{cloud_kms_client, response::unauthorized},
@@ -121,6 +121,8 @@ pub enum SigningKeyError {
     GeneratedInvalidSignature,
     #[error("Failed to parse public key: {0}")]
     InvalidPublicKey(#[from] rsa::pkcs8::spki::Error),
+    #[error("Key does not support the requested function")]
+    KeyDoesNotSupportFunction,
     #[error("Invalid signature: {0}")]
     Signature(#[from] rsa::signature::Error),
 }
@@ -322,7 +324,7 @@ impl AsymmetricKey {
 
     pub async fn as_signer(&self) -> Result<Arc<dyn Signer>, SigningKeyError> {
         Ok(match self {
-            AsymmetricKey::Local { private, .. } => {
+            AsymmetricKey::Local { function, private, .. } if function == &KeyFunction::Sign || function == &KeyFunction::All => {
                 let private_key = RsaPrivateKey::from_pkcs8_pem(&private).unwrap();
                 let signing_key = SigningKey::new(private_key);
                 let verifying_key = signing_key.verifying_key();
@@ -332,7 +334,7 @@ impl AsymmetricKey {
                     verifying_key,
                 })
             }
-            AsymmetricKey::Ckms { .. } => {
+            AsymmetricKey::Ckms { function, .. } if function == &KeyFunction::Sign || function == &KeyFunction::All => {
                 let verifying_key = VerifyingKey::new(self.public_key().await?);
 
                 tracing::trace!("Generated Cloud KMS signer");
@@ -343,6 +345,7 @@ impl AsymmetricKey {
                     verifying_key,
                 })
             }
+            _ => Err(SigningKeyError::KeyDoesNotSupportFunction)?,
         })
     }
 }

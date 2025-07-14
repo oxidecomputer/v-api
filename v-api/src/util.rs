@@ -251,7 +251,7 @@ pub mod tests {
         RsaPrivateKey, RsaPublicKey,
     };
 
-    use crate::config::AsymmetricKey;
+    use crate::config::{AsymmetricKey, KeyFunction};
 
     pub fn get_status<T>(res: &Result<T, HttpError>) -> StatusCode
     where
@@ -274,6 +274,7 @@ pub mod tests {
 
         AsymmetricKey::Local {
             kid: hex::encode(kid),
+            function: KeyFunction::All,
             private: String::from_utf8(
                 priv_key
                     .to_pkcs8_pem(LineEnding::LF)

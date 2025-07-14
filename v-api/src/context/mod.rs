@@ -228,12 +228,6 @@ where
         jwt: JwtConfig,
         keys: Vec<AsymmetricKey>,
     ) -> Result<Self, AppError> {
-        let mut jwt_signers = vec![];
-
-        for key in &keys {
-            jwt_signers.push(JwtSigner::new(&key).await.unwrap())
-        }
-
         let auth_ctx = AuthContext::new(jwt, keys).await?;
         let group_ctx = GroupContext::new(storage.clone());
         let mut mapping_ctx = MappingContext::new(storage.clone());

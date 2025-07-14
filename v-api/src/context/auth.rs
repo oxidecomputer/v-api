@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use dropshot::RequestContext;
+use futures::future::join_all;
 use jsonwebtoken::jwk::JwkSet;
 use std::{collections::HashMap, sync::Arc};
 use v_model::permissions::Caller;
@@ -12,7 +13,7 @@ use crate::{
         jwt::{Claims, JwtSigner, JwtSignerError},
         AuthError, AuthToken, Signer,
     },
-    config::{AsymmetricKey, JwtConfig},
+    config::{AsymmetricKey, JwtConfig, KeyFunction},
     endpoints::login::oauth::{
         OAuthProvider, OAuthProviderError, OAuthProviderFn, OAuthProviderName,
     },
@@ -34,10 +35,33 @@ where
     T: VAppPermission,
 {
     pub async fn new(jwt: JwtConfig, keys: Vec<AsymmetricKey>) -> Result<Self, AppError> {
-        let mut jwt_signers = vec![];
-
+        let mut signers = vec![];
+        let mut verifiers = vec![];
+        
         for key in &keys {
-            jwt_signers.push(JwtSigner::new(&key).await.unwrap())
+            match &key {
+                &AsymmetricKey::Local { function, .. } if function == &KeyFunction::All => {
+                    signers.push(key);
+                    verifiers.push(key);
+                }
+                &AsymmetricKey::Local { function, .. } if function == &KeyFunction::Sign => {
+                    signers.push(key);
+                }
+                &AsymmetricKey::Local { function, .. } if function == &KeyFunction::Verify => {
+                    verifiers.push(key);
+                }
+                &AsymmetricKey::Ckms { function, .. } if function == &KeyFunction::All => {
+                    signers.push(key);
+                    verifiers.push(key);
+                }
+                &AsymmetricKey::Ckms { function, .. } if function == &KeyFunction::Sign => {
+                    signers.push(key);
+                }
+                &AsymmetricKey::Ckms { function, .. } if function == &KeyFunction::Verify => {
+                    verifiers.push(key);
+                }
+                _ => {}
+            }
         }
 
         Ok(Self {
@@ -66,12 +90,12 @@ where
             jwt: JwtContext {
                 default_expiration: jwt.default_expiration,
                 jwks: JwkSet {
-                    keys: jwt_signers.iter().map(|k| k.jwk()).cloned().collect(),
+                    keys: join_all(verifiers.iter().map(|k| k.as_jwk())).await.into_iter().collect::<Result<Vec<_>, _>>()?,
                 },
-                signers: jwt_signers,
+                signers: join_all(signers.iter().map(|k| JwtSigner::new(k))).await.into_iter().collect::<Result<Vec<_>, _>>()?,
             },
             secrets: SecretContext {
-                signer: keys[0].as_signer().await?,
+                signers: join_all(signers.iter().map(|k| k.as_signer())).await.into_iter().collect::<Result<Vec<_>, _>>()?,
             },
             oauth_providers: HashMap::new(),
         })
@@ -112,7 +136,7 @@ where
     }
 
     pub fn signer(&self) -> &dyn Signer {
-        &*self.secrets.signer
+        &*self.secrets.signers[0]
     }
 
     pub fn insert_oauth_provider(
@@ -154,5 +178,5 @@ pub struct JwtContext {
 }
 
 pub struct SecretContext {
-    pub signer: Arc<dyn Signer>,
+    pub signers: Vec<Arc<dyn Signer>>,
 }
