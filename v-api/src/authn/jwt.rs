@@ -17,6 +17,7 @@ use jsonwebtoken::{
 use newtype_uuid::TypedUuid;
 use rsa::traits::PublicKeyParts;
 use serde::{Deserialize, Serialize};
+use tap::TapFallible;
 use thiserror::Error;
 use tracing::instrument;
 use v_model::{AccessTokenId, UserId, UserProviderId};
@@ -152,23 +153,23 @@ pub struct JwtSigner {
     #[allow(dead_code)]
     header: Header,
     encoded_header: String,
-    jwk: Jwk,
     signer: Arc<dyn Signer>,
 }
 
 impl JwtSigner {
-    pub async fn new(key: &AsymmetricKey) -> Result<Self, JwtSignerError> {
-        let jwk = key.as_jwk().await?;
+    pub fn new(key: &AsymmetricKey) -> Result<Self, JwtSignerError> {
         let mut header = Header::new(Algorithm::RS256);
         header.kid = Some(key.kid().to_string());
         let encoded_header = to_base64_json(&header)?;
 
-        let signer = key.as_signer().await.map_err(JwtSignerError::InvalidKey)?;
+        let signer = key
+            .as_signer()
+            .map_err(JwtSignerError::InvalidKey)
+            .tap_err(|err| tracing::error!(?err, "Unable to construct signer for JWT key"))?;
 
         Ok(Self {
             header,
             encoded_header,
-            jwk,
             signer,
         })
     }
@@ -178,7 +179,7 @@ impl JwtSigner {
     where
         C: Serialize + Debug,
     {
-        tracing::debug!(?self.jwk.common.key_id, ?claims, "Signing claims");
+        tracing::debug!(?claims, "Signing claims");
 
         let encoded_claims = to_base64_json(claims)?;
 
@@ -197,19 +198,12 @@ impl JwtSigner {
         let enc_signature = URL_SAFE_NO_PAD.encode(signature);
         Ok(format!("{}.{}", message, enc_signature))
     }
-
-    pub fn jwk(&self) -> &Jwk {
-        &self.jwk
-    }
 }
 
 impl AsymmetricKey {
-    pub async fn as_jwk(&self) -> Result<Jwk, JwtSignerError> {
+    pub fn as_jwk(&self) -> Result<Jwk, JwtSignerError> {
         let key_id = self.kid();
-        let public_key = self
-            .public_key()
-            .await
-            .map_err(JwtSignerError::InvalidKey)?;
+        let public_key = self.public_key().map_err(JwtSignerError::InvalidKey)?;
 
         Ok(Jwk {
             common: CommonParameters {

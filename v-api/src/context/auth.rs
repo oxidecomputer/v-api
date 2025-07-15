@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use async_trait::async_trait;
 use dropshot::RequestContext;
-use futures::future::join_all;
 use jsonwebtoken::jwk::JwkSet;
 use std::{collections::HashMap, sync::Arc};
 use v_model::permissions::Caller;
@@ -11,9 +11,9 @@ use v_model::permissions::Caller;
 use crate::{
     authn::{
         jwt::{Claims, JwtSigner, JwtSignerError},
-        AuthError, AuthToken, Signer,
+        AuthError, AuthToken, Signer, VerificationResult, Verifier,
     },
-    config::{AsymmetricKey, JwtConfig, KeyFunction},
+    config::{AsymmetricKey, JwtConfig},
     endpoints::login::oauth::{
         OAuthProvider, OAuthProviderError, OAuthProviderFn, OAuthProviderName,
     },
@@ -34,33 +34,18 @@ impl<T> AuthContext<T>
 where
     T: VAppPermission,
 {
-    pub async fn new(jwt: JwtConfig, keys: Vec<AsymmetricKey>) -> Result<Self, AppError> {
+    pub fn new(jwt: JwtConfig, keys: Vec<AsymmetricKey>) -> Result<Self, AppError> {
         let mut signers = vec![];
         let mut verifiers = vec![];
-        
+
         for key in &keys {
             match &key {
-                &AsymmetricKey::Local { function, .. } if function == &KeyFunction::All => {
-                    signers.push(key);
-                    verifiers.push(key);
-                }
-                &AsymmetricKey::Local { function, .. } if function == &KeyFunction::Sign => {
+                &AsymmetricKey::LocalSigner { .. } | &AsymmetricKey::CkmsSigner { .. } => {
                     signers.push(key);
                 }
-                &AsymmetricKey::Local { function, .. } if function == &KeyFunction::Verify => {
+                &AsymmetricKey::LocalVerifier { .. } | &AsymmetricKey::CkmsVerifier { .. } => {
                     verifiers.push(key);
                 }
-                &AsymmetricKey::Ckms { function, .. } if function == &KeyFunction::All => {
-                    signers.push(key);
-                    verifiers.push(key);
-                }
-                &AsymmetricKey::Ckms { function, .. } if function == &KeyFunction::Sign => {
-                    signers.push(key);
-                }
-                &AsymmetricKey::Ckms { function, .. } if function == &KeyFunction::Verify => {
-                    verifiers.push(key);
-                }
-                _ => {}
             }
         }
 
@@ -90,12 +75,29 @@ where
             jwt: JwtContext {
                 default_expiration: jwt.default_expiration,
                 jwks: JwkSet {
-                    keys: join_all(verifiers.iter().map(|k| k.as_jwk())).await.into_iter().collect::<Result<Vec<_>, _>>()?,
+                    keys: verifiers
+                        .iter()
+                        .map(|k| k.as_jwk())
+                        .into_iter()
+                        .collect::<Result<Vec<_>, _>>()?,
                 },
-                signers: join_all(signers.iter().map(|k| JwtSigner::new(k))).await.into_iter().collect::<Result<Vec<_>, _>>()?,
+                signers: signers
+                    .iter()
+                    .map(|k| JwtSigner::new(k))
+                    .into_iter()
+                    .collect::<Result<Vec<_>, _>>()?,
             },
             secrets: SecretContext {
-                signers: join_all(signers.iter().map(|k| k.as_signer())).await.into_iter().collect::<Result<Vec<_>, _>>()?,
+                signers: signers
+                    .iter()
+                    .map(|k| k.as_signer())
+                    .into_iter()
+                    .collect::<Result<Vec<_>, _>>()?,
+                verifiers: verifiers
+                    .iter()
+                    .map(|k| k.as_verifier())
+                    .into_iter()
+                    .collect::<Result<Vec<_>, _>>()?,
             },
             oauth_providers: HashMap::new(),
         })
@@ -139,6 +141,10 @@ where
         &*self.secrets.signers[0]
     }
 
+    pub fn verifiers(&self) -> &[Arc<dyn Verifier>] {
+        &self.secrets.verifiers
+    }
+
     pub fn insert_oauth_provider(
         &mut self,
         name: OAuthProviderName,
@@ -171,6 +177,23 @@ where
     }
 }
 
+#[async_trait]
+impl<T> Verifier for AuthContext<T>
+where
+    T: VAppPermission,
+{
+    fn verify(&self, message: &[u8], signature: &[u8]) -> VerificationResult {
+        let mut combined_result = VerificationResult::default();
+        for verifier in self.verifiers() {
+            let mut result = verifier.verify(message, signature);
+            combined_result.verified = combined_result.verified || result.verified;
+            combined_result.errors.append(&mut result.errors);
+        }
+
+        combined_result
+    }
+}
+
 pub struct JwtContext {
     pub default_expiration: i64,
     pub signers: Vec<JwtSigner>,
@@ -179,4 +202,33 @@ pub struct JwtContext {
 
 pub struct SecretContext {
     pub signers: Vec<Arc<dyn Signer>>,
+    pub verifiers: Vec<Arc<dyn Verifier>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        authn::Verifier,
+        config::JwtConfig,
+        context::auth::AuthContext,
+        permissions::VPermission,
+        util::tests::{mock_key, MockKey},
+    };
+
+    #[tokio::test]
+    async fn test_construct_with_signers_and_verifiers() {
+        let MockKey { signer, verifier } = mock_key("test");
+        let ctx = AuthContext::<VPermission>::new(
+            JwtConfig {
+                default_expiration: 5000,
+            },
+            vec![signer, verifier],
+        )
+        .unwrap();
+
+        let data = vec![1, 2, 3, 4, 5, 6];
+        let signature = ctx.signer().sign(&data).await.unwrap();
+        let verification = ctx.verify(&data, &signature);
+        assert!(verification.verified);
+    }
 }

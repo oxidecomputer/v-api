@@ -8,6 +8,8 @@ use secrecy::{ExposeSecret, SecretSlice, SecretString};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::authn::Verifier;
+
 use super::{Signer, SigningKeyError};
 
 pub struct RawKey {
@@ -24,8 +26,8 @@ pub enum ApiKeyError {
     MalformedSignature(#[from] rsa::signature::Error),
     #[error("Failed to sign API key: {0}")]
     Signing(SigningKeyError),
-    #[error("Failed to sign API key: {0}")]
-    Verify(SigningKeyError),
+    #[error("Failed to verify API key")]
+    Verify,
 }
 
 impl RawKey {
@@ -60,11 +62,19 @@ impl RawKey {
         ))
     }
 
-    pub fn verify(&self, signer: &dyn Signer, signature: &[u8]) -> Result<(), ApiKeyError> {
+    pub fn verify<T>(&self, verifier: &T, signature: &[u8]) -> Result<(), ApiKeyError>
+    where
+        T: Verifier,
+    {
         let signature = hex::decode(signature)?;
-        Ok(signer
+        if verifier
             .verify(&self.clear.expose_secret(), &signature)
-            .map_err(ApiKeyError::Verify)?)
+            .verified
+        {
+            return Ok(());
+        }
+
+        Err(ApiKeyError::Verify)
     }
 
     pub fn expose_secret(&self) -> &[u8] {
@@ -128,15 +138,33 @@ impl SignedKey {
 #[cfg(test)]
 mod tests {
     use secrecy::ExposeSecret;
+    use std::sync::Arc;
     use uuid::Uuid;
 
     use super::RawKey;
-    use crate::util::tests::mock_key;
+    use crate::{
+        authn::{VerificationResult, Verifier},
+        util::tests::{mock_key, MockKey},
+    };
+
+    struct TestVerifier {
+        verifier: Arc<dyn Verifier>,
+    }
+
+    impl Verifier for TestVerifier {
+        fn verify(&self, message: &[u8], signature: &[u8]) -> VerificationResult {
+            self.verifier.verify(message, signature)
+        }
+    }
 
     #[tokio::test]
     async fn test_verifies_signature() {
         let id = Uuid::new_v4();
-        let signer = mock_key().as_signer().await.unwrap();
+        let MockKey { signer, verifier } = mock_key("test");
+        let signer = signer.as_signer().unwrap();
+        let verifier = TestVerifier {
+            verifier: verifier.as_verifier().unwrap(),
+        };
 
         let raw = RawKey::generate::<8>(&id);
         let signed = raw.sign(&*signer).await.unwrap();
@@ -145,14 +173,15 @@ mod tests {
 
         assert_eq!(
             (),
-            raw2.verify(&*signer, signed.signature.as_bytes()).unwrap()
+            raw2.verify(&verifier, signed.signature.as_bytes()).unwrap()
         )
     }
 
     #[tokio::test]
     async fn test_generates_signatures() {
         let id = Uuid::new_v4();
-        let signer = mock_key().as_signer().await.unwrap();
+        let MockKey { signer, .. } = mock_key("test");
+        let signer = signer.as_signer().unwrap();
 
         let raw1 = RawKey::generate::<8>(&id);
         let signed1 = raw1.sign(&*signer).await.unwrap();

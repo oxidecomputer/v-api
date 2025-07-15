@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use async_trait::async_trait;
 use auth::AuthContext;
 use chrono::{TimeDelta, Utc};
 use dropshot::{ClientErrorStatusCode, HttpError, RequestContext, ServerContext};
@@ -27,7 +28,7 @@ use v_model::{
 use crate::{
     authn::{
         jwt::{Claims, JwtSigner, JwtSignerError},
-        AuthError, AuthToken, Signer,
+        AuthError, AuthToken, Signer, VerificationResult, Verifier,
     },
     config::{AsymmetricKey, JwtConfig},
     endpoints::login::{
@@ -228,7 +229,7 @@ where
         jwt: JwtConfig,
         keys: Vec<AsymmetricKey>,
     ) -> Result<Self, AppError> {
-        let auth_ctx = AuthContext::new(jwt, keys).await?;
+        let auth_ctx = AuthContext::new(jwt, keys)?;
         let group_ctx = GroupContext::new(storage.clone());
         let mut mapping_ctx = MappingContext::new(storage.clone());
         mapping_ctx.set_engine(Some(Arc::new(DefaultMappingEngine::new(
@@ -374,7 +375,7 @@ where
         Ok(match auth {
             Some(token) => {
                 self.user
-                    .get_caller(&self.builtin_registration_user(), self.signer(), token)
+                    .get_caller(&self.builtin_registration_user(), &self.auth, token)
                     .await?
             }
             None => {
@@ -622,6 +623,16 @@ where
         } else {
             resource_restricted()
         }
+    }
+}
+
+#[async_trait]
+impl<T> Verifier for VContext<T>
+where
+    T: VAppPermission,
+{
+    fn verify(&self, message: &[u8], signature: &[u8]) -> VerificationResult {
+        self.auth.verify(message, signature)
     }
 }
 
@@ -882,20 +893,21 @@ pub(crate) mod test_mocks {
         endpoints::login::oauth::{google::GoogleOAuthProvider, OAuthProviderName},
         mapper::DefaultMappingEngine,
         permissions::VPermission,
-        util::tests::mock_key,
+        util::tests::{mock_key, MockKey},
     };
 
     use super::VContext;
 
     // Construct a mock context that can be used in tests
     pub async fn mock_context(storage: Arc<MockStorage>) -> VContext<VPermission> {
+        let MockKey { signer, verifier } = mock_key("test");
         let mut ctx = VContext::new(
             "".to_string(),
             storage,
             JwtConfig::default(),
             vec![
                 // We are in the context of a test and do not care about the key leaking
-                mock_key(),
+                signer, verifier,
             ],
         )
         .await

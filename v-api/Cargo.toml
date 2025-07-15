@@ -50,6 +50,7 @@ yup-oauth2 = { workspace = true }
 async-trait = { workspace = true }
 mockall = { workspace = true }
 rsa = { workspace = true, features = ["pem"] }
+tracing-subscriber = { workspace = true }
 v-model = { path = "../v-model", features = ["mock"] }
 
 [package.metadata.dist]
