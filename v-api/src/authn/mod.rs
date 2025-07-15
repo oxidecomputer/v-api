@@ -233,15 +233,13 @@ pub enum CloudKmsError {
 
 // Signer that relies on a private key stored in GCP. This signer never
 // has direct access to the private key
-pub struct CloudKmsSigner {
+pub struct CloudKmsSigningKey {
     client: CloudKMS<HttpsConnector<HttpConnector>>,
     key_name: String,
 }
 
 // Verifier that fetches and stores a public key from Cloud KMS.
-pub struct CloudKmsVerifier {
-    client: CloudKMS<HttpsConnector<HttpConnector>>,
-    key_name: String,
+pub struct CloudKmsVerifyingKey {
     verifying_key: VerifyingKey<Sha256>,
 }
 
@@ -257,7 +255,7 @@ pub struct CloudKmsSignatureResponse {
 }
 
 #[async_trait]
-impl Signer for CloudKmsSigner {
+impl Signer for CloudKmsSigningKey {
     #[instrument(skip(self, message), err(Debug))]
     async fn sign(&self, message: &[u8]) -> Result<Vec<u8>, SigningKeyError> {
         let mut hasher = Sha256::new();
@@ -325,7 +323,7 @@ impl Signer for CloudKmsSigner {
     }
 }
 
-impl Verifier for CloudKmsVerifier {
+impl Verifier for CloudKmsVerifyingKey {
     fn verify(&self, message: &[u8], signature: &[u8]) -> VerificationResult {
         let signature = Signature::try_from(signature);
         tracing::trace!("Verifying message");
@@ -427,7 +425,7 @@ impl AsymmetricKey {
 
                 Arc::new(LocalSigningKey { signing_key })
             }
-            AsymmetricKey::CkmsSigner { .. } => Arc::new(CloudKmsSigner {
+            AsymmetricKey::CkmsSigner { .. } => Arc::new(CloudKmsSigningKey {
                 client: block_on(cloud_kms_client())?,
                 key_name: self.cloud_kms_key_name().unwrap(),
             }),
@@ -444,11 +442,7 @@ impl AsymmetricKey {
             }
             AsymmetricKey::CkmsVerifier { .. } => {
                 let verifying_key = VerifyingKey::new(self.public_key()?);
-                Arc::new(CloudKmsVerifier {
-                    client: block_on(cloud_kms_client())?,
-                    key_name: self.cloud_kms_key_name().unwrap(),
-                    verifying_key,
-                })
+                Arc::new(CloudKmsVerifyingKey { verifying_key })
             }
             _ => Err(SigningKeyError::KeyDoesNotSupportFunction)?,
         })
