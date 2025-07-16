@@ -642,40 +642,6 @@ where
         }
     }
 
-    #[instrument(skip(self), err(Debug))]
-    async fn ensure_api_user(
-        &self,
-        caller: &Caller<T>,
-        api_user_id: TypedUuid<UserId>,
-        mut mapped_permissions: Permissions<T>,
-        mut mapped_groups: BTreeSet<TypedUuid<AccessGroupId>>,
-    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        match self.get_api_user(caller, &api_user_id).await {
-            ResourceResult::Ok(info) => {
-                // Ensure that the existing user has "at least" the mapped permissions
-                let mut update: NewApiUser<T> = info.user.into();
-                update.permissions.append(&mut mapped_permissions);
-                update.groups.append(&mut mapped_groups);
-
-                self.update_api_user(caller, update).await
-            }
-            ResourceResult::Err(ResourceError::DoesNotExist) => {
-                // TODO: Seems weird this is not a create call, indicates an issue higher up in
-                // the call chain
-                self.update_api_user(
-                    caller,
-                    NewApiUser {
-                        id: api_user_id,
-                        permissions: mapped_permissions,
-                        groups: mapped_groups,
-                    },
-                )
-                .await
-            }
-            other => other,
-        }
-    }
-
     pub async fn register_access_token(
         &self,
         caller: &Caller<T>,

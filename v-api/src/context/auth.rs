@@ -217,12 +217,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_construct_with_signers_and_verifiers() {
-        let MockKey { signer, verifier } = mock_key("test");
+        let MockKey { verifier: wrong_verifier, .. } = mock_key("test1");
+        let MockKey { signer, verifier } = mock_key("test2");
         let ctx = AuthContext::<VPermission>::new(
             JwtConfig {
                 default_expiration: 5000,
             },
-            vec![signer, verifier],
+            vec![signer, wrong_verifier, verifier],
         )
         .unwrap();
 
