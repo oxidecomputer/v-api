@@ -15,6 +15,7 @@ crc32c = { workspace = true }
 diesel = { workspace = true }
 dropshot = { workspace = true }
 dropshot-authorization-header = { path = "../dropshot-authorization-header" }
+futures = { workspace = true }
 google-cloudkms1 = { workspace = true }
 hex = { workspace = true }
 http = { workspace = true }
@@ -49,6 +50,7 @@ yup-oauth2 = { workspace = true }
 async-trait = { workspace = true }
 mockall = { workspace = true }
 rsa = { workspace = true, features = ["pem"] }
+tracing-subscriber = { workspace = true }
 v-model = { path = "../v-model", features = ["mock"] }
 
 [package.metadata.dist]

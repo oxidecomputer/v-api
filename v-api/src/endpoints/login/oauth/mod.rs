@@ -18,7 +18,7 @@ use thiserror::Error;
 use tracing::instrument;
 use v_model::OAuthClient;
 
-use crate::authn::{key::RawKey, Signer};
+use crate::authn::{key::RawKey, Verifier};
 
 use super::{UserInfo, UserInfoError, UserInfoProvider};
 
@@ -199,14 +199,19 @@ pub struct OAuthProviderNameParam {
 }
 
 pub trait CheckOAuthClient {
-    fn is_secret_valid(&self, key: &RawKey, signer: &dyn Signer) -> bool;
+    fn is_secret_valid<T>(&self, key: &RawKey, verifiers: &T) -> bool
+    where
+        T: Verifier;
     fn is_redirect_uri_valid(&self, redirect_uri: &str) -> bool;
 }
 
 impl CheckOAuthClient for OAuthClient {
-    fn is_secret_valid(&self, key: &RawKey, signer: &dyn Signer) -> bool {
+    fn is_secret_valid<T>(&self, key: &RawKey, verifier: &T) -> bool
+    where
+        T: Verifier,
+    {
         for secret in &self.secrets {
-            match key.verify(signer, secret.secret_signature.as_bytes()) {
+            match key.verify(verifier, secret.secret_signature.as_bytes()) {
                 Ok(_) => return true,
                 Err(err) => {
                     tracing::error!(?err, ?secret.id, "Client contains an invalid secret signature");

@@ -245,7 +245,6 @@ pub async fn cloud_kms_client() -> Result<CloudKMS<HttpsConnector<HttpConnector>
 pub mod tests {
     use dropshot::{HttpCodedResponse, HttpError};
     use http::StatusCode;
-    use rand_core::RngCore;
     use rsa::{
         pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding},
         RsaPrivateKey, RsaPublicKey,
@@ -263,26 +262,40 @@ pub mod tests {
         }
     }
 
-    pub fn mock_key() -> AsymmetricKey {
+    pub struct MockKey {
+        pub signer: AsymmetricKey,
+        pub verifier: AsymmetricKey,
+    }
+
+    pub fn mock_key(kid: &str) -> MockKey {
         let mut rng = rand::thread_rng();
         let bits = 2048;
         let priv_key = RsaPrivateKey::new(&mut rng, bits).expect("Failed to generate a key");
         let pub_key = RsaPublicKey::from(&priv_key);
 
-        let mut kid = [0; 24];
-        rng.fill_bytes(&mut kid);
-
-        AsymmetricKey::Local {
-            kid: hex::encode(kid),
-            private: String::from_utf8(
-                priv_key
-                    .to_pkcs8_pem(LineEnding::LF)
-                    .unwrap()
-                    .as_bytes()
-                    .to_vec(),
-            )
-            .unwrap(),
-            public: pub_key.to_public_key_pem(LineEnding::LF).unwrap(),
+        MockKey {
+            signer: AsymmetricKey::LocalSigner {
+                kid: hex::encode(kid),
+                private: String::from_utf8(
+                    priv_key
+                        .to_pkcs8_pem(LineEnding::LF)
+                        .unwrap()
+                        .as_bytes()
+                        .to_vec(),
+                )
+                .unwrap(),
+            },
+            verifier: AsymmetricKey::LocalVerifier {
+                kid: hex::encode(kid),
+                public: String::from_utf8(
+                    pub_key
+                        .to_public_key_pem(LineEnding::LF)
+                        .unwrap()
+                        .as_bytes()
+                        .to_vec(),
+                )
+                .unwrap(),
+            },
         }
     }
 }

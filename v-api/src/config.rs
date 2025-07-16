@@ -69,16 +69,23 @@ impl Default for JwtConfig {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum AsymmetricKey {
-    Local {
+    LocalVerifier {
         kid: String,
-        // #[serde(with = "serde_bytes")]
-        private: String,
         public: String,
     },
-    // Kms {
-    //     id: String,
-    // },
-    Ckms {
+    LocalSigner {
+        kid: String,
+        private: String,
+    },
+    CkmsVerifier {
+        kid: String,
+        version: u16,
+        key: String,
+        keyring: String,
+        location: String,
+        project: String,
+    },
+    CkmsSigner {
         kid: String,
         version: u16,
         key: String,
@@ -91,8 +98,10 @@ pub enum AsymmetricKey {
 impl AsymmetricKey {
     pub fn kid(&self) -> &str {
         match self {
-            Self::Local { kid, .. } => kid,
-            Self::Ckms { kid, .. } => kid,
+            Self::LocalVerifier { kid, .. } => kid,
+            Self::LocalSigner { kid, .. } => kid,
+            Self::CkmsVerifier { kid, .. } => kid,
+            Self::CkmsSigner { kid, .. } => kid,
         }
     }
 }

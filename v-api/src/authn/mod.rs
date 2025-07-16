@@ -7,6 +7,7 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use crc32c::crc32c;
 use dropshot::{HttpError, RequestContext, SharedExtractor};
 use dropshot_authorization_header::bearer::BearerAuth;
+use futures::executor::block_on;
 use google_cloudkms1::{
     api::AsymmetricSignRequest, hyper_rustls::HttpsConnector,
     hyper_util::client::legacy::connect::HttpConnector, CloudKMS,
@@ -15,7 +16,7 @@ use rsa::{
     pkcs1v15::Signature,
     pkcs1v15::{SigningKey, VerifyingKey},
     pkcs8::{DecodePrivateKey, DecodePublicKey},
-    signature::{Keypair, RandomizedSigner, SignatureEncoding, Verifier},
+    signature::{RandomizedSigner, SignatureEncoding, Verifier as RsaVerifier},
     RsaPrivateKey, RsaPublicKey,
 };
 use serde::{Deserialize, Serialize};
@@ -121,6 +122,8 @@ pub enum SigningKeyError {
     GeneratedInvalidSignature,
     #[error("Failed to parse public key: {0}")]
     InvalidPublicKey(#[from] rsa::pkcs8::spki::Error),
+    #[error("Key does not support the requested function")]
+    KeyDoesNotSupportFunction,
     #[error("Invalid signature: {0}")]
     Signature(#[from] rsa::signature::Error),
 }
@@ -128,33 +131,83 @@ pub enum SigningKeyError {
 #[async_trait]
 pub trait Signer: Send + Sync {
     async fn sign(&self, message: &[u8]) -> Result<Vec<u8>, SigningKeyError>;
-    fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), SigningKeyError>;
+}
+
+#[derive(Debug, Default)]
+pub struct VerificationResult {
+    pub verified: bool,
+    pub errors: Vec<Option<SigningKeyError>>,
+}
+
+#[async_trait]
+pub trait Verifier: Send + Sync {
+    fn verify(&self, message: &[u8], signature: &[u8]) -> VerificationResult;
 }
 
 // A signer that stores a local in memory key for signing new JWTs
-pub struct LocalKey {
+pub struct LocalSigningKey {
     signing_key: SigningKey<Sha256>,
+}
+
+// A signer that stores a local in memory key for verifying JWTs
+pub struct LocalVerifyingKey {
     verifying_key: VerifyingKey<Sha256>,
 }
 
 #[async_trait]
-impl Signer for LocalKey {
+impl Signer for LocalSigningKey {
     #[instrument(skip(self, message), err(Debug))]
     async fn sign(&self, message: &[u8]) -> Result<Vec<u8>, SigningKeyError> {
         tracing::trace!("Signing message");
         let mut rng = rand::thread_rng();
         let signature = self.signing_key.sign_with_rng(&mut rng, message).to_vec();
 
-        self.verify(message, &signature)
-            .map_err(|_| SigningKeyError::GeneratedInvalidSignature)?;
-
         Ok(signature)
     }
+}
 
-    fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), SigningKeyError> {
-        let signature = Signature::try_from(signature)?;
+#[async_trait]
+impl Verifier for LocalVerifyingKey {
+    fn verify(&self, message: &[u8], signature: &[u8]) -> VerificationResult {
+        let signature = Signature::try_from(signature);
         tracing::trace!("Verifying message");
-        Ok(self.verifying_key.verify(message, &signature)?)
+        match signature {
+            Ok(signature) => {
+                let verification_result = self.verifying_key.verify(message, &signature);
+                match verification_result {
+                    Ok(()) => VerificationResult {
+                        verified: true,
+                        errors: vec![None],
+                    },
+                    Err(err) => VerificationResult {
+                        verified: false,
+                        errors: vec![Some(SigningKeyError::from(err))],
+                    },
+                }
+            }
+            Err(err) => VerificationResult {
+                verified: false,
+                errors: vec![Some(SigningKeyError::from(err))],
+            },
+        }
+    }
+}
+
+impl<T> Verifier for Arc<T>
+where
+    T: Verifier,
+{
+    fn verify(&self, message: &[u8], signature: &[u8]) -> VerificationResult {
+        (**self).verify(message, signature)
+    }
+}
+
+impl<T> Verifier for &Arc<T>
+where
+    T: Verifier,
+{
+    fn verify(&self, message: &[u8], signature: &[u8]) -> VerificationResult {
+        (**self).verify(message, signature)
     }
 }
 
@@ -178,11 +231,15 @@ pub enum CloudKmsError {
     RemoteKeyAuthMissing(#[from] std::io::Error),
 }
 
-// Signer that relies on a private key stored in GCP, and a locally store JWK. This signer never
+// Signer that relies on a private key stored in GCP. This signer never
 // has direct access to the private key
-pub struct CloudKmsSigner {
+pub struct CloudKmsSigningKey {
     client: CloudKMS<HttpsConnector<HttpConnector>>,
     key_name: String,
+}
+
+// Verifier that fetches and stores a public key from Cloud KMS.
+pub struct CloudKmsVerifyingKey {
     verifying_key: VerifyingKey<Sha256>,
 }
 
@@ -198,7 +255,7 @@ pub struct CloudKmsSignatureResponse {
 }
 
 #[async_trait]
-impl Signer for CloudKmsSigner {
+impl Signer for CloudKmsSigningKey {
     #[instrument(skip(self, message), err(Debug))]
     async fn sign(&self, message: &[u8]) -> Result<Vec<u8>, SigningKeyError> {
         let mut hasher = Sha256::new();
@@ -264,18 +321,38 @@ impl Signer for CloudKmsSigner {
 
         Ok(signature)
     }
+}
 
-    fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), SigningKeyError> {
-        let signature = Signature::try_from(signature)?;
-        Ok(self.verifying_key.verify(message, &signature)?)
+impl Verifier for CloudKmsVerifyingKey {
+    fn verify(&self, message: &[u8], signature: &[u8]) -> VerificationResult {
+        let signature = Signature::try_from(signature);
+        tracing::trace!("Verifying message");
+        match signature {
+            Ok(signature) => {
+                let verification_result = self.verifying_key.verify(message, &signature);
+                match verification_result {
+                    Ok(()) => VerificationResult {
+                        verified: true,
+                        errors: vec![None],
+                    },
+                    Err(err) => VerificationResult {
+                        verified: false,
+                        errors: vec![Some(SigningKeyError::from(err))],
+                    },
+                }
+            }
+            Err(err) => VerificationResult {
+                verified: false,
+                errors: vec![Some(SigningKeyError::from(err))],
+            },
+        }
     }
 }
 
 impl AsymmetricKey {
     fn cloud_kms_key_name(&self) -> Option<String> {
         match self {
-            AsymmetricKey::Local { .. } => None,
-            AsymmetricKey::Ckms {
+            AsymmetricKey::CkmsSigner {
                 version,
                 key,
                 keyring,
@@ -286,63 +363,88 @@ impl AsymmetricKey {
                 "projects/{}/locations/{}/keyRings/{}/cryptoKeys/{}/cryptoKeyVersions/{}",
                 project, location, keyring, key, version
             )),
+            AsymmetricKey::CkmsVerifier {
+                version,
+                key,
+                keyring,
+                location,
+                project,
+                ..
+            } => Some(format!(
+                "projects/{}/locations/{}/keyRings/{}/cryptoKeys/{}/cryptoKeyVersions/{}",
+                project, location, keyring, key, version
+            )),
+            _ => None,
         }
     }
 
     pub async fn private_key(&self) -> Result<RsaPrivateKey, SigningKeyError> {
         Ok(match self {
-            AsymmetricKey::Local { private, .. } => {
+            AsymmetricKey::LocalSigner { private, .. } => {
                 RsaPrivateKey::from_pkcs8_pem(&private).unwrap()
             }
             _ => unimplemented!(),
         })
     }
 
-    pub async fn public_key(&self) -> Result<RsaPublicKey, SigningKeyError> {
+    pub fn public_key(&self) -> Result<RsaPublicKey, SigningKeyError> {
         Ok(match self {
-            AsymmetricKey::Local { public, .. } => RsaPublicKey::from_public_key_pem(&public)?,
-            AsymmetricKey::Ckms { .. } => {
-                let kms_client = cloud_kms_client().await?;
+            AsymmetricKey::LocalVerifier { public, .. } => {
+                RsaPublicKey::from_public_key_pem(&public)?
+            }
+            AsymmetricKey::LocalSigner { .. } => Err(SigningKeyError::KeyDoesNotSupportFunction)?,
+            AsymmetricKey::CkmsVerifier { .. } => {
+                let public_key = block_on(async {
+                    let kms_client = cloud_kms_client().await?;
 
-                let public_key = kms_client
-                    .projects()
-                    .locations_key_rings_crypto_keys_crypto_key_versions_get_public_key(
-                        &self.cloud_kms_key_name().unwrap(),
+                    Ok::<_, SigningKeyError>(
+                        kms_client
+                            .projects()
+                            .locations_key_rings_crypto_keys_crypto_key_versions_get_public_key(
+                                &self.cloud_kms_key_name().unwrap(),
+                            )
+                            .doit()
+                            .await
+                            .map_err(|err| CloudKmsError::from(err))?
+                            .1,
                     )
-                    .doit()
-                    .await
-                    .map_err(|err| CloudKmsError::from(err))?
-                    .1;
+                })?;
 
                 let pem = public_key.pem.ok_or(CloudKmsError::MissingPem)?;
                 RsaPublicKey::from_public_key_pem(&pem)?
             }
+            AsymmetricKey::CkmsSigner { .. } => Err(SigningKeyError::KeyDoesNotSupportFunction)?,
         })
     }
 
-    pub async fn as_signer(&self) -> Result<Arc<dyn Signer>, SigningKeyError> {
+    pub fn as_signer(&self) -> Result<Arc<dyn Signer>, SigningKeyError> {
         Ok(match self {
-            AsymmetricKey::Local { private, .. } => {
+            AsymmetricKey::LocalSigner { private, .. } => {
                 let private_key = RsaPrivateKey::from_pkcs8_pem(&private).unwrap();
                 let signing_key = SigningKey::new(private_key);
-                let verifying_key = signing_key.verifying_key();
 
-                Arc::new(LocalKey {
-                    signing_key,
-                    verifying_key,
-                })
+                Arc::new(LocalSigningKey { signing_key })
             }
-            AsymmetricKey::Ckms { .. } => {
-                let verifying_key = VerifyingKey::new(self.public_key().await?);
+            AsymmetricKey::CkmsSigner { .. } => Arc::new(CloudKmsSigningKey {
+                client: block_on(cloud_kms_client())?,
+                key_name: self.cloud_kms_key_name().unwrap(),
+            }),
+            _ => Err(SigningKeyError::KeyDoesNotSupportFunction)?,
+        })
+    }
 
-                tracing::trace!("Generated Cloud KMS signer");
+    pub fn as_verifier(&self) -> Result<Arc<dyn Verifier>, SigningKeyError> {
+        Ok(match self {
+            AsymmetricKey::LocalVerifier { public, .. } => {
+                let verifying_key = VerifyingKey::new(RsaPublicKey::from_public_key_pem(public)?);
 
-                Arc::new(CloudKmsSigner {
-                    client: cloud_kms_client().await?,
-                    key_name: self.cloud_kms_key_name().unwrap(),
-                    verifying_key,
-                })
+                Arc::new(LocalVerifyingKey { verifying_key })
             }
+            AsymmetricKey::CkmsVerifier { .. } => {
+                let verifying_key = VerifyingKey::new(self.public_key()?);
+                Arc::new(CloudKmsVerifyingKey { verifying_key })
+            }
+            _ => Err(SigningKeyError::KeyDoesNotSupportFunction)?,
         })
     }
 }

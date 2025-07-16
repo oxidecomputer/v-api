@@ -580,7 +580,7 @@ where
         // the token provided matches the stored signature
         if link_request.target_user_id == caller.id
             && secret
-                .verify(ctx.signer(), link_request.secret_signature.as_bytes())
+                .verify(ctx, link_request.secret_signature.as_bytes())
                 .is_ok()
         {
             let provider = ctx

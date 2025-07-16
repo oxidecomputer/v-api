@@ -352,6 +352,6 @@ mod tests {
 
         let key = RawKey::try_from(&secret.key.0).unwrap();
 
-        assert!(client.is_secret_valid(&key, ctx.signer()))
+        assert!(client.is_secret_valid(&key, &ctx))
     }
 }

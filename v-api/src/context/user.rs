@@ -28,7 +28,7 @@ use v_model::{
 use crate::{
     authn::{
         jwt::{Claims, JwtSigner, JwtSignerError},
-        AuthToken, Signer,
+        AuthToken, Verifier,
     },
     permissions::{VAppPermission, VPermission},
     response::{resource_restricted, OptionalResource, ResourceError, ResourceResult},
@@ -126,15 +126,18 @@ where
         extensions
     }
 
-    #[instrument(skip(self, registration_user, signer, token))]
-    pub async fn get_caller(
+    #[instrument(skip(self, registration_user, verifier, token))]
+    pub async fn get_caller<U>(
         &self,
         registration_user: &Caller<T>,
-        signer: &dyn Signer,
+        verifier: &U,
         token: &AuthToken,
-    ) -> Result<Caller<T>, UserContextError> {
+    ) -> Result<Caller<T>, UserContextError>
+    where
+        U: Verifier,
+    {
         let (api_user_id, base_permissions) = self
-            .get_base_permissions(registration_user, signer, token)
+            .get_base_permissions(registration_user, verifier, token)
             .await?;
 
         match self.get_api_user(registration_user, &api_user_id).await {
@@ -192,12 +195,15 @@ where
         }
     }
 
-    async fn get_base_permissions(
+    async fn get_base_permissions<U>(
         &self,
         caller: &Caller<T>,
-        signer: &dyn Signer,
+        verifier: &U,
         auth: &AuthToken,
-    ) -> Result<(TypedUuid<UserId>, BasePermissions<T>), UserContextError> {
+    ) -> Result<(TypedUuid<UserId>, BasePermissions<T>), UserContextError>
+    where
+        U: Verifier,
+    {
         Ok(match auth {
             AuthToken::ApiKey(api_key) => {
                 async {
@@ -230,7 +236,7 @@ where
 
                     if let Some(key) = key.pop() {
                         if let Err(err) =
-                            api_key.verify(signer, key.key_signature.as_bytes())
+                            api_key.verify(verifier, key.key_signature.as_bytes())
                         {
                             tracing::debug!(?err, "Failed to verify api key");
                             Err(UserContextError::FailedToAuthenticate)

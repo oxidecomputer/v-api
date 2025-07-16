@@ -608,7 +608,7 @@ where
 
     tracing::debug!("Constructed client secret");
 
-    if !client.is_secret_valid(&client_secret, ctx.signer()) {
+    if !client.is_secret_valid(&client_secret, ctx) {
         Err(OAuthError {
             error: OAuthErrorCode::InvalidClient,
             error_description: Some("Invalid client secret".to_string()),
