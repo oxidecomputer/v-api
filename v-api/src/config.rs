@@ -67,7 +67,7 @@ impl Default for JwtConfig {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "lowercase")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AsymmetricKey {
     LocalVerifier {
         kid: String,
