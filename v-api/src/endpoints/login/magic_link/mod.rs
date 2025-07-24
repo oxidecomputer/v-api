@@ -15,7 +15,9 @@ use tracing::instrument;
 use url::Url;
 use uuid::Uuid;
 use v_model::{
-    permissions::PermissionStorage, schema_ext::MagicLinkMedium, MagicLink, MagicLinkAttemptId,
+    permissions::PermissionStorage,
+    schema_ext::{MagicLinkAttemptState, MagicLinkMedium},
+    MagicLink, MagicLinkAttemptId,
 };
 
 use crate::{
@@ -193,6 +195,9 @@ where
         .complete_login_attempt(body.attempt_id, &signed_key.signature())
         .await
         .map_err(|err| match err {
+            ResourceError::InternalError(MagicLinkTransitionError::State(
+                MagicLinkAttemptState::Complete,
+            )) => bad_request("Login link has already been used"),
             ResourceError::InternalError(MagicLinkTransitionError::Expired) => {
                 bad_request("Login link is expired")
             }
