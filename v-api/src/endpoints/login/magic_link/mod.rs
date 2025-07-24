@@ -191,7 +191,13 @@ where
     let attempt = ctx
         .magic_link
         .complete_login_attempt(body.attempt_id, &signed_key.signature())
-        .await?;
+        .await
+        .map_err(|err| match err {
+            ResourceError::InternalError(MagicLinkTransitionError::Expired) => {
+                bad_request("Login link is expired")
+            }
+            err => err.into(),
+        })?;
 
     // Verify that the submitted recipient email address matches the one that this attempt was
     // generated for
