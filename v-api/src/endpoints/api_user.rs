@@ -140,7 +140,7 @@ where
     filter.api_user_id = Some(info.iter().map(|info| info.user.id).collect());
     let providers: HashMap<TypedUuid<UserId>, Vec<ApiUserProvider>> = ctx
         .user
-        .list_api_user_provider(&caller, filter, &ListPagination::default().limit(10))
+        .list_api_user_provider(&caller, filter, &ListPagination::unlimited())
         .await?
         .into_iter()
         .fold(HashMap::new(), |mut map, provider| {
