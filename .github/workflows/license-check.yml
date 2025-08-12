@@ -1,10 +1,10 @@
 name: license-check
+permissions:
+  contents: read
 
 on:
-  pull_request:
   push:
-    branch:
-      - main
+  pull_request:
 
 jobs:
   license:
