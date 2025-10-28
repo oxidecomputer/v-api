@@ -12,7 +12,7 @@ async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel" }
 async-trait = "0.1.89"
 base64 = "0.22"
 bb8 = "0.8.6"
-chrono = "0.4.41"
+chrono = "0.4.42"
 cookie = { version = "0.18.1" }
 crc32c = "0.6.8"
 diesel = { version = "2.2.12", features = ["postgres"] }
