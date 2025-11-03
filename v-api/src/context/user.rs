@@ -36,7 +36,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-enum BasePermissions<T: Permission> {
+pub enum BasePermissions<T: Permission> {
     Full,
     Restricted(Permissions<T>),
 }
@@ -141,41 +141,7 @@ where
             .await?;
 
         match self.get_api_user(registration_user, &api_user_id).await {
-            ResourceResult::Ok(info) => {
-                let extensions = self.get_extensions(&info.user).await;
-
-                // The permissions for the caller is the intersection of the user's permissions and the tokens permissions
-                let user_permissions = self.get_user_permissions(&info.user, &extensions).await?;
-
-                let combined_permissions = match &base_permissions {
-                    BasePermissions::Full => user_permissions.clone(),
-                    BasePermissions::Restricted(permissions) => {
-                        let token_permissions = <T as PermissionStorage>::expand(
-                            permissions,
-                            &info.user,
-                            Some(&user_permissions),
-                            &extensions,
-                        );
-                        token_permissions.intersect(&user_permissions)
-                    }
-                };
-
-                tracing::trace!(token = ?base_permissions, user = ?user_permissions, combined = ?combined_permissions, "Computed caller permissions");
-
-                let caller: Caller<T> = Caller {
-                    id: api_user_id,
-                    permissions: combined_permissions
-                        .into_iter()
-                        .map(|p| p.into())
-                        .collect::<Permissions<T>>(),
-                    extensions,
-                };
-
-                tracing::info!(?caller.id, "Resolved caller");
-                tracing::debug!(?caller.permissions, "Caller permissions");
-
-                Ok(caller)
-            }
+            ResourceResult::Ok(info) => self.resolve_caller(&info, base_permissions).await,
             Err(ResourceError::Conflict) => {
                 tracing::error!("User lookup resulted in a conflict. This should be impossible!");
                 Err(UserContextError::FailedToAuthenticate)
@@ -193,6 +159,46 @@ where
                 Err(UserContextError::Storage(err))
             }
         }
+    }
+
+    pub async fn resolve_caller(
+        &self,
+        info: &ApiUserInfo<T>,
+        base_permissions: BasePermissions<T>,
+    ) -> Result<Caller<T>, UserContextError> {
+        let extensions = self.get_extensions(&info.user).await;
+
+        // The permissions for the caller is the intersection of the user's permissions and the tokens permissions
+        let user_permissions = self.get_user_permissions(&info.user, &extensions).await?;
+
+        let combined_permissions = match &base_permissions {
+            BasePermissions::Full => user_permissions.clone(),
+            BasePermissions::Restricted(permissions) => {
+                let token_permissions = <T as PermissionStorage>::expand(
+                    permissions,
+                    &info.user,
+                    Some(&user_permissions),
+                    &extensions,
+                );
+                token_permissions.intersect(&user_permissions)
+            }
+        };
+
+        tracing::trace!(token = ?base_permissions, user = ?user_permissions, combined = ?combined_permissions, "Computed caller permissions");
+
+        let caller: Caller<T> = Caller {
+            id: info.user.id,
+            permissions: combined_permissions
+                .into_iter()
+                .map(|p| p.into())
+                .collect::<Permissions<T>>(),
+            extensions,
+        };
+
+        tracing::info!(?caller.id, "Resolved caller");
+        tracing::debug!(?caller.permissions, "Caller permissions");
+
+        Ok(caller)
     }
 
     async fn get_base_permissions<U>(

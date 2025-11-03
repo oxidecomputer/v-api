@@ -25,7 +25,7 @@ use v_model::{
 
 use crate::{
     authn::key::RawKey,
-    context::{ApiContext, VContextWithCaller},
+    context::{user::BasePermissions, ApiContext, VContextWithCaller},
     error::ApiError,
     permissions::{VAppPermission, VAppPermissionResponse},
     secrets::OpenApiSecretString,
@@ -116,6 +116,41 @@ where
 
     tracing::trace!(user = ?serde_json::to_string(&info.user), "Found user");
     Ok(HttpResponseOk(GetUserResponse::new(info.user, providers)))
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CallerResponse<T> {
+    pub id: TypedUuid<UserId>,
+    pub permissions: Permissions<T>,
+}
+
+#[instrument(skip(rqctx), err(Debug))]
+pub async fn resolve_api_user_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+    path: Path<ApiUserPath>,
+) -> Result<HttpResponseOk<CallerResponse<U>>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+    U: VAppPermissionResponse + From<T> + JsonSchema,
+{
+    let (ctx, caller) = rqctx.as_ctx().await?;
+    let path = path.into_inner();
+    let info = ctx.user.get_api_user(&caller, &path.user_id).await?;
+
+    let resolved_caller = ctx
+        .user
+        .resolve_caller(&info, BasePermissions::Full)
+        .await?;
+
+    tracing::trace!(caller = ?resolved_caller, "Resolved caller");
+    Ok(HttpResponseOk(CallerResponse {
+        id: resolved_caller.id,
+        permissions: resolved_caller
+            .permissions
+            .into_iter()
+            .map(|p| p.into())
+            .collect::<Permissions<U>>(),
+    }))
 }
 
 #[instrument(skip(rqctx), err(Debug))]
