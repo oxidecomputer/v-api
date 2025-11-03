@@ -60,7 +60,7 @@ pub use mapping::MappingContext;
 pub mod oauth;
 pub use oauth::OAuthContext;
 pub mod user;
-pub use user::{CallerExtension, ExtensionError, UserContext};
+pub use user::{BasePermissions, CallerExtension, ExtensionError, UserContext};
 
 pub trait VApiStorage<P: Send + Sync>:
     ApiUserStore<P>
