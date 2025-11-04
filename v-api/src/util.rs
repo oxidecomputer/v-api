@@ -17,11 +17,11 @@ pub mod request {
     use http::header::COOKIE;
 
     pub trait RequestCookies {
-        fn cookie(&self, name: &str) -> Option<Cookie>;
+        fn cookie(&'_ self, name: &str) -> Option<Cookie<'_>>;
     }
 
     impl RequestCookies for RequestInfo {
-        fn cookie(&self, name: &str) -> Option<Cookie> {
+        fn cookie(&'_ self, name: &str) -> Option<Cookie<'_>> {
             let cookie_header = self.headers().get(COOKIE)?;
 
             Cookie::split_parse(String::from_utf8(cookie_header.as_bytes().to_vec()).unwrap())
