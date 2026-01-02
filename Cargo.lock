@@ -695,9 +695,9 @@ dependencies = [
 
 [[package]]
 name = "google-apis-common"
-version = "7.0.0"
+version = "8.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7530ee92a7e9247c3294ae1b84ea98474dbc27563c49a14d3938e816499bf38f"
+checksum = "020dd415ee200770d835d01674084400a4d11e6c108ae941f660e8264f49d4ca"
 dependencies = [
  "base64",
  "chrono",
@@ -705,7 +705,6 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
- "itertools",
  "mime",
  "percent-encoding",
  "serde",
@@ -718,9 +717,9 @@ dependencies = [
 
 [[package]]
 name = "google-cloudkms1"
-version = "6.0.0+20240621"
+version = "7.0.0+20251203"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82a9330f7af5181eee3077ba4221f5a45ecdbfb26c36d2b89a7682226c6b9af5"
+checksum = "cef55117f2b1d40e56f2fd26161a2e93c9d7899be9389a9d4aa59308168e880c"
 dependencies = [
  "chrono",
  "google-apis-common",
@@ -1100,15 +1099,6 @@ dependencies = [
  "hermit-abi",
  "libc",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "itertools"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
-dependencies = [
- "either",
 ]
 
 [[package]]
@@ -3388,14 +3378,12 @@ dependencies = [
 
 [[package]]
 name = "yup-oauth2"
-version = "11.0.0"
+version = "12.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ed5f19242090128c5809f6535cc7b8d4e2c32433f6c6005800bbc20a644a7f0"
+checksum = "f16c9757965c8c261c64d2ca27a8335688b54cc2147f135fd36449d7bbfcff00"
 dependencies = [
- "anyhow",
  "async-trait",
  "base64",
- "futures",
  "http",
  "http-body-util",
  "hyper",
@@ -3408,6 +3396,7 @@ dependencies = [
  "seahash",
  "serde",
  "serde_json",
+ "thiserror 2.0.17",
  "time",
  "tokio",
  "url",
