@@ -168,8 +168,8 @@ impl Parse for ContractSettings {
 
         let kind = settings
             .iter()
+            .find(|&s| s.name == "kind")
             .cloned()
-            .find(|s| s.name == "kind")
             .ok_or_else(|| Error::new(span, "Expand must contain a \"kind\" setting"))?;
 
         Ok(ContractSettings {
@@ -201,8 +201,8 @@ impl Parse for ExpandSettings {
 
         let kind = settings
             .iter()
+            .find(|&s| s.name == "kind")
             .cloned()
-            .find(|s| s.name == "kind")
             .ok_or_else(|| Error::new(span, "Expand must contain a \"kind\" setting"))?;
 
         Ok(ExpandSettings {
@@ -214,8 +214,8 @@ impl Parse for ExpandSettings {
             },
             variant: settings
                 .iter()
+                .find(|&s| s.name == "variant")
                 .cloned()
-                .find(|s| s.name == "variant")
                 .expect("Expand must contain a \"variant\" setting")
                 .value,
             source: settings.iter().find(|s| s.name == "source").map(|s| {
@@ -253,13 +253,13 @@ impl Parse for ScopeSettings {
         Ok(ScopeSettings {
             from: settings
                 .iter()
+                .find(|&v| v.name == "from")
                 .cloned()
-                .find(|v| v.name == "from")
                 .map(|v| v.value),
             to: settings
                 .iter()
+                .find(|&v| v.name == "to")
                 .cloned()
-                .find(|v| v.name == "to")
                 .map(|v| v.value),
         })
     }
@@ -313,12 +313,10 @@ pub fn v_api(attr: TokenStream, input: TokenStream) -> TokenStream {
                 #as_scope_out
                 #permission_storage_out
             }
-            .into()
         }
         _ => quote_spanned! {
                 input_span => compile_error!("v_api may only be applied to enums");
-        }
-        .into(),
+        },
     };
 
     let from = from_system_permission_tokens(&attr.source, &input.ident);
@@ -734,7 +732,7 @@ fn as_scope_trait_tokens(
 ) -> proc_macro2::TokenStream {
     let as_scope_mapping = scope_settings.iter().filter_map(|(variant, settings)| {
         settings.to.as_ref().map(|to| {
-            let fields = if variant.fields.len() > 0 {
+            let fields = if !variant.fields.is_empty() {
                 let mut fields = quote! {};
                 variant
                     .fields
@@ -802,7 +800,6 @@ fn as_scope_trait_tokens(
             }
         }
     }
-    .into()
 }
 
 fn permission_storage_trait_tokens(
@@ -844,7 +841,7 @@ fn permission_storage_contract_tokens(
                 .then(|| set_name.clone()),
         );
 
-        let fields = if variant.fields.len() > 0 && setting.kind != ContractKind::Drop {
+        let fields = if !variant.fields.is_empty() && setting.kind != ContractKind::Drop {
             let mut fields = quote! {};
             variant
                 .fields

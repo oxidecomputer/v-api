@@ -117,7 +117,7 @@ impl From<AuthError> for HttpError {
 #[derive(Debug, Error)]
 pub enum SigningKeyError {
     #[error("Cloud signing failed: {0}")]
-    CloudKmsError(#[from] CloudKmsError),
+    CloudKmsError(#[from] Box<CloudKmsError>),
     #[error("Failed to immediately verify generated signature")]
     GeneratedInvalidSignature,
     #[error("Failed to parse public key: {0}")]
@@ -288,16 +288,20 @@ impl Signer for CloudKmsSigningKey {
         let signature = match response {
             Ok((_, response)) => {
                 tracing::info!("Library deserialization succeeded");
-                response.signature.ok_or(CloudKmsError::MissingSignature)
+                response
+                    .signature
+                    .ok_or_else(|| Box::new(CloudKmsError::MissingSignature))
             }
             Err(google_cloudkms1::Error::JsonDecodeError(body, _)) => {
                 tracing::info!("Using fallback deserialization");
                 serde_json::from_str::<CloudKmsSignatureResponse>(&body)
-                    .map_err(|err| CloudKmsError::FailedToDeserialize(err))
+                    .map_err(CloudKmsError::FailedToDeserialize)
+                    .map_err(Box::new)
                     .and_then(|resp| {
-                        let decoded = BASE64_STANDARD
+                        BASE64_STANDARD
                             .decode(&resp.signature)
                             .map_err(CloudKmsError::FailedToDecodeSignature)
+                            .map_err(Box::new)
                             .and_then(|decoded| {
                                 let check = crc32c(&decoded);
                                 let check_valid = resp
@@ -309,14 +313,12 @@ impl Signer for CloudKmsSigningKey {
                                 if check_valid {
                                     Ok(decoded)
                                 } else {
-                                    Err(CloudKmsError::CorruptedSignature)
+                                    Err(Box::new(CloudKmsError::CorruptedSignature))
                                 }
-                            });
-
-                        decoded
+                            })
                     })
             }
-            Err(err) => Err(CloudKmsError::from(err)),
+            Err(err) => Err(Box::new(CloudKmsError::from(err))),
         }?;
 
         Ok(signature)
@@ -381,7 +383,7 @@ impl AsymmetricKey {
     pub async fn private_key(&self) -> Result<RsaPrivateKey, SigningKeyError> {
         Ok(match self {
             AsymmetricKey::LocalSigner { private, .. } => {
-                RsaPrivateKey::from_pkcs8_pem(&private).unwrap()
+                RsaPrivateKey::from_pkcs8_pem(private).unwrap()
             }
             _ => unimplemented!(),
         })
@@ -390,7 +392,7 @@ impl AsymmetricKey {
     pub fn public_key(&self) -> Result<RsaPublicKey, SigningKeyError> {
         Ok(match self {
             AsymmetricKey::LocalVerifier { public, .. } => {
-                RsaPublicKey::from_public_key_pem(&public)?
+                RsaPublicKey::from_public_key_pem(public)?
             }
             AsymmetricKey::LocalSigner { .. } => Err(SigningKeyError::KeyDoesNotSupportFunction)?,
             AsymmetricKey::CkmsVerifier { .. } => {
@@ -405,12 +407,16 @@ impl AsymmetricKey {
                             )
                             .doit()
                             .await
-                            .map_err(|err| CloudKmsError::from(err))?
+                            .map_err(CloudKmsError::from)
+                            .map_err(Box::new)?
                             .1,
                     )
                 })?;
 
-                let pem = public_key.pem.ok_or(CloudKmsError::MissingPem)?;
+                let pem = public_key
+                    .pem
+                    .ok_or(CloudKmsError::MissingPem)
+                    .map_err(Box::new)?;
                 RsaPublicKey::from_public_key_pem(&pem)?
             }
             AsymmetricKey::CkmsSigner { .. } => Err(SigningKeyError::KeyDoesNotSupportFunction)?,
@@ -420,7 +426,7 @@ impl AsymmetricKey {
     pub fn as_signer(&self) -> Result<Arc<dyn Signer>, SigningKeyError> {
         Ok(match self {
             AsymmetricKey::LocalSigner { private, .. } => {
-                let private_key = RsaPrivateKey::from_pkcs8_pem(&private).unwrap();
+                let private_key = RsaPrivateKey::from_pkcs8_pem(private).unwrap();
                 let signing_key = SigningKey::new(private_key);
 
                 Arc::new(LocalSigningKey { signing_key })

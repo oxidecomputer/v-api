@@ -21,8 +21,8 @@ use v_model::{
         MagicLinkSecretStore, MagicLinkStore, MapperStore, OAuthClientRedirectUriStore,
         OAuthClientSecretStore, OAuthClientStore, StoreError,
     },
-    AccessGroupId, ApiUserInfo, ApiUserProvider, InvalidValueError, LinkRequest, NewApiUser,
-    NewApiUserProvider, NewLinkRequest, UserId, UserProviderId,
+    AccessGroupId, ApiUserInfo, ApiUserProvider, LinkRequest, NewApiUser, NewApiUserProvider,
+    NewLinkRequest, UserId, UserProviderId,
 };
 
 use crate::{
@@ -133,7 +133,7 @@ where
 {
     type AppPermissions = T;
     fn v_ctx(&self) -> &VContext<T> {
-        &self
+        self
     }
 }
 
@@ -211,14 +211,6 @@ impl From<UserContextError> for HttpError {
     }
 }
 
-#[derive(Debug, Error)]
-pub enum LoginAttemptError {
-    #[error(transparent)]
-    FailedToCreate(#[from] InvalidValueError),
-    #[error(transparent)]
-    Storage(#[from] StoreError),
-}
-
 impl<T> VContext<T>
 where
     T: VAppPermission,
@@ -278,11 +270,11 @@ where
     }
 
     pub fn signer(&self) -> &dyn Signer {
-        &*self.auth.signer()
+        self.auth.signer()
     }
 
     pub fn jwt_signer(&self) -> &JwtSigner {
-        &*self.auth.jwt_signer()
+        self.auth.jwt_signer()
     }
 
     pub fn public_url(&self) -> &str {
@@ -342,7 +334,7 @@ where
     ) -> Claims {
         let expires_at =
             Utc::now() + TimeDelta::try_seconds(self.auth.default_jwt_expiration()).unwrap();
-        Claims::new(self, None, &api_user, &api_user_provider, scope, expires_at)
+        Claims::new(self, None, api_user, api_user_provider, scope, expires_at)
     }
 
     pub fn insert_oauth_provider(
@@ -364,7 +356,7 @@ where
         &self,
         rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     ) -> Result<Caller<T>, VContextCallerError> {
-        self.get_caller_from_token(self.auth.authn_token(&rqctx).await?.as_ref())
+        self.get_caller_from_token(self.auth.authn_token(rqctx).await?.as_ref())
             .await
     }
 
@@ -392,9 +384,11 @@ where
         info: UserInfo,
     ) -> ResourceResult<(ApiUserInfo<T>, ApiUserProvider), ApiError> {
         // Check if we have seen this identity before
-        let mut filter = ApiUserProviderFilter::default();
-        filter.provider = Some(vec![info.external_id.provider().to_string()]);
-        filter.provider_id = Some(vec![info.external_id.id().to_string()]);
+        let filter = ApiUserProviderFilter {
+            provider: Some(vec![info.external_id.provider().to_string()]),
+            provider_id: Some(vec![info.external_id.id().to_string()]),
+            ..Default::default()
+        };
 
         tracing::info!("Check for existing users matching the requested external id");
 
@@ -516,10 +510,10 @@ where
         api_user_provider: &TypedUuid<UserProviderId>,
         scope: Option<Vec<String>>,
     ) -> ResourceResult<RegisteredAccessToken, ApiError> {
-        let claims = self.generate_claims(&api_user, &api_user_provider, scope);
+        let claims = self.generate_claims(api_user, api_user_provider, scope);
         let token = self
             .user
-            .register_access_token(caller, self.jwt_signer(), &api_user, &claims)
+            .register_access_token(caller, self.jwt_signer(), api_user, &claims)
             .await
             // TODO: FIXME
             .unwrap();

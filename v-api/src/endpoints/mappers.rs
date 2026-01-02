@@ -35,7 +35,7 @@ where
     T::AppPermissions: Permission + From<VPermission> + AsScope + PermissionStorage,
 {
     let ctx = rqctx.v_ctx();
-    let caller = ctx.get_caller(&rqctx).await?;
+    let caller = ctx.get_caller(rqctx).await?;
 
     Ok(HttpResponseOk(
         ctx.mapping

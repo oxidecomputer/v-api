@@ -107,7 +107,7 @@ impl ExtractUserInfo for GoogleOAuthProvider {
         let display_name = profile_info
             .names
             .into_iter()
-            .filter_map(|name| name.metadata.primary.then(|| name.display_name))
+            .filter_map(|name| name.metadata.primary.then_some(name.display_name))
             .nth(0);
 
         Ok(UserInfo {
@@ -138,7 +138,7 @@ impl OAuthProvider for GoogleOAuthProvider {
     fn client_id(&self, client_type: &ClientType) -> &str {
         match client_type {
             ClientType::Device => &self.device_public.client_id,
-            ClientType::Web { .. } => &self.web_public.client_id,
+            ClientType::Web => &self.web_public.client_id,
         }
     }
 
@@ -148,7 +148,7 @@ impl OAuthProvider for GoogleOAuthProvider {
                 .device_private
                 .as_ref()
                 .map(|private| &private.client_secret),
-            ClientType::Web { .. } => self
+            ClientType::Web => self
                 .web_private
                 .as_ref()
                 .map(|private| &private.client_secret),

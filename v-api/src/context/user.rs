@@ -188,10 +188,7 @@ where
 
         let caller: Caller<T> = Caller {
             id: info.user.id,
-            permissions: combined_permissions
-                .into_iter()
-                .map(|p| p.into())
-                .collect::<Permissions<T>>(),
+            permissions: combined_permissions.into_iter().collect::<Permissions<T>>(),
             extensions,
         };
 
@@ -210,7 +207,7 @@ where
     where
         U: Verifier,
     {
-        Ok(match auth {
+        match auth {
             AuthToken::ApiKey(api_key) => {
                 async {
                     tracing::debug!("Attempt to authenticate");
@@ -278,7 +275,7 @@ where
 
                 Ok((jwt.claims.sub, permissions))
             }
-        }?)
+        }
     }
 
     #[instrument(skip(self), fields(user_id = ?user.id, groups = ?user.groups))]
@@ -287,7 +284,7 @@ where
         user: &ApiUser<T>,
         extensions: &ArcMap,
     ) -> Result<Permissions<T>, StoreError> {
-        let mut group_permissions = self.get_user_group_permissions(&user, &extensions).await?;
+        let mut group_permissions = self.get_user_group_permissions(user, extensions).await?;
         let mut permissions = user.permissions.clone();
         permissions.append(&mut group_permissions);
 
@@ -316,7 +313,7 @@ where
         let permissions = groups
             .into_iter()
             .fold(Permissions::new(), |mut aggregate, group| {
-                let mut expanded = <T as PermissionStorage>::expand(&group.permissions, &user, Some(&user.permissions), extensions);
+                let mut expanded = <T as PermissionStorage>::expand(&group.permissions, user, Some(&user.permissions), extensions);
 
                 tracing::trace!(group_id = ?group.id, group_name = ?group.name, permissions = ?expanded, "Transformed group into permission set");
                 aggregate.append(&mut expanded);
@@ -393,8 +390,8 @@ where
         if caller.can(&VPermission::CreateApiUser.into()) {
             let mut new_user = NewApiUser {
                 id: TypedUuid::new_v4(),
-                permissions: permissions,
-                groups: groups,
+                permissions,
+                groups,
             };
             new_user.permissions = <T as PermissionStorage>::contract(&new_user.permissions);
             Ok(ApiUserStore::upsert(&*self.storage, new_user).await?)
@@ -544,7 +541,7 @@ where
                         id: user
                             .email
                             .map(|email| email.id)
-                            .unwrap_or_else(|| TypedUuid::new_v4()),
+                            .unwrap_or_else(TypedUuid::new_v4),
                         user_id,
                         email: email.to_string(),
                     },

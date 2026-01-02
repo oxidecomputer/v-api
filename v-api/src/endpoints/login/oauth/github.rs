@@ -130,7 +130,7 @@ impl OAuthProvider for GitHubOAuthProvider {
     fn client_id(&self, client_type: &ClientType) -> &str {
         match client_type {
             ClientType::Device => &self.device_public.client_id,
-            ClientType::Web { .. } => &self.web_public.client_id,
+            ClientType::Web => &self.web_public.client_id,
         }
     }
 
@@ -140,7 +140,7 @@ impl OAuthProvider for GitHubOAuthProvider {
                 .device_private
                 .as_ref()
                 .map(|private| &private.client_secret),
-            ClientType::Web { .. } => self
+            ClientType::Web => self
                 .web_private
                 .as_ref()
                 .map(|private| &private.client_secret),

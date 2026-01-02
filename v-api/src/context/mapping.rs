@@ -127,8 +127,8 @@ where
                     Ok(mapping) => {
                         tracing::trace!(?mapper.name, "Applying mapping");
                         (
-                            mapping.permissions_for(&info).await?,
-                            mapping.groups_for(&info).await?,
+                            mapping.permissions_for(info).await?,
+                            mapping.groups_for(info).await?,
                         )
                     }
                     Err(err) => {
@@ -181,8 +181,8 @@ where
         let mut update: NewMapper = mapper.clone().into();
         update.activations = activations;
 
-        Ok(MapperStore::upsert(&*self.storage, &update)
+        MapperStore::upsert(&*self.storage, &update)
             .await
-            .map(|_| ())?)
+            .map(|_| ())
     }
 }
