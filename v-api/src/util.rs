@@ -191,7 +191,8 @@ pub mod response {
     }
 }
 
-pub async fn cloud_kms_client() -> Result<CloudKMS<HttpsConnector<HttpConnector>>, CloudKmsError> {
+pub async fn cloud_kms_client(
+) -> Result<CloudKMS<HttpsConnector<HttpConnector>>, Box<CloudKmsError>> {
     let opts = yup_oauth2::ApplicationDefaultCredentialsFlowOpts::default();
 
     tracing::trace!(?opts, "Request GCP credentials");
@@ -210,7 +211,7 @@ pub async fn cloud_kms_client() -> Result<CloudKMS<HttpsConnector<HttpConnector>
                     ?err,
                     "Failed to construct Cloud KMS credentials from service account"
                 );
-                CloudKmsError::RemoteKeyAuthMissing(err)
+                Box::new(CloudKmsError::RemoteKeyAuthMissing(err))
             })?
         }
         yup_oauth2::authenticator::ApplicationDefaultCredentialsTypes::InstanceMetadata(auth) => {
@@ -221,7 +222,7 @@ pub async fn cloud_kms_client() -> Result<CloudKMS<HttpsConnector<HttpConnector>
                     ?err,
                     "Failed to construct Cloud KMS credentials from instance metadata"
                 );
-                CloudKmsError::RemoteKeyAuthMissing(err)
+                Box::new(CloudKmsError::RemoteKeyAuthMissing(err))
             })?
         }
     };

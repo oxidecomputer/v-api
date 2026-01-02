@@ -41,7 +41,7 @@ where
         .map_err(ApiError::OAuth)?;
 
     Ok(HttpResponseOk(provider.provider_info(
-        &rqctx.v_ctx().public_url(),
+        rqctx.v_ctx().public_url(),
         &ClientType::Device,
     )))
 }
@@ -70,7 +70,7 @@ pub struct ProviderTokenExchange {
 impl AccessTokenExchange {
     pub fn new(
         req: AccessTokenExchangeRequest,
-        provider: &Box<dyn OAuthProvider + Send + Sync>,
+        provider: &(dyn OAuthProvider + Send + Sync),
     ) -> Option<Self> {
         provider
             .client_secret(&ClientType::Device)
@@ -117,7 +117,7 @@ where
 {
     let ctx = rqctx.v_ctx();
     let path = path.into_inner();
-    let mut provider = ctx
+    let provider = ctx
         .get_oauth_provider(&path.provider)
         .await
         .map_err(ApiError::OAuth)?;
@@ -126,9 +126,7 @@ where
 
     let exchange_request = body.into_inner();
 
-    if let Some(mut exchange) = AccessTokenExchange::new(exchange_request, &mut provider) {
-        exchange.provider.client_secret = exchange.provider.client_secret;
-
+    if let Some(exchange) = AccessTokenExchange::new(exchange_request, &*provider) {
         let token_exchange_endpoint = provider.token_exchange_endpoint();
         let client = reqwest::Client::new();
 

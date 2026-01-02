@@ -17,7 +17,7 @@ pub fn migrations() -> Vec<Box<dyn Migration<Pg>>> {
 }
 
 pub fn run_migrations(url: &str) {
-    let mut conn = db_conn(&url);
+    let mut conn = db_conn(url);
     run_migrations_on_conn(&mut conn);
 }
 

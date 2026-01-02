@@ -78,10 +78,6 @@ enum OAuthErrorCode {
     UnsupportedResponseType,
 }
 
-#[derive(Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum OAuthTokenErrorCode {}
-
 impl From<OAuthError> for HttpError {
     fn from(value: OAuthError) -> Self {
         let serialized = serde_json::to_string(&value).unwrap();
@@ -146,7 +142,7 @@ where
             }
         })?;
 
-    if client.is_redirect_uri_valid(&redirect_uri) {
+    if client.is_redirect_uri_valid(redirect_uri) {
         Ok(client)
     } else {
         Err(OAuthError {
@@ -230,12 +226,7 @@ where
 
     tracing::info!(?attempt.id, "Created login attempt");
 
-    Ok(oauth_redirect_response(
-        ctx.public_url(),
-        &*provider,
-        &attempt,
-        pkce_challenge,
-    )?)
+    oauth_redirect_response(ctx.public_url(), &*provider, &attempt, pkce_challenge)
 }
 
 fn oauth_redirect_response(
@@ -366,7 +357,7 @@ where
     let attempt_id = verify_csrf(&rqctx.request, &query)?;
 
     http_response_temporary_redirect(
-        authz_code_callback_op_inner(&ctx, &attempt_id, query.code, query.error).await?,
+        authz_code_callback_op_inner(ctx, &attempt_id, query.code, query.error).await?,
     )
 }
 
@@ -383,7 +374,7 @@ where
     // material to try and complete the flow
     let mut attempt = ctx
         .login
-        .get_login_attempt(&attempt_id)
+        .get_login_attempt(attempt_id)
         .await
         .map_err(to_internal_error)?
         .ok_or_else(|| {
@@ -503,7 +494,7 @@ where
 
     // Verify the submitted client credentials
     authorize_code_exchange(
-        &ctx,
+        ctx,
         &body.grant_type,
         client_id,
         &client_secret.0,
@@ -519,7 +510,7 @@ where
         .get_login_attempt_for_code(&body.code)
         .await
         .map_err(to_internal_error)?
-        .ok_or_else(|| OAuthError {
+        .ok_or(OAuthError {
             error: OAuthErrorCode::InvalidGrant,
             error_description: None,
             error_uri: None,
@@ -581,7 +572,7 @@ async fn authorize_code_exchange<T>(
 where
     T: VAppPermission + PermissionStorage,
 {
-    let client = get_oauth_client(ctx, &client_id, &redirect_uri).await?;
+    let client = get_oauth_client(ctx, &client_id, redirect_uri).await?;
 
     // Verify that we received the expected grant type
     if grant_type != "authorization_code" {

@@ -79,6 +79,7 @@ where
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 #[instrument(skip(ctx, secret, recipient, redirect_uri))]
 async fn magic_link_send_op_inner<T>(
     ctx: &VContext<T>,
@@ -192,7 +193,7 @@ where
 
     let attempt = ctx
         .magic_link
-        .complete_login_attempt(body.attempt_id, &signed_key.signature())
+        .complete_login_attempt(body.attempt_id, signed_key.signature())
         .await
         .map_err(|err| match err {
             ResourceError::InternalError(MagicLinkTransitionError::State(

@@ -61,9 +61,10 @@ where
         user: &UserInfo,
     ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError> {
         tracing::trace!("Running email domain mapper");
-        let has_email_in_domain = user.verified_emails.iter().fold(false, |found, email| {
-            found || email.ends_with(&self.data.domain)
-        });
+        let has_email_in_domain = user
+            .verified_emails
+            .iter()
+            .any(|email| email.ends_with(&self.data.domain));
 
         if has_email_in_domain {
             let groups = self

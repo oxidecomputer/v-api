@@ -164,8 +164,8 @@ impl From<ApiUserProviderModel> for ApiUserProvider {
             user_id: TypedUuid::from_untyped_uuid(value.api_user_id),
             provider: value.provider,
             provider_id: value.provider_id,
-            emails: value.emails.into_iter().filter_map(|e| e).collect(),
-            display_names: value.display_names.into_iter().filter_map(|d| d).collect(),
+            emails: value.emails.into_iter().flatten().collect(),
+            display_names: value.display_names.into_iter().flatten().collect(),
             created_at: value.created_at,
             updated_at: value.updated_at,
             deleted_at: value.deleted_at,
@@ -289,10 +289,8 @@ impl LoginAttempt {
 
         if let Some(error) = &self.error {
             params.insert("error", error);
-        } else {
-            if let Some(authz_code) = &self.authz_code {
-                params.insert("code", authz_code);
-            }
+        } else if let Some(authz_code) = &self.authz_code {
+            params.insert("code", authz_code);
         }
 
         let query_string = params

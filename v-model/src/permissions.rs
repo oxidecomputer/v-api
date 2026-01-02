@@ -192,16 +192,24 @@ where
         self.0.iter()
     }
 
-    pub fn into_iter(self) -> impl Iterator<Item = T> {
-        self.0.into_iter()
-    }
-
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+}
+
+impl<T> IntoIterator for Permissions<T>
+where
+    T: Permission,
+{
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 

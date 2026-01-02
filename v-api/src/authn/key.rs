@@ -52,7 +52,7 @@ impl RawKey {
     pub async fn sign(self, signer: &dyn Signer) -> Result<SignedKey, ApiKeyError> {
         let signature = hex::encode(
             signer
-                .sign(&self.clear.expose_secret())
+                .sign(self.clear.expose_secret())
                 .await
                 .map_err(ApiKeyError::Signing)?,
         );
@@ -68,7 +68,7 @@ impl RawKey {
     {
         let signature = hex::decode(signature)?;
         if verifier
-            .verify(&self.clear.expose_secret(), &signature)
+            .verify(self.clear.expose_secret(), &signature)
             .verified
         {
             return Ok(());

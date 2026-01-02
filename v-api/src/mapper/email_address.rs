@@ -57,7 +57,7 @@ where
         if user
             .verified_emails
             .iter()
-            .fold(false, |found, email| found || email == &self.data.email)
+            .any(|email| email == &self.data.email)
         {
             Ok(self.data.permissions.clone().unwrap_or_default())
         } else {
@@ -75,7 +75,7 @@ where
         let found_email = user
             .verified_emails
             .iter()
-            .fold(false, |found, email| found || email == &self.data.email);
+            .any(|email| email == &self.data.email);
 
         if found_email {
             let groups = self

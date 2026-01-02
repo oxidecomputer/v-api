@@ -43,7 +43,7 @@ where
         &self,
         id: &TypedUuid<LinkRequestId>,
     ) -> Result<Option<LinkRequest>, StoreError> {
-        Ok(LinkRequestStore::get(&*self.storage, id, false, false).await?)
+        LinkRequestStore::get(&*self.storage, id, false, false).await
     }
 
     pub async fn create_link_request_token(
