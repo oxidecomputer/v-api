@@ -50,12 +50,15 @@ macro_rules! sql_conversion {
     };
 }
 
-#[derive(Debug, PartialEq, Clone, FromSqlRow, AsExpression, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, PartialEq, Clone, FromSqlRow, AsExpression, Serialize, Deserialize, JsonSchema, Default,
+)]
 #[diesel(sql_type = AttemptState)]
 #[serde(rename_all = "lowercase")]
 pub enum LoginAttemptState {
     Complete,
     Failed,
+    #[default]
     New,
     RemoteAuthenticated,
 }
@@ -76,12 +79,6 @@ impl Display for LoginAttemptState {
             LoginAttemptState::New => write!(f, "new"),
             LoginAttemptState::RemoteAuthenticated => write!(f, "remote_authenticated"),
         }
-    }
-}
-
-impl Default for LoginAttemptState {
-    fn default() -> Self {
-        Self::New
     }
 }
 
