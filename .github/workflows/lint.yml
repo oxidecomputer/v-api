@@ -1,4 +1,5 @@
-name: Fmt
+name: lint
+
 permissions:
   contents: read
 
