@@ -18,9 +18,9 @@ pub enum AppError {
     #[error("At least one JWT signing key must be configured")]
     NoConfiguredJwtKeys,
     #[error("Configured jwt key is invalid")]
-    JwtSigner(#[from] JwtSignerError),
+    JwtSigner(#[from] Box<JwtSignerError>),
     #[error(transparent)]
-    Signer(#[from] SigningKeyError),
+    Signer(#[from] Box<SigningKeyError>),
 }
 
 #[derive(Debug, Error)]

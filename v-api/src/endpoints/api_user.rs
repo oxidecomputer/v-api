@@ -83,8 +83,10 @@ where
     let (ctx, caller) = rqctx.as_ctx().await?;
     let info = ctx.user.get_api_user(&caller, &caller.id).await?;
 
-    let mut filter = ApiUserProviderFilter::default();
-    filter.api_user_id = Some(vec![info.user.id]);
+    let filter = ApiUserProviderFilter {
+        api_user_id: Some(vec![info.user.id]),
+        ..Default::default()
+    };
     let providers = ctx
         .user
         .list_api_user_provider(&caller, filter, &ListPagination::default().limit(10))
@@ -107,8 +109,10 @@ where
     let path = path.into_inner();
     let info = ctx.user.get_api_user(&caller, &path.user_id).await?;
 
-    let mut filter = ApiUserProviderFilter::default();
-    filter.api_user_id = Some(vec![info.user.id]);
+    let filter = ApiUserProviderFilter {
+        api_user_id: Some(vec![info.user.id]),
+        ..Default::default()
+    };
     let providers = ctx
         .user
         .list_api_user_provider(&caller, filter, &ListPagination::default().limit(10))
@@ -171,8 +175,10 @@ where
         )
         .await?;
 
-    let mut filter = ApiUserProviderFilter::default();
-    filter.api_user_id = Some(info.iter().map(|info| info.user.id).collect());
+    let filter = ApiUserProviderFilter {
+        api_user_id: Some(info.iter().map(|info| info.user.id).collect()),
+        ..Default::default()
+    };
     let providers: HashMap<TypedUuid<UserId>, Vec<ApiUserProvider>> = ctx
         .user
         .list_api_user_provider(&caller, filter, &ListPagination::unlimited())

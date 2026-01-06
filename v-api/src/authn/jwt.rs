@@ -79,7 +79,7 @@ impl Claims {
             scp: scope,
             exp: expires_at.timestamp(),
             nbf: Utc::now().timestamp(),
-            jti: id.unwrap_or_else(|| TypedUuid::new_v4()),
+            jti: id.unwrap_or_else(TypedUuid::new_v4),
         }
     }
 }
@@ -106,8 +106,8 @@ impl Jwt {
 
         // The only JWKs supported are those that are available in the server context
         let jwk = ctx.jwks().await.find(&kid).ok_or(JwtError::NoMatchingKey)?;
-        let (key, algorithm) = DecodingKey::from_jwk(&jwk)
-            .map(|key| (key, Jwt::algo(&jwk)))
+        let (key, algorithm) = DecodingKey::from_jwk(jwk)
+            .map(|key| (key, Jwt::algo(jwk)))
             .map_err(JwtError::InvalidJwk)?;
 
         tracing::trace!(?jwk, ?algorithm, "Kid matched known decoding key");

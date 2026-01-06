@@ -58,16 +58,16 @@ where
             registration_caller: Caller {
                 id: "00000000-0000-4000-8000-000000000001".parse().unwrap(),
                 permissions: vec![
-                    VPermission::CreateApiUser.into(),
-                    VPermission::GetApiUsersAll.into(),
-                    VPermission::ManageApiUsersAll.into(),
-                    VPermission::GetApiKeysAll.into(),
-                    VPermission::CreateGroup.into(),
-                    VPermission::GetGroupsAll.into(),
-                    VPermission::CreateMapper.into(),
-                    VPermission::GetMappersAll.into(),
-                    VPermission::GetOAuthClientsAll.into(),
-                    VPermission::CreateAccessToken.into(),
+                    VPermission::CreateApiUser,
+                    VPermission::GetApiUsersAll,
+                    VPermission::ManageApiUsersAll,
+                    VPermission::GetApiKeysAll,
+                    VPermission::CreateGroup,
+                    VPermission::GetGroupsAll,
+                    VPermission::CreateMapper,
+                    VPermission::GetMappersAll,
+                    VPermission::GetOAuthClientsAll,
+                    VPermission::CreateAccessToken,
                 ]
                 .into(),
                 extensions: HashMap::default(),
@@ -78,26 +78,26 @@ where
                     keys: verifiers
                         .iter()
                         .map(|k| k.as_jwk())
-                        .into_iter()
-                        .collect::<Result<Vec<_>, _>>()?,
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(Box::new)?,
                 },
                 signers: signers
                     .iter()
                     .map(|k| JwtSigner::new(k))
-                    .into_iter()
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(Box::new)?,
             },
             secrets: SecretContext {
                 signers: signers
                     .iter()
                     .map(|k| k.as_signer())
-                    .into_iter()
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(Box::new)?,
                 verifiers: verifiers
                     .iter()
                     .map(|k| k.as_verifier())
-                    .into_iter()
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(Box::new)?,
             },
             oauth_providers: HashMap::new(),
         })

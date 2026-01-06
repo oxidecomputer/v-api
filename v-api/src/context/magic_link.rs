@@ -295,14 +295,17 @@ where
         &self,
         signature: &str,
     ) -> ResourceResult<MagicLinkAttempt, StoreError> {
-        let mut filter = MagicLinkAttemptFilter::default();
-        filter.signature = Some(vec![signature.to_string()]);
+        let filter = MagicLinkAttemptFilter {
+            signature: Some(vec![signature.to_string()]),
+            ..Default::default()
+        };
         MagicLinkAttemptStore::list(&*self.storage, filter, &ListPagination::latest())
             .await
             .map(|mut results| results.pop())
             .optional()
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[instrument(skip(self, key, signer, redirect_uri, recipient), err(Debug))]
     pub async fn send_login_attempt(
         &self,
