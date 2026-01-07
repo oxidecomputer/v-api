@@ -3582,9 +3582,9 @@ dependencies = [
 
 [[package]]
 name = "yup-oauth2"
-version = "12.1.1"
+version = "12.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f16c9757965c8c261c64d2ca27a8335688b54cc2147f135fd36449d7bbfcff00"
+checksum = "ef19a12dfb29fe39f78e1547e1be49717b84aef8762a4001359ed4f94d3accc1"
 dependencies = [
  "async-trait",
  "base64",
@@ -3596,7 +3596,6 @@ dependencies = [
  "log",
  "percent-encoding",
  "rustls 0.23.35",
- "rustls-pemfile",
  "seahash",
  "serde",
  "serde_json",
