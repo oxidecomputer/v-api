@@ -32,8 +32,8 @@ oauth2 = { version = "5.0.0", default-features = false, features = ["rustls-tls"
 partial-struct = { git = "https://github.com/oxidecomputer/partial-struct" }
 proc-macro2 = "1"
 quote = "1"
-rand = "0.8.5"
-rand_core = "0.6"
+rand = "0.9.2"
+rand_core = "0.9"
 reqwest = { version = "0.12.24", default-features = false, features = ["json", "stream"] }
 rsa = "0.9.10"
 schemars = { version = "0.8.22", features = ["url"] }
