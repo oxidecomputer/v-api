@@ -3,28 +3,16 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use diesel::{
-    migration::{Migration, MigrationSource},
-    pg::Pg,
     r2d2::{ConnectionManager, ManageConnection},
     PgConnection,
 };
-use diesel_migrations::{embed_migrations, EmbeddedMigrations};
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("../v-model/migrations");
 
-pub fn migrations() -> Vec<Box<dyn Migration<Pg>>> {
-    MIGRATIONS.migrations().unwrap()
-}
-
 pub fn run_migrations(url: &str) {
     let mut conn = db_conn(url);
-    run_migrations_on_conn(&mut conn);
-}
-
-pub fn run_migrations_on_conn(conn: &mut PgConnection) {
-    for migration in migrations() {
-        migration.run(conn).unwrap();
-    }
+    conn.run_pending_migrations(MIGRATIONS).unwrap();
 }
 
 fn db_conn(url: &str) -> PgConnection {

@@ -50,6 +50,10 @@ struct TestDb {
 
 impl TestDb {
     pub fn new(test_name: &str) -> Self {
+        // TEST_DATABASE should be a connection string that does not
+        // define the initial database.
+        //
+        // `postgres://<user>:<pass>@localhost`
         let db_base = std::env::var("TEST_DATABASE").unwrap();
         let db_name = format!(
             "v_api_{}_{}",
@@ -83,7 +87,11 @@ impl TestDb {
     }
 
     fn conn(&self) -> PgConnection {
-        let conn: ConnectionManager<PgConnection> = ConnectionManager::new(&self.db_base);
+        // Connect to the builtin postgres database since we know it exists.
+        // This makes it easier to deal with postgres instances stood up as
+        // part of a dev environment manager such as flox.dev
+        let url = format!("{}/postgres", &self.db_base);
+        let conn: ConnectionManager<PgConnection> = ConnectionManager::new(&url);
         conn.connect().unwrap()
     }
 }
