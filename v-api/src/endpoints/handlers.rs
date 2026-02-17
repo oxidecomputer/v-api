@@ -20,9 +20,10 @@ mod macros {
                     add_api_user_to_group_op, create_api_user_op, create_api_user_token_op,
                     delete_api_user_token_op, get_api_user_op, list_api_user_op, get_api_user_token_op, get_self_op,
                     link_provider_op, list_api_user_tokens_op, remove_api_user_from_group_op, set_api_user_contact_email_op,
+                    list_api_users_for_group_op,
                     update_api_user_op, AddGroupBody, ApiKeyCreateParams, ApiKeyResponse, ApiUserPath,
                     ApiUserProviderLinkPayload, ApiUserRemoveGroupPath, ApiUserTokenPath,
-                    ApiUserUpdateParams, GetUserResponse, InitialApiKeyResponse, ApiUserEmailUpdateParams
+                    ApiUserUpdateParams, GetUserResponse, InitialApiKeyResponse, ApiUserEmailUpdateParams, ApiUserGroupPath
                 },
                 api_user_provider::{
                     create_link_token_op, ApiUserLinkRequestPayload, ApiUserLinkRequestResponse,
@@ -602,6 +603,18 @@ mod macros {
                 path: Path<AccessGroupPath>,
             ) -> Result<HttpResponseOk<AccessGroup<$permission_type>>, HttpError> {
                 delete_group_op(&rqctx, path.into_inner()).await
+            }
+
+            /// Get members of a group
+            #[endpoint {
+                method = GET,
+                path = "/group-membership/{group_id}",
+            }]
+            pub async fn get_group_members(
+                rqctx: RequestContext<$context_type>,
+                path: Path<ApiUserGroupPath>,
+            ) -> Result<HttpResponseOk<Vec<ApiUser<$permission_type>>>, HttpError> {
+                list_api_users_for_group_op(&rqctx, path.into_inner()).await
             }
 
             // MAPPERS
