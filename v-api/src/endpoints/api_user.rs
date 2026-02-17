@@ -573,7 +573,32 @@ where
     Ok(HttpResponseOk(into_user_response(info.user)))
 }
 
-// TODO: Needs to be implemented
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ApiUserGroupPath {
+    group_id: TypedUuid<AccessGroupId>,
+}
+
+#[instrument(skip(rqctx), err(Debug))]
+pub async fn list_api_users_for_group_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+    path: ApiUserGroupPath,
+) -> Result<HttpResponseOk<Vec<ApiUser<U>>>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+    U: From<T> + Permission + JsonSchema,
+{
+    let (ctx, caller) = rqctx.as_ctx().await?;
+    Ok(HttpResponseOk(
+        ctx.list_api_users_for_group(&caller, path.group_id)
+            .await
+            .map(|members| {
+                members
+                    .into_iter()
+                    .map(|m| into_user_response(m.user))
+                    .collect()
+            })?,
+    ))
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ApiUserProviderLinkPayload {
