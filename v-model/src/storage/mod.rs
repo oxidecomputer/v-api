@@ -98,6 +98,28 @@ pub struct ApiUserFilter {
     pub deleted: bool,
 }
 
+impl ApiUserFilter {
+    pub fn id(mut self, id: Vec<TypedUuid<UserId>>) -> Self {
+        self.id = Some(id);
+        self
+    }
+
+    pub fn email(mut self, email: Vec<String>) -> Self {
+        self.email = Some(email);
+        self
+    }
+
+    pub fn groups(mut self, groups: Vec<TypedUuid<AccessGroupId>>) -> Self {
+        self.groups = Some(groups);
+        self
+    }
+
+    pub fn deleted(mut self, deleted: bool) -> Self {
+        self.deleted = deleted;
+        self
+    }
+}
+
 #[cfg_attr(feature = "mock", automock)]
 #[async_trait]
 pub trait ApiUserStore<T: Send + Sync> {

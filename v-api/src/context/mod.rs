@@ -15,7 +15,7 @@ use user::{RegisteredAccessToken, UserContextError};
 use v_model::{
     permissions::{Caller, Permission},
     storage::{
-        AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore,
+        AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore, ApiUserFilter,
         ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, LinkRequestStore,
         ListPagination, LoginAttemptStore, MagicLinkAttemptStore, MagicLinkRedirectUriStore,
         MagicLinkSecretStore, MagicLinkStore, MapperStore, OAuthClientRedirectUriStore,
@@ -521,6 +521,31 @@ where
         tracing::info!(api_user_id = ?api_user, "Generated access token");
 
         Ok(token)
+    }
+
+    pub async fn list_api_users_for_group(
+        &self,
+        caller: &Caller<T>,
+        group_id: TypedUuid<AccessGroupId>,
+    ) -> ResourceResult<Vec<ApiUserInfo<T>>, StoreError> {
+        if caller.any(
+            [
+                VPermission::GetGroup(group_id).into(),
+                VPermission::GetGroupsAll.into(),
+            ]
+            .iter(),
+        ) {
+            Ok(self
+                .user
+                .list_api_user(
+                    caller,
+                    ApiUserFilter::default().groups(vec![group_id]),
+                    &ListPagination::unlimited(),
+                )
+                .await?)
+        } else {
+            resource_restricted()
+        }
     }
 
     pub async fn add_api_user_to_group(
