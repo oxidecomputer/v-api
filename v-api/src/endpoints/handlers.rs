@@ -438,7 +438,7 @@ mod macros {
             pub async fn create_api_user(
                 rqctx: RequestContext<$context_type>,
                 body: TypedBody<ApiUserUpdateParams<$permission_type>>,
-            ) -> Result<HttpResponseCreated<ApiUser<$permission_type>>, HttpError> {
+            ) -> Result<HttpResponseCreated<GetUserResponse<$permission_type>>, HttpError> {
                 create_api_user_op(&rqctx, body).await
             }
 
@@ -451,7 +451,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<ApiUserPath>,
                 body: TypedBody<ApiUserUpdateParams<$permission_type>>,
-            ) -> Result<HttpResponseOk<ApiUser<$permission_type>>, HttpError> {
+            ) -> Result<HttpResponseOk<GetUserResponse<$permission_type>>, HttpError> {
                 update_api_user_op(&rqctx, path.into_inner(), body.into_inner()).await
             }
 
@@ -526,7 +526,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<ApiUserPath>,
                 body: TypedBody<AddGroupBody>,
-            ) -> Result<HttpResponseOk<ApiUser<$permission_type>>, HttpError> {
+            ) -> Result<HttpResponseOk<GetUserResponse<$permission_type>>, HttpError> {
                 add_api_user_to_group_op(&rqctx, path.into_inner(), body.into_inner()).await
             }
 
@@ -538,7 +538,7 @@ mod macros {
             pub async fn remove_api_user_from_group(
                 rqctx: RequestContext<$context_type>,
                 path: Path<ApiUserRemoveGroupPath>,
-            ) -> Result<HttpResponseOk<ApiUser<$permission_type>>, HttpError> {
+            ) -> Result<HttpResponseOk<GetUserResponse<$permission_type>>, HttpError> {
                 remove_api_user_from_group_op(&rqctx, path.into_inner()).await
             }
 
@@ -613,7 +613,7 @@ mod macros {
             pub async fn get_group_members(
                 rqctx: RequestContext<$context_type>,
                 path: Path<ApiUserGroupPath>,
-            ) -> Result<HttpResponseOk<Vec<ApiUser<$permission_type>>>, HttpError> {
+            ) -> Result<HttpResponseOk<Vec<GetUserResponse<$permission_type>>>, HttpError> {
                 list_api_users_for_group_op(&rqctx, path.into_inner()).await
             }
 
