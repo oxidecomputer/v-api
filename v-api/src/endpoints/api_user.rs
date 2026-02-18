@@ -775,7 +775,7 @@ mod tests {
         permissions::{Caller, Permissions},
         storage::{
             ApiKeyFilter, ListPagination, MockApiKeyStore, MockApiUserContactEmailStore,
-            MockApiUserStore, StoreError,
+            MockApiUserProviderStore, MockApiUserStore, StoreError,
         },
         ApiKey, ApiUser, ApiUserContactEmail, ApiUserInfo, ApiUserProvider, NewApiUser,
     };
@@ -843,9 +843,14 @@ mod tests {
                 x.permissions.can(&VPermission::GetApiUsersAll.into())
             })
             .returning(|_| Err(StoreError::Unknown));
+        let mut api_user_provider_store = MockApiUserProviderStore::new();
+        api_user_provider_store
+            .expect_list()
+            .returning(|_, _| Ok(vec![]));
 
         let mut storage = MockStorage::new();
         storage.api_user_store = Some(Arc::new(store));
+        storage.api_user_provider_store = Some(Arc::new(api_user_provider_store));
 
         let ctx = mock_context(Arc::new(storage)).await;
 
@@ -935,9 +940,14 @@ mod tests {
             .expect_upsert()
             .withf(move |x: &NewApiUser<VPermission>| &x.id == &failure_id)
             .returning(|_| Err(StoreError::Unknown));
+        let mut api_user_provider_store = MockApiUserProviderStore::new();
+        api_user_provider_store
+            .expect_list()
+            .returning(|_, _| Ok(vec![]));
 
         let mut storage = MockStorage::new();
         storage.api_user_store = Some(Arc::new(store));
+        storage.api_user_provider_store = Some(Arc::new(api_user_provider_store));
 
         let ctx = mock_context(Arc::new(storage)).await;
 
@@ -1186,6 +1196,10 @@ mod tests {
             .expect_get()
             .with(eq(unknown_api_user_path.user_id), eq(false))
             .returning(move |_, _| Ok(None));
+        let mut api_user_provider_store = MockApiUserProviderStore::new();
+        api_user_provider_store
+            .expect_list()
+            .returning(|_, _| Ok(vec![]));
 
         let mut token_store = MockApiKeyStore::new();
         token_store
@@ -1207,6 +1221,7 @@ mod tests {
         let mut storage = MockStorage::new();
         storage.api_user_store = Some(Arc::new(api_user_store));
         storage.api_user_token_store = Some(Arc::new(token_store));
+        storage.api_user_provider_store = Some(Arc::new(api_user_provider_store));
 
         let ctx = mock_context(Arc::new(storage)).await;
 
