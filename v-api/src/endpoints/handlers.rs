@@ -707,6 +707,8 @@ mod macros {
                 .expect("Failed to register endpoint");
             $api.register(remove_api_user_from_group)
                 .expect("Failed to register endpoint");
+            $api.register(get_group_members)
+                .expect("Failed to register endpoint");
             $api.register(link_provider)
                 .expect("Failed to register endpoint");
             $api.register(create_link_token)
