@@ -284,7 +284,8 @@ pub mod tests {
                         .as_bytes()
                         .to_vec(),
                 )
-                .unwrap(),
+                .unwrap()
+                .into(),
             },
             verifier: AsymmetricKey::LocalVerifier {
                 kid: hex::encode(kid),

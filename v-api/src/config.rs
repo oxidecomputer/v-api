@@ -2,14 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::path::PathBuf;
-
-use secrecy::SecretString;
 use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer,
 };
+use std::path::PathBuf;
 use thiserror::Error;
+use v_api_param::StringParam;
 
 #[derive(Debug, Error)]
 pub enum AppConfigError {
@@ -75,7 +74,7 @@ pub enum AsymmetricKey {
     },
     LocalSigner {
         kid: String,
-        private: String,
+        private: StringParam,
     },
     CkmsVerifier {
         kid: String,
@@ -123,7 +122,7 @@ pub struct AuthnProviders {
 #[derive(Debug, Deserialize)]
 pub struct SendGridConfig {
     pub from: String,
-    pub key: String,
+    pub key: StringParam,
 }
 
 #[derive(Debug, Deserialize)]
@@ -141,12 +140,12 @@ pub struct OAuthConfig {
 #[derive(Debug, Deserialize)]
 pub struct OAuthDeviceConfig {
     pub client_id: String,
-    pub client_secret: SecretString,
+    pub client_secret: StringParam,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct OAuthWebConfig {
     pub client_id: String,
-    pub client_secret: SecretString,
+    pub client_secret: StringParam,
     pub redirect_uri: String,
 }
