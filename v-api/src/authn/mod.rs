@@ -19,11 +19,13 @@ use rsa::{
     signature::{RandomizedSigner, SignatureEncoding, Verifier as RsaVerifier},
     RsaPrivateKey, RsaPublicKey,
 };
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fmt::Debug, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
+use v_api_param::ParamResolutionError;
 use v_model::permissions::PermissionStorage;
 
 use crate::{
@@ -124,6 +126,8 @@ pub enum SigningKeyError {
     InvalidPublicKey(#[from] rsa::pkcs8::spki::Error),
     #[error("Key does not support the requested function")]
     KeyDoesNotSupportFunction,
+    #[error("Failed to resolve parameter")]
+    Param(#[from] ParamResolutionError),
     #[error("Invalid signature: {0}")]
     Signature(#[from] rsa::signature::Error),
 }
@@ -383,7 +387,7 @@ impl AsymmetricKey {
     pub async fn private_key(&self) -> Result<RsaPrivateKey, SigningKeyError> {
         Ok(match self {
             AsymmetricKey::LocalSigner { private, .. } => {
-                RsaPrivateKey::from_pkcs8_pem(private).unwrap()
+                RsaPrivateKey::from_pkcs8_pem(private.resolve()?.expose_secret()).unwrap()
             }
             _ => unimplemented!(),
         })
@@ -426,7 +430,8 @@ impl AsymmetricKey {
     pub fn as_signer(&self) -> Result<Arc<dyn Signer>, SigningKeyError> {
         Ok(match self {
             AsymmetricKey::LocalSigner { private, .. } => {
-                let private_key = RsaPrivateKey::from_pkcs8_pem(private).unwrap();
+                let private_key =
+                    RsaPrivateKey::from_pkcs8_pem(private.resolve()?.expose_secret()).unwrap();
                 let signing_key = SigningKey::new(private_key);
 
                 Arc::new(LocalSigningKey { signing_key })
