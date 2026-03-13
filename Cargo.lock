@@ -26,7 +26,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 [[package]]
 name = "async-bb8-diesel"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/async-bb8-diesel#f049570ff89080b2385c637af4c0e614b0a124a4"
+source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=f049570ff89080b2385c637af4c0e614b0a124a4#f049570ff89080b2385c637af4c0e614b0a124a4"
 dependencies = [
  "async-trait",
  "bb8",
@@ -1677,7 +1677,7 @@ dependencies = [
 [[package]]
 name = "partial-struct"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/partial-struct#4bebbcfcbc3f0c4b7d2d707529a4ecda2ffd027f"
+source = "git+https://github.com/oxidecomputer/partial-struct?rev=4bebbcfcbc3f0c4b7d2d707529a4ecda2ffd027f#4bebbcfcbc3f0c4b7d2d707529a4ecda2ffd027f"
 dependencies = [
  "proc-macro2",
  "quote",
