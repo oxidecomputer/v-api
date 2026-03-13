@@ -1,3 +1,7 @@
+# The intent is to keep this updated as new stable versions are relased.
+# Probably easiest if it matches dropshot
+#   https://github.com/oxidecomputer/dropshot/blob/main/rust-toolchain.toml
+
 [toolchain]
-channel = "stable"
+channel = "1.93.1"
 components = ["clippy", "rustfmt"]
