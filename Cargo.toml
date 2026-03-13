@@ -9,6 +9,7 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
+async-bb8-diesel = "0.3"
 async-trait = "0.1.89"
 base64 = "0.22"
 bb8 = "0.9"
@@ -56,10 +57,7 @@ yup-oauth2 = "12.1.2"
 
 # Internal dependencies; pin to git hash to prevent drift
 
-[workspace.dependencies.async-bb8-diesel]
-git = "https://github.com/oxidecomputer/async-bb8-diesel"
-rev = "f049570ff89080b2385c637af4c0e614b0a124a4"
-
 [workspace.dependencies.partial-struct]
 git = "https://github.com/oxidecomputer/partial-struct"
 rev = "4bebbcfcbc3f0c4b7d2d707529a4ecda2ffd027f"
+version = "0.1.0"
