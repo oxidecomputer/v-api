@@ -33,8 +33,10 @@ jobs:
           rustup toolchain install
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # 2.9.1
       - run: |
+          # ensure build with default features succeeds
           cargo build
       - run: |
+          # build & test with all features
           cargo test --all-features
         env:
           RUST_BACKTRACE: "1"
