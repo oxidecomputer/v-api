@@ -1,6 +1,6 @@
 [package]
 name = "v-api"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [features]
@@ -23,6 +23,7 @@ http-body-util = { workspace = true }
 hyper = { workspace = true }
 jsonwebtoken = { workspace = true }
 oauth2 = { workspace = true }
+oauth2-reqwest = { workspace = true }
 newtype-uuid = { workspace = true }
 partial-struct = { workspace = true }
 rand = { workspace = true, features = ["std"] }

@@ -705,8 +705,9 @@ async fn fetch_user_info(
         request = request.set_pkce_verifier(PkceCodeVerifier::new(pkce_verifier.to_string()))
     }
 
+    let oauth_client: oauth2_reqwest::ReqwestClient = provider.client().clone().into();
     let response = request
-        .request_async(provider.client())
+        .request_async(&oauth_client)
         .await
         .map_err(to_internal_error)?;
 
@@ -727,7 +728,7 @@ async fn fetch_user_info(
         client
             .revoke_token(response.access_token().into())
             .map_err(internal_error)?
-            .request_async(provider.client())
+            .request_async(&oauth_client)
             .await
             .map_err(internal_error)?;
     }
