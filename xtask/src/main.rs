@@ -10,7 +10,6 @@ use std::fs;
 #[derive(Parser)]
 #[command(name = "xtask")]
 #[command(about = "build tasks")]
-
 enum Xtask {
     #[command(about = "bump the global version number")]
     Bump {
@@ -74,7 +73,7 @@ impl Bump for Version {
         match place {
             VersionPlace::Major => {
                 if self.pre == Prerelease::EMPTY {
-                    self.major = self.major + 1;
+                    self.major += 1;
                     self.minor = 0;
                     self.patch = 0;
                 }
@@ -82,14 +81,14 @@ impl Bump for Version {
             }
             VersionPlace::Minor => {
                 if self.pre == Prerelease::EMPTY {
-                    self.minor = self.minor + 1;
+                    self.minor += 1;
                     self.patch = 0;
                 }
                 self.pre = Prerelease::EMPTY;
             }
             VersionPlace::Patch => {
                 if self.pre == Prerelease::EMPTY {
-                    self.patch = self.patch + 1;
+                    self.patch += 1;
                 }
                 self.pre = Prerelease::EMPTY;
             }
