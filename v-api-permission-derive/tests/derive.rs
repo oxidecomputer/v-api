@@ -46,4 +46,7 @@ fn test_derive() {
         #[v_api(expand(kind = replace, variant = Flip, source = actor, field = id))]
         Flop,
     }
+
+    let _ = ItemWrapper { id: Uuid::new_v4() };
+    let _ = AppPermissions::Flop;
 }
