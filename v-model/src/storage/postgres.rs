@@ -1017,13 +1017,15 @@ impl MagicLinkStore for PostgresStore {
 
         // Deleted secrets are not included in the results
         if let Some(signature) = signature {
-            query = query.filter(magic_link_client_secret::secret_signature.eq_any(signature))
+            query = query
+                .filter(magic_link_client_secret::secret_signature.eq_any(signature))
                 .filter(magic_link_client_secret::deleted_at.is_null());
         }
 
         // Deleted redirect URIs are not included in the results
         if let Some(redirect_uri) = redirect_uri {
-            query = query.filter(magic_link_client_redirect_uri::redirect_uri.eq_any(redirect_uri))
+            query = query
+                .filter(magic_link_client_redirect_uri::redirect_uri.eq_any(redirect_uri))
                 .filter(magic_link_client_redirect_uri::deleted_at.is_null());
         }
 
