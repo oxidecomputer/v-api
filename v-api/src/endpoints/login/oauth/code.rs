@@ -4,10 +4,10 @@
 
 use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
 use chrono::{TimeDelta, Utc};
+use cookie::{Cookie, SameSite};
 use dropshot::{
-    http_response_temporary_redirect, Body, ClientErrorStatusCode, HttpError, HttpResponseOk,
-    HttpResponseTemporaryRedirect, Path, Query, RequestContext, RequestInfo, SharedExtractor,
-    TypedBody,
+    Body, ClientErrorStatusCode, HttpError, HttpResponseOk, Path, Query, RequestContext,
+    RequestInfo, SharedExtractor, TypedBody,
 };
 use dropshot_authorization_header::basic::BasicAuth;
 use http::{
@@ -250,8 +250,13 @@ fn oauth_redirect_response(
 
     // Create an attempt cookie header for storing the login attempt. This also acts as our csrf
     // check
-    let login_cookie = HeaderValue::from_str(&format!("{}={}", LOGIN_ATTEMPT_COOKIE, attempt.id))
-        .map_err(to_internal_error)?;
+    let mut cookie = Cookie::new(LOGIN_ATTEMPT_COOKIE, attempt.id.to_string());
+    cookie.set_http_only(true);
+    cookie.set_same_site(SameSite::Lax);
+    cookie.set_secure(public_url.starts_with("https"));
+    cookie.set_max_age(cookie::time::Duration::seconds(600));
+
+    let login_cookie = HeaderValue::from_str(&cookie.to_string()).map_err(to_internal_error)?;
 
     // Generate the url to the remote provider that the user will be redirected to
     let mut authz_url = client
@@ -342,7 +347,7 @@ pub async fn authz_code_callback_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<OAuthProviderNameParam>,
     query: Query<OAuthAuthzCodeReturnQuery>,
-) -> Result<HttpResponseTemporaryRedirect, HttpError>
+) -> Result<Response<Body>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
 {
@@ -359,9 +364,25 @@ where
     // Verify and extract the attempt id before performing any work
     let attempt_id = verify_csrf(&rqctx.request, &query)?;
 
-    http_response_temporary_redirect(
-        authz_code_callback_op_inner(ctx, &attempt_id, query.code, query.error).await?,
-    )
+    // Clear the login attempt cookie
+    let mut cookie = Cookie::new(LOGIN_ATTEMPT_COOKIE, "");
+    cookie.set_http_only(true);
+    cookie.set_same_site(SameSite::Lax);
+    cookie.set_secure(ctx.public_url().starts_with("https"));
+    cookie.set_max_age(cookie::time::Duration::seconds(0));
+    let login_cookie = HeaderValue::from_str(&cookie.to_string()).map_err(to_internal_error)?;
+
+    Ok(Response::builder()
+        .status(StatusCode::TEMPORARY_REDIRECT)
+        .header(SET_COOKIE, login_cookie)
+        .header(
+            LOCATION,
+            HeaderValue::from_str(
+                &authz_code_callback_op_inner(ctx, &attempt_id, query.code, query.error).await?,
+            )
+            .map_err(to_internal_error)?,
+        )
+        .body(Body::empty())?)
 }
 
 pub async fn authz_code_callback_op_inner<T>(
@@ -930,7 +951,11 @@ mod tests {
             .unwrap()
         );
         assert_eq!(
-            attempt.id.to_string().as_str(),
+            format!(
+                "{}; HttpOnly; SameSite=Lax; Secure; Max-Age=600",
+                attempt.id
+            )
+            .as_str(),
             String::from_utf8(
                 response
                     .headers()
