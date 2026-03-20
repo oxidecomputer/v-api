@@ -19,6 +19,7 @@ use newtype_uuid::TypedUuid;
 use oauth2::{
     AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope, TokenResponse,
 };
+use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
 use schemars::JsonSchema;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
@@ -205,8 +206,10 @@ where
     // Assign any scope errors that arose
     attempt.error = scope_error;
 
-    // Add in the user defined state and redirect uri
-    attempt.state = Some(query.state);
+    // Add in the user defined state and redirect uri. State is an arbitrary value and may be
+    // malicious. It must be url-encoded before being presented back to the client. Therefore we
+    // process once before storing so all downstream consumers see the encoded value.
+    attempt.state = Some(percent_encode(query.state.as_bytes(), NON_ALPHANUMERIC).to_string());
 
     // If the remote provider supports pkce, set up a challenge
     let pkce_challenge = if provider.supports_pkce() {
