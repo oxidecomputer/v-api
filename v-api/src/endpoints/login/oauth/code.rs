@@ -4,6 +4,7 @@
 
 use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
 use chrono::{TimeDelta, Utc};
+use cookie::Cookie;
 use dropshot::{
     http_response_temporary_redirect, Body, ClientErrorStatusCode, HttpError, HttpResponseOk,
     HttpResponseTemporaryRedirect, Path, Query, RequestContext, RequestInfo, SharedExtractor,
@@ -250,8 +251,11 @@ fn oauth_redirect_response(
 
     // Create an attempt cookie header for storing the login attempt. This also acts as our csrf
     // check
-    let login_cookie = HeaderValue::from_str(&format!("{}={}", LOGIN_ATTEMPT_COOKIE, attempt.id))
-        .map_err(to_internal_error)?;
+    let mut cookie = Cookie::new(LOGIN_ATTEMPT_COOKIE, attempt.id.to_string());
+    cookie.set_http_only(true);
+    cookie.set_max_age(cookie::time::Duration::seconds(600));
+
+    let login_cookie = HeaderValue::from_str(&cookie.to_string()).map_err(to_internal_error)?;
 
     // Generate the url to the remote provider that the user will be redirected to
     let mut authz_url = client
