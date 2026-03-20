@@ -775,7 +775,7 @@ mod tests {
     };
 
     use chrono::{TimeDelta, Utc};
-    use dropshot::RequestInfo;
+    use dropshot::{HttpResponse, RequestInfo};
     use http::{
         header::{COOKIE, LOCATION, SET_COOKIE},
         HeaderValue, StatusCode,
@@ -913,7 +913,7 @@ mod tests {
             scope: String::new(),
         };
 
-        let mut response = oauth_redirect_response(
+        let response = oauth_redirect_response(
             &ctx.public_url(),
             &*ctx
                 .get_oauth_provider(&OAuthProviderName::Google)
@@ -922,21 +922,16 @@ mod tests {
             &attempt,
             Some(challenge.clone()),
         )
+        .unwrap()
+        .to_result()
         .unwrap();
+        let headers = response.headers();
 
         let expected_location = format!("https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=google_web_client_id&state={}&code_challenge={}&code_challenge_method=S256&redirect_uri=https%3A%2F%2Fapi.oxeng.dev%2Flogin%2Foauth%2Fgoogle%2Fcode%2Fcallback&scope=openid+email+profile", attempt.id, challenge.as_str());
 
         assert_eq!(
             expected_location,
-            String::from_utf8(
-                response
-                    .headers_mut()
-                    .get(LOCATION)
-                    .unwrap()
-                    .as_bytes()
-                    .to_vec()
-            )
-            .unwrap()
+            String::from_utf8(headers.get(LOCATION).unwrap().as_bytes().to_vec()).unwrap()
         );
         assert_eq!(
             format!(
@@ -944,18 +939,11 @@ mod tests {
                 attempt.id
             )
             .as_str(),
-            String::from_utf8(
-                response
-                    .headers_mut()
-                    .get(SET_COOKIE)
-                    .unwrap()
-                    .as_bytes()
-                    .to_vec()
-            )
-            .unwrap()
-            .split_once('=')
-            .unwrap()
-            .1
+            String::from_utf8(headers.get(SET_COOKIE).unwrap().as_bytes().to_vec())
+                .unwrap()
+                .split_once('=')
+                .unwrap()
+                .1
         )
     }
 
