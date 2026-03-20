@@ -31,6 +31,8 @@ use crate::{
 
 pub mod client;
 
+static EXPIRATION_MAX: Duration = Duration::minutes(15);
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct MagicLinkPath {
     channel: String,
@@ -121,7 +123,7 @@ where
             medium,
             channel,
             scope.as_deref(),
-            Utc::now().add(Duration::seconds(expires_in)),
+            Utc::now().add(Duration::seconds(expires_in).min(EXPIRATION_MAX)),
             &recipient,
         )
         .await;
