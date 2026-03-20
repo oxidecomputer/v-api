@@ -26,13 +26,9 @@ use v_model::{
 };
 
 use crate::{
-    authn::{
-        jwt::{Claims, JwtSigner, JwtSignerError},
-        AuthToken, Verifier,
-    },
-    permissions::{VAppPermission, VPermission},
-    response::{resource_restricted, OptionalResource, ResourceError, ResourceResult},
-    VApiStorage,
+    VApiStorage, authn::{
+        AuthToken, Verifier, jwt::{Claims, JwtSigner, JwtSignerError}
+    }, permissions::{VAppPermission, VPermission}, response::{OptionalResource, ResourceError, ResourceResult, resource_not_found, resource_restricted}
 };
 
 #[derive(Debug)]
@@ -568,9 +564,16 @@ where
             ]
             .iter(),
         ) {
-            ApiUserProviderStore::get(&*self.storage, provider_id, false)
+            let provider = ApiUserProviderStore::get(&*self.storage, provider_id, false)
                 .await
-                .optional()
+                .optional()?;
+
+            // Ensure that the requested provider belongs to the user
+            if provider.user_id == *user_id {
+                Ok(provider)
+            } else {
+                resource_not_found()
+            }
         } else {
             resource_restricted()
         }
