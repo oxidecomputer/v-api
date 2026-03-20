@@ -26,9 +26,15 @@ use v_model::{
 };
 
 use crate::{
-    VApiStorage, authn::{
-        AuthToken, Verifier, jwt::{Claims, JwtSigner, JwtSignerError}
-    }, permissions::{VAppPermission, VPermission}, response::{OptionalResource, ResourceError, ResourceResult, resource_not_found, resource_restricted}
+    authn::{
+        jwt::{Claims, JwtSigner, JwtSignerError},
+        AuthToken, Verifier,
+    },
+    permissions::{VAppPermission, VPermission},
+    response::{
+        resource_not_found, resource_restricted, OptionalResource, ResourceError, ResourceResult,
+    },
+    VApiStorage,
 };
 
 #[derive(Debug)]
