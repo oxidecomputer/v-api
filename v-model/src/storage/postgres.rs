@@ -581,9 +581,10 @@ impl ApiUserProviderStore for PostgresStore {
         &self,
         id: &TypedUuid<UserProviderId>,
     ) -> Result<Option<ApiUserProvider>, StoreError> {
-        let _ = update(api_user::dsl::api_user)
-            .filter(api_user::id.eq(id.into_untyped_uuid()))
-            .set(api_user::deleted_at.eq(Utc::now()))
+        let _ = update(api_user_provider::dsl::api_user_provider)
+            .filter(api_user_provider::id.eq(id.into_untyped_uuid()))
+            .filter(api_user_provider::deleted_at.is_null())
+            .set(api_user_provider::deleted_at.eq(Utc::now()))
             .execute_async(&*self.pool.get().await?)
             .await?;
 
