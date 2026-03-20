@@ -283,7 +283,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<OAuthProviderNameParam>,
                 query: Query<OAuthAuthzCodeReturnQuery>,
-            ) -> Result<HttpResponseTemporaryRedirect, HttpError> {
+            ) -> Result<Response<Body>, HttpError> {
                 authz_code_callback_op(&rqctx, path, query).await
             }
 
