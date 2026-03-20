@@ -642,7 +642,7 @@ impl AccessTokenStore for PostgresStore {
         }
 
         if !revoked {
-            query = query.filter(api_user_access_token::revoked_at.gt(Utc::now()));
+            query = query.filter(api_user_access_token::revoked_at.is_null());
         }
 
         let results = query
