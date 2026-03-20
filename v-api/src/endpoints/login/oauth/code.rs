@@ -6,9 +6,8 @@ use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
 use chrono::{TimeDelta, Utc};
 use cookie::{Cookie, SameSite};
 use dropshot::{
-    http_response_temporary_redirect, Body, ClientErrorStatusCode, HttpError, HttpResponseOk,
-    HttpResponseTemporaryRedirect, Path, Query, RequestContext, RequestInfo, SharedExtractor,
-    TypedBody,
+    Body, ClientErrorStatusCode, HttpError, HttpResponseOk, Path, Query, RequestContext,
+    RequestInfo, SharedExtractor, TypedBody,
 };
 use dropshot_authorization_header::basic::BasicAuth;
 use http::{
