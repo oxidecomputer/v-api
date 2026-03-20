@@ -84,6 +84,15 @@ where
         Ok(attempts.pop())
     }
 
+    pub async fn complete_login_attempt(
+        &self,
+        attempt: LoginAttempt,
+    ) -> Result<LoginAttempt, StoreError> {
+        let mut attempt: NewLoginAttempt = attempt.into();
+        attempt.attempt_state = LoginAttemptState::Complete;
+        LoginAttemptStore::upsert(&*self.storage, attempt).await
+    }
+
     pub async fn fail_login_attempt(
         &self,
         attempt: LoginAttempt,
