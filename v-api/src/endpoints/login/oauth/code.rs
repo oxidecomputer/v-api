@@ -6,15 +6,12 @@ use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
 use chrono::{TimeDelta, Utc};
 use cookie::{Cookie, SameSite};
 use dropshot::{
-    Body, ClientErrorStatusCode, HttpError, HttpResponseOk, Path, Query, RequestContext,
-    RequestInfo, SharedExtractor, TypedBody,
+    http_response_temporary_redirect, ClientErrorStatusCode, HttpError, HttpResponseOk,
+    HttpResponseTemporaryRedirect, Path, Query, RequestContext, RequestInfo, SharedExtractor,
+    TypedBody,
 };
 use dropshot_authorization_header::basic::BasicAuth;
-use http::{
-    header::{LOCATION, SET_COOKIE},
-    HeaderValue, StatusCode,
-};
-use hyper::Response;
+use http::{header::SET_COOKIE, HeaderValue};
 use newtype_uuid::TypedUuid;
 use oauth2::{
     AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope, TokenResponse,
@@ -160,7 +157,7 @@ pub async fn authz_code_redirect_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<OAuthProviderNameParam>,
     query: Query<OAuthAuthzCodeQuery>,
-) -> Result<Response<Body>, HttpError>
+) -> Result<HttpResponseTemporaryRedirect, HttpError>
 where
     T: VAppPermission + PermissionStorage,
 {
@@ -237,7 +234,7 @@ fn oauth_redirect_response(
     provider: &dyn OAuthProvider,
     attempt: &LoginAttempt,
     code_challenge: Option<PkceCodeChallenge>,
-) -> Result<Response<Body>, HttpError> {
+) -> Result<HttpResponseTemporaryRedirect, HttpError> {
     // We may fail if the provider configuration is not correctly configured
     // TODO: This behavior should be changed so that clients are precomputed. We do not need to be
     // constructing a new client on every request. That said, we need to ensure the client does not
@@ -274,14 +271,10 @@ fn oauth_redirect_response(
         authz_url = authz_url.set_pkce_challenge(challenge);
     };
 
-    Ok(Response::builder()
-        .status(StatusCode::TEMPORARY_REDIRECT)
-        .header(SET_COOKIE, login_cookie)
-        .header(
-            LOCATION,
-            HeaderValue::from_str(authz_url.url().0.as_str()).map_err(to_internal_error)?,
-        )
-        .body(Body::empty())?)
+    let mut redirect = http_response_temporary_redirect(authz_url.url().0.to_string())?;
+    redirect.headers_mut().append(SET_COOKIE, login_cookie);
+
+    Ok(redirect)
 }
 
 // TODO: Determine if 401 empty responses are correct here
@@ -347,7 +340,7 @@ pub async fn authz_code_callback_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<OAuthProviderNameParam>,
     query: Query<OAuthAuthzCodeReturnQuery>,
-) -> Result<Response<Body>, HttpError>
+) -> Result<HttpResponseTemporaryRedirect, HttpError>
 where
     T: VAppPermission + PermissionStorage,
 {
@@ -372,17 +365,12 @@ where
     cookie.set_max_age(cookie::time::Duration::seconds(0));
     let login_cookie = HeaderValue::from_str(&cookie.to_string()).map_err(to_internal_error)?;
 
-    Ok(Response::builder()
-        .status(StatusCode::TEMPORARY_REDIRECT)
-        .header(SET_COOKIE, login_cookie)
-        .header(
-            LOCATION,
-            HeaderValue::from_str(
-                &authz_code_callback_op_inner(ctx, &attempt_id, query.code, query.error).await?,
-            )
-            .map_err(to_internal_error)?,
-        )
-        .body(Body::empty())?)
+    let mut redirect = http_response_temporary_redirect(
+        authz_code_callback_op_inner(ctx, &attempt_id, query.code, query.error).await?,
+    )?;
+    redirect.headers_mut().append(SET_COOKIE, login_cookie);
+
+    Ok(redirect)
 }
 
 pub async fn authz_code_callback_op_inner<T>(
@@ -925,7 +913,7 @@ mod tests {
             scope: String::new(),
         };
 
-        let response = oauth_redirect_response(
+        let mut response = oauth_redirect_response(
             &ctx.public_url(),
             &*ctx
                 .get_oauth_provider(&OAuthProviderName::Google)
@@ -942,7 +930,7 @@ mod tests {
             expected_location,
             String::from_utf8(
                 response
-                    .headers()
+                    .headers_mut()
                     .get(LOCATION)
                     .unwrap()
                     .as_bytes()
@@ -958,7 +946,7 @@ mod tests {
             .as_str(),
             String::from_utf8(
                 response
-                    .headers()
+                    .headers_mut()
                     .get(SET_COOKIE)
                     .unwrap()
                     .as_bytes()
