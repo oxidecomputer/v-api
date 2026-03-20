@@ -505,7 +505,7 @@ where
     tracing::debug!("Authorized code exchange");
 
     // Lookup the request assigned to this code
-    let attempt = ctx
+    let mut attempt = ctx
         .login
         .get_login_attempt_for_code(&body.code)
         .await
@@ -532,6 +532,24 @@ where
     let info = fetch_user_info(ctx.public_url(), &ctx.web_client(), &*provider, &attempt).await?;
 
     tracing::debug!("Retrieved user information from remote provider");
+
+    // During fetch_user_info we revoke any downstream codes if possible, therefore At this point we
+    // consider the login attempt to be consumed and can no longer be used. We state transition to
+    // complete, even though we may fail further along in the handler. If a failure occurs then the
+    // user will need to re-authenticate.
+    attempt = ctx
+        .login
+        .complete_login_attempt(attempt)
+        .await
+        .map_err(|err| {
+            tracing::error!(?err, "Failed to complete login attempt");
+            OAuthError {
+                error: OAuthErrorCode::ServerError,
+                error_description: Some("An unexpected error occurred".to_string()),
+                error_uri: None,
+                state: None,
+            }
+        })?;
 
     // Register this user as an API user if needed
     let (api_user_info, api_user_provider) = ctx
