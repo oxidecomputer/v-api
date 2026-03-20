@@ -951,7 +951,11 @@ mod tests {
             .unwrap()
         );
         assert_eq!(
-            format!("{}; HttpOnly; SameSite=Lax; Secure; Max-Age=600", attempt.id).as_str(),
+            format!(
+                "{}; HttpOnly; SameSite=Lax; Secure; Max-Age=600",
+                attempt.id
+            )
+            .as_str(),
             String::from_utf8(
                 response
                     .headers()
