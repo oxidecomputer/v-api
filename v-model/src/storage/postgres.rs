@@ -836,12 +836,18 @@ impl OAuthClientStore for PostgresStore {
                         Vec::<OAuthClientRedirectUri>::new(),
                     ));
 
+                    // Only include secrets that have not been deleted
                     if let Some(secret) = secret {
-                        value.1.push(secret.into());
+                        if secret.deleted_at.is_none() {
+                            value.1.push(secret.into());
+                        }
                     }
 
+                    // Only include redirect URIs that have not been deleted
                     if let Some(redirect) = redirect {
-                        value.2.push(redirect.into());
+                        if redirect.deleted_at.is_none() {
+                            value.2.push(redirect.into());
+                        }
                     }
 
                     clients
