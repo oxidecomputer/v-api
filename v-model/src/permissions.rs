@@ -178,11 +178,12 @@ where
     pub fn remove(&mut self, item: &T) -> bool {
         let mut removed = false;
         self.0.retain(|perm| {
-            if perm == item {
+            let matches = perm == item;
+            if matches {
                 removed = true;
             }
 
-            perm == item
+            !matches
         });
 
         removed
