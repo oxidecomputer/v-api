@@ -31,7 +31,9 @@ use crate::{
         AuthToken, Verifier,
     },
     permissions::{VAppPermission, VPermission},
-    response::{resource_restricted, OptionalResource, ResourceError, ResourceResult},
+    response::{
+        resource_not_found, resource_restricted, OptionalResource, ResourceError, ResourceResult,
+    },
     VApiStorage,
 };
 
@@ -568,9 +570,16 @@ where
             ]
             .iter(),
         ) {
-            ApiUserProviderStore::get(&*self.storage, provider_id, false)
+            let provider = ApiUserProviderStore::get(&*self.storage, provider_id, false)
                 .await
-                .optional()
+                .optional()?;
+
+            // Ensure that the requested provider belongs to the user
+            if provider.user_id == *user_id {
+                Ok(provider)
+            } else {
+                resource_not_found()
+            }
         } else {
             resource_restricted()
         }
