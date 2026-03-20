@@ -836,12 +836,18 @@ impl OAuthClientStore for PostgresStore {
                         Vec::<OAuthClientRedirectUri>::new(),
                     ));
 
+                    // Only include secrets that have not been deleted
                     if let Some(secret) = secret {
-                        value.1.push(secret.into());
+                        if secret.deleted_at.is_none() {
+                            value.1.push(secret.into());
+                        }
                     }
 
+                    // Only include redirect URIs that have not been deleted
                     if let Some(redirect) = redirect {
-                        value.2.push(redirect.into());
+                        if redirect.deleted_at.is_none() {
+                            value.2.push(redirect.into());
+                        }
                     }
 
                     clients
@@ -1009,12 +1015,18 @@ impl MagicLinkStore for PostgresStore {
             );
         }
 
+        // Deleted secrets are not included in the results
         if let Some(signature) = signature {
-            query = query.filter(magic_link_client_secret::secret_signature.eq_any(signature));
+            query = query
+                .filter(magic_link_client_secret::secret_signature.eq_any(signature))
+                .filter(magic_link_client_secret::deleted_at.is_null());
         }
 
+        // Deleted redirect URIs are not included in the results
         if let Some(redirect_uri) = redirect_uri {
-            query = query.filter(magic_link_client_redirect_uri::redirect_uri.eq_any(redirect_uri));
+            query = query
+                .filter(magic_link_client_redirect_uri::redirect_uri.eq_any(redirect_uri))
+                .filter(magic_link_client_redirect_uri::deleted_at.is_null());
         }
 
         if !deleted {
