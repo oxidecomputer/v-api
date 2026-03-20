@@ -96,7 +96,11 @@ impl AuthToken {
                 Ok(AuthToken::Jwt(token))
             }
             Err(err) => {
-                tracing::debug!(?err, ?token, "Token is not a JWT, falling back to API key");
+                tracing::debug!(
+                    ?err,
+                    token_size = token.len(),
+                    "Token is not a JWT, falling back to API key"
+                );
 
                 Ok(AuthToken::ApiKey(
                     RawKey::try_from(token.as_str()).map_err(|err| {
