@@ -2,29 +2,25 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{fmt::Debug, sync::Arc};
-
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{DateTime, Utc};
 use jsonwebtoken::{
     decode, decode_header,
-    jwk::{
-        AlgorithmParameters, CommonParameters, Jwk, KeyAlgorithm, PublicKeyUse, RSAKeyParameters,
-        RSAKeyType,
-    },
+    jwk::{AlgorithmParameters, Jwk},
     Algorithm, DecodingKey, Header, Validation,
 };
 use newtype_uuid::TypedUuid;
-use rsa::traits::PublicKeyParts;
 use serde::{Deserialize, Serialize};
-use tap::TapFallible;
+use std::{fmt::Debug, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
 use v_model::{AccessTokenId, UserId, UserProviderId};
 
-use crate::{config::AsymmetricKey, context::VContext, permissions::VAppPermission};
+use crate::{authn::Signer, context::VContext, permissions::VAppPermission};
 
-use super::{Signer, SigningKeyError};
+use super::SigningKeyError;
+
+pub static DEFAULT_JWT_EXPIRATION: i64 = 3600;
 
 #[derive(Debug, Error)]
 pub enum JwtError {
@@ -153,19 +149,14 @@ pub struct JwtSigner {
     #[allow(dead_code)]
     header: Header,
     encoded_header: String,
-    signer: Arc<dyn Signer>,
+    signer: Arc<Signer>,
 }
 
 impl JwtSigner {
-    pub fn new(key: &AsymmetricKey) -> Result<Self, JwtSignerError> {
+    pub fn new(signer: Arc<Signer>) -> Result<Self, JwtSignerError> {
         let mut header = Header::new(Algorithm::RS256);
-        header.kid = Some(key.kid().to_string());
+        header.kid = Some(signer.kid.clone());
         let encoded_header = to_base64_json(&header)?;
-
-        let signer = key
-            .as_signer()
-            .map_err(JwtSignerError::InvalidKey)
-            .tap_err(|err| tracing::error!(?err, "Unable to construct signer for JWT key"))?;
 
         Ok(Self {
             header,
@@ -197,31 +188,6 @@ impl JwtSigner {
 
         let enc_signature = URL_SAFE_NO_PAD.encode(signature);
         Ok(format!("{}.{}", message, enc_signature))
-    }
-}
-
-impl AsymmetricKey {
-    pub fn as_jwk(&self) -> Result<Jwk, JwtSignerError> {
-        let key_id = self.kid();
-        let public_key = self.public_key().map_err(JwtSignerError::InvalidKey)?;
-
-        Ok(Jwk {
-            common: CommonParameters {
-                public_key_use: Some(PublicKeyUse::Signature),
-                key_operations: None,
-                key_algorithm: Some(KeyAlgorithm::RS256),
-                key_id: Some(key_id.to_string()),
-                x509_chain: None,
-                x509_sha1_fingerprint: None,
-                x509_sha256_fingerprint: None,
-                x509_url: None,
-            },
-            algorithm: AlgorithmParameters::RSA(RSAKeyParameters {
-                key_type: RSAKeyType::RSA,
-                n: URL_SAFE_NO_PAD.encode(public_key.n().to_bytes_be()),
-                e: URL_SAFE_NO_PAD.encode(public_key.e().to_bytes_be()),
-            }),
-        })
     }
 }
 

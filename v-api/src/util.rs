@@ -296,7 +296,8 @@ pub mod tests {
                         .as_bytes()
                         .to_vec(),
                 )
-                .unwrap(),
+                .unwrap()
+                .into(),
             },
         }
     }

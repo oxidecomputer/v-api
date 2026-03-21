@@ -21,7 +21,7 @@ use v_model::{
 };
 
 use crate::{
-    authn::{key::RawKey, Verifier},
+    authn::{key::RawKey, Verify},
     context::magic_link::{MagicLinkSendError, MagicLinkTransitionError},
     endpoints::login::{ExternalUserId, UserInfo},
     permissions::VAppPermission,
@@ -289,14 +289,14 @@ impl From<MagicLinkTransitionError> for HttpError {
 pub trait CheckMagicLinkClient {
     fn is_secret_valid<T>(&self, key: &RawKey, verifier: &T) -> bool
     where
-        T: Verifier;
+        T: Verify;
     fn is_redirect_uri_valid(&self, redirect_uri: &str) -> bool;
 }
 
 impl CheckMagicLinkClient for MagicLink {
     fn is_secret_valid<T>(&self, key: &RawKey, verifier: &T) -> bool
     where
-        T: Verifier,
+        T: Verify,
     {
         for secret in &self.secrets {
             match key.verify(verifier, secret.secret_signature.as_bytes()) {

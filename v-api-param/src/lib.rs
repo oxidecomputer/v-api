@@ -54,11 +54,16 @@ impl StringParam {
     ///
     /// For inline values, returns the value directly.
     /// For path-based values, reads the file contents and trims trailing whitespace.
-    pub fn resolve(&self) -> Result<SecretString, ParamResolutionError> {
+    pub fn resolve(&self, base: Option<PathBuf>) -> Result<SecretString, ParamResolutionError> {
         match self {
             StringParam::Inline(value) => Ok(value.clone()),
             StringParam::FromPath { path } => {
-                let content = std::fs::read_to_string(path).map_err(|source| {
+                let path = if let Some(base) = base {
+                    base.join(path)
+                } else {
+                    path.clone()
+                };
+                let content = std::fs::read_to_string(&path).map_err(|source| {
                     ParamResolutionError::FileRead {
                         path: path.display().to_string(),
                         source,
@@ -93,7 +98,7 @@ mod tests {
     #[test]
     fn test_inline_value() {
         let param = StringParam::Inline("my-param".to_string().into());
-        assert_eq!(param.resolve().unwrap().expose_secret(), "my-param");
+        assert_eq!(param.resolve(None).unwrap().expose_secret(), "my-param");
     }
 
     #[test]
@@ -104,7 +109,7 @@ mod tests {
         let param = StringParam::FromPath {
             path: file.path().to_path_buf(),
         };
-        assert_eq!(param.resolve().unwrap().expose_secret(), "file-param");
+        assert_eq!(param.resolve(None).unwrap().expose_secret(), "file-param");
     }
 
     #[test]
@@ -116,7 +121,7 @@ mod tests {
         let param = StringParam::FromPath {
             path: file.path().to_path_buf(),
         };
-        assert_eq!(param.resolve().unwrap().expose_secret(), "file-param");
+        assert_eq!(param.resolve(None).unwrap().expose_secret(), "file-param");
     }
 
     #[test]
@@ -124,7 +129,7 @@ mod tests {
         let param = StringParam::FromPath {
             path: PathBuf::from("/nonexistent/path"),
         };
-        let result = param.resolve();
+        let result = param.resolve(None);
         assert!(matches!(result, Err(ParamResolutionError::FileRead { .. })));
     }
 
@@ -139,7 +144,7 @@ mod tests {
 
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(
-            config.key.resolve().unwrap().expose_secret(),
+            config.key.resolve(None).unwrap().expose_secret(),
             "inline-value"
         );
     }
@@ -157,6 +162,9 @@ mod tests {
         }
 
         let config: Config = toml::from_str(&toml).unwrap();
-        assert_eq!(config.key.resolve().unwrap().expose_secret(), "path-value");
+        assert_eq!(
+            config.key.resolve(None).unwrap().expose_secret(),
+            "path-value"
+        );
     }
 }
