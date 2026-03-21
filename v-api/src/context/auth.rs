@@ -71,14 +71,11 @@ where
                 signers: signers
                     .iter()
                     .cloned()
-                    .map(|k| JwtSigner::new(k))
+                    .map(JwtSigner::new)
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(Box::new)?,
             },
-            secrets: SecretContext {
-                signers: signers,
-                verifiers: verifiers,
-            },
+            secrets: SecretContext { signers, verifiers },
             oauth_providers: HashMap::new(),
         })
     }

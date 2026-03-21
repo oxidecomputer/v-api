@@ -384,7 +384,7 @@ impl Verifier {
 
 impl Verify for Verifier {
     fn verify(&self, message: &[u8], signature: &[u8]) -> VerificationResult {
-        Verifier::verify(&self, message, signature)
+        Verifier::verify(self, message, signature)
     }
 }
 

@@ -703,6 +703,15 @@ pub struct VContextBuilder<T> {
     keys: Option<Vec<AsymmetricKey>>,
 }
 
+impl<T> Default for VContextBuilder<T>
+where
+    T: VAppPermission,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> VContextBuilder<T>
 where
     T: VAppPermission,
@@ -763,14 +772,12 @@ where
                 "keys".to_string(),
             ))?;
 
-        Ok(
-            VContext::<T>::new(public_url, param_path, storage, jwt, keys)
-                .await
-                .map_err(|err| {
-                    tracing::error!(?err, "Failed to construct VContext");
-                    VContextBuilderError::VContext(err)
-                })?,
-        )
+        VContext::<T>::new(public_url, param_path, storage, jwt, keys)
+            .await
+            .map_err(|err| {
+                tracing::error!(?err, "Failed to construct VContext");
+                VContextBuilderError::VContext(err)
+            })
     }
 }
 
