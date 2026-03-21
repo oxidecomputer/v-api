@@ -113,6 +113,22 @@ mod tests {
     }
 
     #[test]
+    fn test_from_path_with_base() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "file-param").unwrap();
+
+        let param = StringParam::FromPath {
+            path: PathBuf::from(file.path().file_name().unwrap()),
+        };
+        let base_path = std::env::temp_dir();
+
+        assert_eq!(
+            param.resolve(Some(base_path)).unwrap().expose_secret(),
+            "file-param"
+        );
+    }
+
+    #[test]
     fn test_from_path_trims_trailing_whitespace() {
         let mut file = NamedTempFile::new().unwrap();
         writeln!(file, "file-param").unwrap();
