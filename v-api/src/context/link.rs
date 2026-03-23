@@ -14,7 +14,7 @@ use v_model::{
 use crate::{
     authn::{
         key::{RawKey, SignedKey},
-        Signer,
+        Sign,
     },
     permissions::{VAppPermission, VPermission},
     response::{resource_restricted, ResourceResult},
@@ -49,7 +49,7 @@ where
     pub async fn create_link_request_token(
         &self,
         caller: &Caller<T>,
-        signer: &dyn Signer,
+        signer: &dyn Sign,
         source_provider: &TypedUuid<UserProviderId>,
         source_user: &TypedUuid<UserId>,
         target: &TypedUuid<UserId>,

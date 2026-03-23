@@ -24,7 +24,7 @@ use v_model::{
 use crate::{
     authn::{
         key::{ApiKeyError, RawKey},
-        Signer, SigningKeyError,
+        Sign, SigningKeyError,
     },
     messenger::{Message, Messenger, MessengerError},
     permissions::{VAppPermission, VPermission},
@@ -310,7 +310,7 @@ where
     pub async fn send_login_attempt(
         &self,
         key: RawKey,
-        signer: &dyn Signer,
+        signer: &dyn Sign,
         client_id: TypedUuid<MagicLinkId>,
         redirect_uri: &Url,
         medium: MagicLinkMedium,

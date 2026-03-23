@@ -28,7 +28,7 @@ use v_model::{
 use crate::{
     authn::{
         jwt::{Claims, JwtSigner, JwtSignerError},
-        AuthToken, Verifier,
+        AuthToken, Verify,
     },
     permissions::{VAppPermission, VPermission},
     response::{
@@ -136,7 +136,7 @@ where
         token: &AuthToken,
     ) -> Result<Caller<T>, UserContextError>
     where
-        U: Verifier,
+        U: Verify,
     {
         let (api_user_id, base_permissions) = self
             .get_base_permissions(registration_user, verifier, token)
@@ -207,7 +207,7 @@ where
         auth: &AuthToken,
     ) -> Result<(TypedUuid<UserId>, BasePermissions<T>), UserContextError>
     where
-        U: Verifier,
+        U: Verify,
     {
         match auth {
             AuthToken::ApiKey(api_key) => {

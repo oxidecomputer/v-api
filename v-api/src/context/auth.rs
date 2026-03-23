@@ -11,9 +11,9 @@ use v_model::permissions::Caller;
 use crate::{
     authn::{
         jwt::{Claims, JwtSigner, JwtSignerError},
-        AuthError, AuthToken, Signer, VerificationResult, Verifier,
+        AuthError, AuthToken, Sign, Signer, VerificationResult, Verifier, Verify,
     },
-    config::{AsymmetricKey, JwtConfig},
+    config::JwtConfig,
     endpoints::login::oauth::{
         OAuthProvider, OAuthProviderError, OAuthProviderFn, OAuthProviderName,
     },
@@ -34,21 +34,14 @@ impl<T> AuthContext<T>
 where
     T: VAppPermission,
 {
-    pub fn new(jwt: JwtConfig, keys: Vec<AsymmetricKey>) -> Result<Self, AppError> {
-        let mut signers = vec![];
-        let mut verifiers = vec![];
-
-        for key in &keys {
-            match &key {
-                &AsymmetricKey::LocalSigner { .. } | &AsymmetricKey::CkmsSigner { .. } => {
-                    signers.push(key);
-                }
-                &AsymmetricKey::LocalVerifier { .. } | &AsymmetricKey::CkmsVerifier { .. } => {
-                    verifiers.push(key);
-                }
-            }
-        }
-
+    pub fn new(
+        jwt: JwtConfig,
+        jwks: JwkSet,
+        signers: Vec<Signer>,
+        verifiers: Vec<Verifier>,
+    ) -> Result<Self, AppError> {
+        let signers = signers.into_iter().map(Arc::new).collect::<Vec<_>>();
+        let verifiers = verifiers.into_iter().map(Arc::new).collect::<Vec<_>>();
         Ok(Self {
             unauthenticated_caller: Caller {
                 id: "00000000-0000-4000-8000-000000000000".parse().unwrap(),
@@ -74,31 +67,15 @@ where
             },
             jwt: JwtContext {
                 default_expiration: jwt.default_expiration,
-                jwks: JwkSet {
-                    keys: verifiers
-                        .iter()
-                        .map(|k| k.as_jwk())
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(Box::new)?,
-                },
+                jwks,
                 signers: signers
                     .iter()
-                    .map(|k| JwtSigner::new(k))
+                    .cloned()
+                    .map(JwtSigner::new)
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(Box::new)?,
             },
-            secrets: SecretContext {
-                signers: signers
-                    .iter()
-                    .map(|k| k.as_signer())
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(Box::new)?,
-                verifiers: verifiers
-                    .iter()
-                    .map(|k| k.as_verifier())
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(Box::new)?,
-            },
+            secrets: SecretContext { signers, verifiers },
             oauth_providers: HashMap::new(),
         })
     }
@@ -137,11 +114,11 @@ where
         self.jwt.signers.first().unwrap()
     }
 
-    pub fn signer(&self) -> &dyn Signer {
+    pub fn signer(&self) -> &dyn Sign {
         &*self.secrets.signers[0]
     }
 
-    pub fn verifiers(&self) -> &[Arc<dyn Verifier>] {
+    pub fn verifiers(&self) -> &[Arc<Verifier>] {
         &self.secrets.verifiers
     }
 
@@ -178,7 +155,7 @@ where
 }
 
 #[async_trait]
-impl<T> Verifier for AuthContext<T>
+impl<T> Verify for AuthContext<T>
 where
     T: VAppPermission,
 {
@@ -201,14 +178,16 @@ pub struct JwtContext {
 }
 
 pub struct SecretContext {
-    pub signers: Vec<Arc<dyn Signer>>,
-    pub verifiers: Vec<Arc<dyn Verifier>>,
+    pub signers: Vec<Arc<Signer>>,
+    pub verifiers: Vec<Arc<Verifier>>,
 }
 
 #[cfg(test)]
 mod tests {
+    use jsonwebtoken::jwk::JwkSet;
+
     use crate::{
-        authn::Verifier,
+        authn::Verify,
         config::JwtConfig,
         context::auth::AuthContext,
         permissions::VPermission,
@@ -226,7 +205,12 @@ mod tests {
             JwtConfig {
                 default_expiration: 5000,
             },
-            vec![signer, wrong_verifier, verifier],
+            JwkSet { keys: vec![] },
+            vec![signer.resolve_signer(None).unwrap()],
+            vec![
+                wrong_verifier.resolve_verifier(None).await.unwrap(),
+                verifier.resolve_verifier(None).await.unwrap(),
+            ],
         )
         .unwrap();
 

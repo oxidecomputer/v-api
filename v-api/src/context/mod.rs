@@ -6,9 +6,10 @@ use async_trait::async_trait;
 use auth::AuthContext;
 use chrono::{TimeDelta, Utc};
 use dropshot::{ClientErrorStatusCode, HttpError, RequestContext, ServerContext};
+use futures::future::join_all;
 use jsonwebtoken::jwk::JwkSet;
 use newtype_uuid::TypedUuid;
-use std::{fmt::Debug, future::Future, sync::Arc};
+use std::{fmt::Debug, future::Future, path::PathBuf, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
 use user::{RegisteredAccessToken, UserContextError};
@@ -27,8 +28,8 @@ use v_model::{
 
 use crate::{
     authn::{
-        jwt::{Claims, JwtSigner, JwtSignerError},
-        AuthError, AuthToken, Signer, VerificationResult, Verifier,
+        jwt::{Claims, JwtSigner, JwtSignerError, DEFAULT_JWT_EXPIRATION},
+        AuthError, AuthToken, Sign, VerificationResult, Verify,
     },
     config::{AsymmetricKey, JwtConfig},
     endpoints::login::{
@@ -37,7 +38,7 @@ use crate::{
         },
         UserInfo,
     },
-    error::{ApiError, AppError},
+    error::ApiError,
     mapper::DefaultMappingEngine,
     permissions::{VAppPermission, VPermission},
     response::{OptionalResource, ResourceErrorInner},
@@ -157,6 +158,12 @@ where
 }
 
 #[derive(Debug, Error)]
+pub enum VContextError {
+    #[error("Failed to construct internal auth context")]
+    InternalAuthContext,
+}
+
+#[derive(Debug, Error)]
 pub enum VContextCallerError {
     #[error(transparent)]
     Auth(#[from] AuthError),
@@ -215,13 +222,38 @@ impl<T> VContext<T>
 where
     T: VAppPermission,
 {
-    pub async fn new(
+    async fn new(
         public_url: String,
+        param_path: Option<PathBuf>,
         storage: Arc<dyn VApiStorage<T>>,
         jwt: JwtConfig,
         keys: Vec<AsymmetricKey>,
-    ) -> Result<Self, AppError> {
-        let auth_ctx = AuthContext::new(jwt, keys)?;
+    ) -> Result<Self, VContextError> {
+        // `keys` is a list of key components, where each one is either a signer or a verifier.
+        // Therefore when constructing our lists we omit any keys from each list which is unable
+        // to be resolved into the needed kind.
+        let jwks = JwkSet {
+            keys: keys
+                .iter()
+                .filter_map(|key| key.resolve_jwk(param_path.clone()).ok())
+                .collect::<Vec<_>>(),
+        };
+        let signers = keys
+            .iter()
+            .filter_map(|key| key.resolve_signer(param_path.clone()).ok())
+            .collect::<Vec<_>>();
+        let verifiers = join_all(
+            keys.iter()
+                .map(|key| key.resolve_verifier(param_path.clone())),
+        )
+        .await
+        .into_iter()
+        .filter_map(|key| key.ok())
+        .collect::<Vec<_>>();
+        let auth_ctx = AuthContext::new(jwt, jwks, signers, verifiers).map_err(|err| {
+            tracing::error!(?err, "Auth context construction failed");
+            VContextError::InternalAuthContext
+        })?;
         let group_ctx = GroupContext::new(storage.clone());
         let mut mapping_ctx = MappingContext::new(storage.clone());
         mapping_ctx.set_engine(Some(Arc::new(DefaultMappingEngine::new(
@@ -269,7 +301,7 @@ where
         self.auth.sign_jwt(claims).await
     }
 
-    pub fn signer(&self) -> &dyn Signer {
+    pub fn signer(&self) -> &dyn Sign {
         self.auth.signer()
     }
 
@@ -646,12 +678,106 @@ where
 }
 
 #[async_trait]
-impl<T> Verifier for VContext<T>
+impl<T> Verify for VContext<T>
 where
     T: VAppPermission,
 {
     fn verify(&self, message: &[u8], signature: &[u8]) -> VerificationResult {
         self.auth.verify(message, signature)
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum VContextBuilderError {
+    #[error("{0} must be set to build a VContext")]
+    MissingRequiredConfiguration(String),
+    #[error("Failed to build VContext")]
+    VContext(#[from] VContextError),
+}
+
+pub struct VContextBuilder<T> {
+    param_path: Option<PathBuf>,
+    jwt_expiration: Option<i64>,
+    public_url: Option<String>,
+    storage: Option<Arc<dyn VApiStorage<T>>>,
+    keys: Option<Vec<AsymmetricKey>>,
+}
+
+impl<T> Default for VContextBuilder<T>
+where
+    T: VAppPermission,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T> VContextBuilder<T>
+where
+    T: VAppPermission,
+{
+    pub fn new() -> Self {
+        Self {
+            param_path: None,
+            jwt_expiration: None,
+            public_url: None,
+            storage: None,
+            keys: None,
+        }
+    }
+
+    pub fn with_param_path(mut self, path: PathBuf) -> Self {
+        self.param_path = Some(path);
+        self
+    }
+
+    pub fn with_jwt_expiration(mut self, expiration: i64) -> Self {
+        self.jwt_expiration = Some(expiration);
+        self
+    }
+
+    pub fn with_public_url(mut self, url: String) -> Self {
+        self.public_url = Some(url);
+        self
+    }
+
+    pub fn with_storage(mut self, storage: Arc<dyn VApiStorage<T>>) -> Self {
+        self.storage = Some(storage);
+        self
+    }
+
+    pub fn with_keys(mut self, keys: Vec<AsymmetricKey>) -> Self {
+        self.keys = Some(keys);
+        self
+    }
+
+    pub async fn build(self) -> Result<VContext<T>, VContextBuilderError> {
+        let public_url =
+            self.public_url
+                .ok_or(VContextBuilderError::MissingRequiredConfiguration(
+                    "public_url".to_string(),
+                ))?;
+        let param_path = self.param_path;
+        let storage = self
+            .storage
+            .ok_or(VContextBuilderError::MissingRequiredConfiguration(
+                "storage".to_string(),
+            ))?;
+        let jwt = JwtConfig {
+            default_expiration: self.jwt_expiration.unwrap_or(DEFAULT_JWT_EXPIRATION),
+        };
+        let keys = self
+            .keys
+            .ok_or(VContextBuilderError::MissingRequiredConfiguration(
+                "keys".to_string(),
+            ))?;
+
+        VContext::<T>::new(public_url, param_path, storage, jwt, keys)
+            .await
+            .map_err(|err| {
+                tracing::error!(?err, "Failed to construct VContext");
+                VContextBuilderError::VContext(err)
+            })
     }
 }
 
@@ -922,6 +1048,7 @@ pub(crate) mod test_mocks {
         let MockKey { signer, verifier } = mock_key("test");
         let mut ctx = VContext::new(
             "".to_string(),
+            None,
             storage,
             JwtConfig::default(),
             vec![

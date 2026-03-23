@@ -8,9 +8,9 @@ use secrecy::{ExposeSecret, SecretSlice, SecretString};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::authn::Verifier;
+use crate::authn::{Sign, Verify};
 
-use super::{Signer, SigningKeyError};
+use super::SigningKeyError;
 
 pub struct RawKey {
     clear: SecretSlice<u8>,
@@ -49,7 +49,7 @@ impl RawKey {
         &self.clear.expose_secret()[0..16]
     }
 
-    pub async fn sign(self, signer: &dyn Signer) -> Result<SignedKey, ApiKeyError> {
+    pub async fn sign(self, signer: &dyn Sign) -> Result<SignedKey, ApiKeyError> {
         let signature = hex::encode(
             signer
                 .sign(self.clear.expose_secret())
@@ -64,7 +64,7 @@ impl RawKey {
 
     pub fn verify<T>(&self, verifier: &T, signature: &[u8]) -> Result<(), ApiKeyError>
     where
-        T: Verifier,
+        T: Verify,
     {
         let signature = hex::decode(signature)?;
         if verifier
@@ -143,15 +143,15 @@ mod tests {
 
     use super::RawKey;
     use crate::{
-        authn::{VerificationResult, Verifier},
+        authn::{VerificationResult, Verify},
         util::tests::{mock_key, MockKey},
     };
 
     struct TestVerifier {
-        verifier: Arc<dyn Verifier>,
+        verifier: Arc<dyn Verify>,
     }
 
-    impl Verifier for TestVerifier {
+    impl Verify for TestVerifier {
         fn verify(&self, message: &[u8], signature: &[u8]) -> VerificationResult {
             self.verifier.verify(message, signature)
         }
@@ -161,13 +161,13 @@ mod tests {
     async fn test_verifies_signature() {
         let id = Uuid::new_v4();
         let MockKey { signer, verifier } = mock_key("test");
-        let signer = signer.as_signer().unwrap();
+        let signer = signer.resolve_signer(None).unwrap();
         let verifier = TestVerifier {
-            verifier: verifier.as_verifier().unwrap(),
+            verifier: Arc::new(verifier.resolve_verifier(None).await.unwrap()),
         };
 
         let raw = RawKey::generate::<8>(&id);
-        let signed = raw.sign(&*signer).await.unwrap();
+        let signed = raw.sign(&signer).await.unwrap();
 
         let raw2 = RawKey::try_from(signed.key.expose_secret()).unwrap();
 
@@ -181,13 +181,13 @@ mod tests {
     async fn test_generates_signatures() {
         let id = Uuid::new_v4();
         let MockKey { signer, .. } = mock_key("test");
-        let signer = signer.as_signer().unwrap();
+        let signer = signer.resolve_signer(None).unwrap();
 
         let raw1 = RawKey::generate::<8>(&id);
-        let signed1 = raw1.sign(&*signer).await.unwrap();
+        let signed1 = raw1.sign(&signer).await.unwrap();
 
         let raw2 = RawKey::generate::<8>(&id);
-        let signed2 = raw2.sign(&*signer).await.unwrap();
+        let signed2 = raw2.sign(&signer).await.unwrap();
 
         assert_ne!(signed1.signature(), signed2.signature())
     }
