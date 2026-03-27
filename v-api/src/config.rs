@@ -37,8 +37,9 @@ pub enum AppConfigError {
     InvalidLogFormatVariant,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum ServerLogFormat {
+    #[default]
     Json,
     Pretty,
 }
