@@ -4,19 +4,21 @@
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{DateTime, Utc};
+use dropshot::{RequestContext, SharedExtractor};
+use dropshot_authorization_header::bearer::BearerAuth;
 use jsonwebtoken::{
     decode, decode_header,
     jwk::{AlgorithmParameters, Jwk},
     Algorithm, DecodingKey, Header, Validation,
 };
 use newtype_uuid::TypedUuid;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{fmt::Debug, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
 use v_model::{AccessTokenId, UserId, UserProviderId};
 
-use crate::{authn::Signer, context::VContext, permissions::VAppPermission};
+use crate::{authn::Signer, context::VContext, permissions::VAppPermission, ApiContext};
 
 use super::SigningKeyError;
 
@@ -34,13 +36,15 @@ pub enum JwtError {
     MissingKid,
     #[error("Failed to find a matching key as requested by token")]
     NoMatchingKey,
+    #[error("No token found")]
+    NoToken,
     #[error("Unsupported algorithm")]
     UnsupportedAlgorithm,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Jwt {
-    pub claims: Claims,
+pub struct Jwt<T> {
+    pub claims: T,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -80,7 +84,10 @@ impl Claims {
     }
 }
 
-impl Jwt {
+impl<C> Jwt<C>
+where
+    C: Debug + DeserializeOwned + Serialize,
+{
     pub async fn new<T>(ctx: &VContext<T>, token: &str) -> Result<Self, JwtError>
     where
         T: VAppPermission,
@@ -103,7 +110,7 @@ impl Jwt {
         // The only JWKs supported are those that are available in the server context
         let jwk = ctx.jwks().await.find(&kid).ok_or(JwtError::NoMatchingKey)?;
         let (key, algorithm) = DecodingKey::from_jwk(jwk)
-            .map(|key| (key, Jwt::algo(jwk)))
+            .map(|key| (key, Jwt::<C>::algo(jwk)))
             .map_err(JwtError::InvalidJwk)?;
 
         tracing::trace!(?jwk, ?algorithm, "Kid matched known decoding key");
@@ -130,6 +137,28 @@ impl Jwt {
                 Err(JwtError::UnsupportedAlgorithm)
             }
         }
+    }
+
+    // Extract an JWT from a Dropshot request
+    pub async fn extract<T>(
+        rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+    ) -> Result<Self, JwtError>
+    where
+        T: VAppPermission,
+    {
+        // Ensure there is a bearer, without it there is nothing else to do
+        let bearer = BearerAuth::from_request(rqctx).await.map_err(|err| {
+            tracing::info!(?err, "Failed to extract bearer auth");
+            JwtError::NoToken
+        })?;
+
+        // Check that the extracted token actually contains a value
+        let token = bearer.consume().ok_or_else(|| {
+            tracing::debug!("Bearer auth is empty");
+            JwtError::NoToken
+        })?;
+
+        Self::new(&rqctx.v_ctx(), &token).await
     }
 }
 
