@@ -16,6 +16,7 @@ use user::{RegisteredAccessToken, UserContextError};
 use v_model::{
     permissions::{Caller, Permission},
     storage::{
+        postgres::{PostgresError, PostgresStore},
         AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore, ApiUserFilter,
         ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, LinkRequestStore,
         ListPagination, LoginAttemptStore, MagicLinkAttemptStore, MagicLinkRedirectUriStore,
@@ -689,8 +690,12 @@ where
 
 #[derive(Debug, Error)]
 pub enum VContextBuilderError {
+    #[error("Conflicting configuration, only one of {0} and {1} can be set")]
+    ConfigConflict(String, String),
     #[error("{0} must be set to build a VContext")]
     MissingRequiredConfiguration(String),
+    #[error("Failed to connect to storage")]
+    Storage(#[from] PostgresError),
     #[error("Failed to build VContext")]
     VContext(#[from] VContextError),
 }
@@ -700,6 +705,7 @@ pub struct VContextBuilder<T> {
     jwt_expiration: Option<i64>,
     public_url: Option<String>,
     storage: Option<Arc<dyn VApiStorage<T>>>,
+    storage_url: Option<String>,
     keys: Option<Vec<AsymmetricKey>>,
 }
 
@@ -722,6 +728,7 @@ where
             jwt_expiration: None,
             public_url: None,
             storage: None,
+            storage_url: None,
             keys: None,
         }
     }
@@ -746,23 +753,48 @@ where
         self
     }
 
+    pub fn with_storage_url(mut self, url: String) -> Self {
+        self.storage_url = Some(url);
+        self
+    }
+
     pub fn with_keys(mut self, keys: Vec<AsymmetricKey>) -> Self {
         self.keys = Some(keys);
         self
     }
 
     pub async fn build(self) -> Result<VContext<T>, VContextBuilderError> {
+        if self.storage.is_some() && self.storage_url.is_some() {
+            return Err(VContextBuilderError::ConfigConflict(
+                "storage".to_string(),
+                "storage_url".to_string(),
+            ));
+        }
+        if self.storage.is_none() && self.storage_url.is_none() {
+            return Err(VContextBuilderError::MissingRequiredConfiguration(
+                "storage".to_string(),
+            ));
+        }
+
         let public_url =
             self.public_url
                 .ok_or(VContextBuilderError::MissingRequiredConfiguration(
                     "public_url".to_string(),
                 ))?;
         let param_path = self.param_path;
-        let storage = self
-            .storage
-            .ok_or(VContextBuilderError::MissingRequiredConfiguration(
-                "storage".to_string(),
-            ))?;
+
+        let storage = if let Some(storage) = self.storage {
+            storage
+        } else {
+            Arc::new(
+                PostgresStore::new(
+                    &self
+                        .storage_url
+                        .expect("Storage url was previously checked to exist"),
+                )
+                .await?,
+            )
+        };
         let jwt = JwtConfig {
             default_expiration: self.jwt_expiration.unwrap_or(DEFAULT_JWT_EXPIRATION),
         };
@@ -803,6 +835,7 @@ mod tests {
         },
         context::user::UserContextError,
         permissions::VPermission,
+        VContextBuilder, VContextBuilderError,
     };
 
     use super::{
@@ -995,6 +1028,43 @@ mod tests {
             VContextCallerError::Caller(UserContextError::InvalidToken) => (),
             other => panic!(
                 "Exected to receive UserContextError::InvalidToken error. Instead found {:?}",
+                other
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_must_specify_storage_pool_or_url() {
+        let result = VContextBuilder::<VPermission>::new().build().await;
+
+        match result {
+            Ok(_) => panic!("Expected to receive PostgresError::MissingRequiredConfiguration error"),
+            Err(VContextBuilderError::MissingRequiredConfiguration(a)) => {
+                assert_eq!(a, "storage");
+            },
+            Err(other) => panic!(
+                "Expected to receive PostgresError::MissingRequiredConfiguration error. Instead found {:?}",
+                other
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_must_specify_only_one_of_storage_url_or_pool() {
+        let result = VContextBuilder::<VPermission>::new()
+            .with_storage(Arc::new(MockStorage::new()))
+            .with_storage_url("postgres://user:password@localhost:5432/db".to_string())
+            .build()
+            .await;
+
+        match result {
+            Ok(_) => panic!("Expected to receive PostgresError::MissingRequiredConfiguration error"),
+            Err(VContextBuilderError::ConfigConflict(a, b)) => {
+                assert_eq!(a, "storage");
+                assert_eq!(b, "storage_url");
+            },
+            Err(other) => panic!(
+                "Expected to receive PostgresError::MissingRequiredConfiguration error. Instead found {:?}",
                 other
             ),
         }
