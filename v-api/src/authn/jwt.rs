@@ -158,7 +158,7 @@ where
             JwtError::NoToken
         })?;
 
-        Self::new(&rqctx.v_ctx(), &token).await
+        Self::new(rqctx.v_ctx(), &token).await
     }
 }
 
