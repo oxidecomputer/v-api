@@ -24,7 +24,9 @@ use v_api_param::ParamResolutionError;
 use v_model::permissions::PermissionStorage;
 
 use crate::{
-    authn::key::RawKey, context::ApiContext, permissions::VAppPermission,
+    authn::{jwt::Claims, key::RawKey},
+    context::ApiContext,
+    permissions::VAppPermission,
     util::response::unauthorized,
 };
 
@@ -44,7 +46,7 @@ pub enum AuthError {
 // A token that provides authentication and optionally (JWT) authorization claims
 pub enum AuthToken {
     ApiKey(RawKey),
-    Jwt(Jwt),
+    Jwt(Jwt<Claims>),
 }
 
 impl Debug for AuthToken {
