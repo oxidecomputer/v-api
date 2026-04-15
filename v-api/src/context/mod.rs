@@ -835,6 +835,7 @@ mod tests {
         },
         context::user::UserContextError,
         permissions::VPermission,
+        VContextBuilder, VContextBuilderError,
     };
 
     use super::{
@@ -1027,6 +1028,43 @@ mod tests {
             VContextCallerError::Caller(UserContextError::InvalidToken) => (),
             other => panic!(
                 "Exected to receive UserContextError::InvalidToken error. Instead found {:?}",
+                other
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_must_specify_storage_pool_or_url() {
+        let result = VContextBuilder::<VPermission>::new().build().await;
+
+        match result {
+            Ok(_) => panic!("Expected to receive PostgresError::MissingRequiredConfiguration error"),
+            Err(VContextBuilderError::MissingRequiredConfiguration(a)) => {
+                assert_eq!(a, "storage");
+            },
+            Err(other) => panic!(
+                "Expected to receive PostgresError::MissingRequiredConfiguration error. Instead found {:?}",
+                other
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_must_specify_only_one_of_storage_url_or_pool() {
+        let result = VContextBuilder::<VPermission>::new()
+            .with_storage(Arc::new(MockStorage::new()))
+            .with_storage_url("postgres://user:password@localhost:5432/db".to_string())
+            .build()
+            .await;
+
+        match result {
+            Ok(_) => panic!("Expected to receive PostgresError::MissingRequiredConfiguration error"),
+            Err(VContextBuilderError::ConfigConflict(a, b)) => {
+                assert_eq!(a, "storage");
+                assert_eq!(b, "storage_url");
+            },
+            Err(other) => panic!(
+                "Expected to receive PostgresError::MissingRequiredConfiguration error. Instead found {:?}",
                 other
             ),
         }
