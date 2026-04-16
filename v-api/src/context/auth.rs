@@ -5,12 +5,13 @@
 use async_trait::async_trait;
 use dropshot::RequestContext;
 use jsonwebtoken::jwk::JwkSet;
-use std::{collections::HashMap, sync::Arc};
+use serde::Serialize;
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use v_model::permissions::Caller;
 
 use crate::{
     authn::{
-        jwt::{Claims, JwtSigner, JwtSignerError},
+        jwt::{JwtSigner, JwtSignerError},
         AuthError, AuthToken, Sign, Signer, VerificationResult, Verifier, Verify,
     },
     config::JwtConfig,
@@ -104,7 +105,10 @@ where
         &self.jwt.jwks
     }
 
-    pub async fn sign_jwt(&self, claims: &Claims) -> Result<String, JwtSignerError> {
+    pub async fn sign_jwt<C>(&self, claims: &C) -> Result<String, JwtSignerError>
+    where
+        C: Serialize + Debug,
+    {
         let signer = self.jwt.signers.first().unwrap();
         signer.sign(claims).await
     }
