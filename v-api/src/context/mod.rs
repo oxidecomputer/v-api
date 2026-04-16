@@ -9,6 +9,7 @@ use dropshot::{ClientErrorStatusCode, HttpError, RequestContext, ServerContext};
 use futures::future::join_all;
 use jsonwebtoken::jwk::JwkSet;
 use newtype_uuid::TypedUuid;
+use serde::Serialize;
 use std::{fmt::Debug, future::Future, path::PathBuf, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
@@ -298,7 +299,10 @@ where
         self.auth.jwks().await
     }
 
-    pub async fn sign_jwt(&self, claims: &Claims) -> Result<String, JwtSignerError> {
+    pub async fn sign_jwt<C>(&self, claims: &C) -> Result<String, JwtSignerError>
+    where
+        C: Serialize + Debug,
+    {
         self.auth.sign_jwt(claims).await
     }
 
