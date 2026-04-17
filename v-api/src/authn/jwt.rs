@@ -72,7 +72,7 @@ impl Claims {
         T: VAppPermission,
     {
         Claims {
-            iss: ctx.public_url().to_string(),
+            iss: ctx.issuer(),
             aud: ctx.public_url().to_string(),
             sub: *user,
             prv: *provider,
