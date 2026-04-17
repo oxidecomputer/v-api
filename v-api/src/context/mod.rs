@@ -14,6 +14,7 @@ use std::{fmt::Debug, future::Future, path::PathBuf, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
 use user::{RegisteredAccessToken, UserContextError};
+use uuid::Uuid;
 use v_model::{
     permissions::{Caller, Permission},
     storage::{
@@ -299,6 +300,31 @@ where
         self.auth.jwks().await
     }
 
+    pub fn issuer(&self) -> String {
+        self.public_url().to_string()
+    }
+
+    pub async fn service_token(&self, audience: &str) -> Result<String, JwtSignerError> {
+        #[derive(Debug, Serialize)]
+        struct ServiceClaims {
+            iss: String,
+            aud: String,
+            sub: String,
+            exp: i64,
+            nbf: i64,
+            jti: Uuid,
+        }
+        self.sign_jwt(&ServiceClaims {
+            iss: self.issuer(),
+            aud: audience.to_string(),
+            sub: self.issuer(),
+            exp: Utc::now().timestamp() + 3600,
+            nbf: Utc::now().timestamp(),
+            jti: Uuid::new_v4(),
+        })
+        .await
+    }
+
     pub async fn sign_jwt<C>(&self, claims: &C) -> Result<String, JwtSignerError>
     where
         C: Serialize + Debug,
@@ -360,6 +386,7 @@ where
             .builtin_registration_user_mut()
             .permissions
             .remove(permission);
+
         self
     }
 
@@ -706,6 +733,7 @@ pub enum VContextBuilderError {
 
 pub struct VContextBuilder<T> {
     param_path: Option<PathBuf>,
+    service_name: Option<String>,
     jwt_expiration: Option<i64>,
     public_url: Option<String>,
     storage: Option<Arc<dyn VApiStorage<T>>>,
@@ -729,6 +757,7 @@ where
     pub fn new() -> Self {
         Self {
             param_path: None,
+            service_name: None,
             jwt_expiration: None,
             public_url: None,
             storage: None,
@@ -739,6 +768,11 @@ where
 
     pub fn with_param_path(mut self, path: PathBuf) -> Self {
         self.param_path = Some(path);
+        self
+    }
+
+    pub fn with_service_name(mut self, name: String) -> Self {
+        self.service_name = Some(name);
         self
     }
 
