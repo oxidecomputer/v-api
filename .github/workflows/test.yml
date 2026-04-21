@@ -14,7 +14,7 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     services:
-      postgres:
+      postgres: &setup-postgres
         image: postgres
         env:
           POSTGRES_USER: test
@@ -33,10 +33,21 @@ jobs:
           rustup toolchain install
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - run: |
-          cargo build # check default features
-      - run: |
-          cargo test --all-features
-        env:
+          cargo test --no-default-features
+        env: &test-env
           RUST_BACKTRACE: "1"
           TEST_DATABASE: postgres://test:test@localhost
           RUST_LOG: v=trace,turnstile=trace
+  test-all:
+    runs-on: ubuntu-24.04
+    services:
+      postgres: *setup-postgres
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - run: |
+          rustup toolchain install
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - run: |
+          cargo test --all-features
+        env: *test-env
