@@ -13,6 +13,7 @@ use steno::{
 use thiserror::Error;
 use uuid::Uuid;
 use v_model::{
+    permissions::Caller,
     saga::{
         db::{NewSagaEventModel, NewSagaModel, SagaEventModel},
         storage::{SagaEventFilter, SagaEventStore, SagaFilter, SagaStore},
@@ -21,7 +22,13 @@ use v_model::{
     storage::ListPagination,
 };
 
-use crate::{ApiContext, VApiStorage};
+use crate::{
+    permissions::{VAppPermission, VPermission},
+    response::{
+        resource_restricted, OptionalResource, ResourceError, ResourceErrorInner, ResourceResult,
+    },
+    ApiContext, VApiStorage,
+};
 
 pub type CreateSagaFuture = Pin<
     Box<
@@ -34,6 +41,25 @@ pub type CreateSagaFuture = Pin<
     >,
 >;
 
+/// Errors that can occur in the saga store.
+#[derive(Debug, Error)]
+pub enum SagaCtxError {
+    #[error("Sec must be configured before sagas can be created")]
+    SecNotConfigured,
+    #[error("Failed to create saga")]
+    Creation(anyhow::Error),
+    #[error("Failed to start saga")]
+    Start(anyhow::Error),
+    #[error("Storage error")]
+    Storage(#[from] v_model::storage::StoreError),
+    #[error("Serialization error")]
+    Serialization(String),
+    #[error("Deserialization error")]
+    Deserialization(String),
+    #[error("Saga not found: {0}")]
+    NotFound(TypedUuid<SagaId>),
+}
+
 #[derive(Clone)]
 pub struct SagaContext<T> {
     node_id: TypedUuid<SagaExecNodeId>,
@@ -43,7 +69,7 @@ pub struct SagaContext<T> {
 
 impl<T> SagaContext<T>
 where
-    T: 'static,
+    T: VAppPermission,
 {
     pub fn new(
         node_id: TypedUuid<SagaExecNodeId>,
@@ -76,133 +102,184 @@ where
     /// Get a saga by ID.
     pub async fn get_saga(
         &self,
+        caller: &Caller<T>,
         saga_id: TypedUuid<SagaId>,
-    ) -> Result<Option<SagaView>, SagaCtxError> {
-        let model = SagaStore::get(&*self.storage, saga_id)
-            .await
-            .map_err(SagaCtxError::Storage)?;
-        Ok(model.map(SagaView::from))
+    ) -> ResourceResult<SagaView, SagaCtxError> {
+        if caller.can(&VPermission::GetSagasAll.into()) {
+            let model = SagaStore::get(&*self.storage, saga_id).await.optional()?;
+            Ok(model.into())
+        } else {
+            resource_restricted()
+        }
     }
 
     /// List all sagas matching the given filter.
-    pub async fn list_sagas(&self, filter: SagaFilter) -> Result<Vec<SagaView>, SagaCtxError> {
-        let models = SagaStore::list(&*self.storage, vec![filter], &ListPagination::unlimited())
-            .await
-            .map_err(SagaCtxError::Storage)?;
-        Ok(models.into_iter().map(SagaView::from).collect())
+    pub async fn list_sagas(
+        &self,
+        caller: &Caller<T>,
+        filter: SagaFilter,
+    ) -> ResourceResult<Vec<SagaView>, SagaCtxError> {
+        if caller.can(&VPermission::GetSagasAll.into()) {
+            let models =
+                SagaStore::list(&*self.storage, vec![filter], &ListPagination::unlimited())
+                    .await
+                    .map_err(ResourceError::InternalError)
+                    .inner_err_into()?;
+            Ok(models.into_iter().map(SagaView::from).collect())
+        } else {
+            resource_restricted()
+        }
     }
 
-    pub async fn start_saga(&self, saga: StenoId) -> Result<StenoId, SagaCtxError> {
-        self.sec
-            .saga_start(saga)
-            .await
-            .map_err(SagaCtxError::Start)?;
-        tracing::info!(saga = ?saga, "Started saga");
+    pub async fn start_saga(
+        &self,
+        caller: &Caller<T>,
+        saga: StenoId,
+    ) -> ResourceResult<StenoId, SagaCtxError> {
+        if caller.can(&VPermission::ManageSagasAll.into()) {
+            self.sec
+                .saga_start(saga)
+                .await
+                .map_err(SagaCtxError::Start)
+                .map_err(ResourceError::InternalError)?;
+            tracing::info!(saga = ?saga, "Started saga");
 
-        Ok(saga)
+            Ok(saga)
+        } else {
+            resource_restricted()
+        }
     }
 
     /// Create a new saga
     pub fn create_saga<S, R>(
         &self,
+        caller: &Caller<T>,
         dag: Arc<SagaDag>,
         context: Arc<S>,
         registry: Arc<ActionRegistry<R>>,
-    ) -> CreateSagaFuture
+    ) -> ResourceResult<CreateSagaFuture, SagaCtxError>
     where
         S: ApiContext,
         R: SagaType<ExecContextType = S>,
     {
-        let sec = self.sec.clone();
-        Box::pin(async move {
-            let saga_id = StenoId(Uuid::new_v4());
+        if caller.can(&VPermission::ManageSagasAll.into()) {
+            let sec = self.sec.clone();
+            Ok(Box::pin(async move {
+                let saga_id = StenoId(Uuid::new_v4());
 
-            // This returns a future that can be used to await the completion of the saga. We safely
-            // drop it here as the executor handles continual execution for the saga.
-            let handle = sec
-                .saga_create(saga_id, context, dag, registry)
-                .await
-                .map_err(|err| {
-                    tracing::error!(error = %err, "Failed to create saga");
-                    SagaCtxError::Creation(err)
-                })?;
+                // This returns a future that can be used to await the completion of the saga. We safely
+                // drop it here as the executor handles continual execution for the saga.
+                let handle = sec
+                    .saga_create(saga_id, context, dag, registry)
+                    .await
+                    .map_err(|err| {
+                        tracing::error!(error = %err, "Failed to create saga");
+                        SagaCtxError::Creation(err)
+                    })?;
 
-            tracing::info!(saga = ?saga_id, "Created saga");
+                tracing::info!(saga = ?saga_id, "Created saga");
 
-            Ok((saga_id, handle))
-        })
+                Ok((saga_id, handle))
+            }))
+        } else {
+            resource_restricted()
+        }
     }
 
     /// Attempt to claim a saga for processing by this node. This does not distinguish between
     /// a saga that is already claimed by another node and a saga that does not exist.
     pub async fn try_claim_saga(
         &self,
+        caller: &Caller<T>,
         saga_id: TypedUuid<SagaId>,
-    ) -> Result<Option<SagaView>, SagaCtxError> {
-        let model = SagaStore::try_claim(&*self.storage, saga_id, self.node_id)
-            .await
-            .map_err(SagaCtxError::Storage)?;
-        Ok(model.map(SagaView::from))
+    ) -> ResourceResult<Option<SagaView>, SagaCtxError> {
+        if caller.can(&VPermission::ManageSagasAll.into()) {
+            let model = SagaStore::try_claim(&*self.storage, saga_id, self.node_id)
+                .await
+                .map_err(ResourceError::InternalError)
+                .inner_err_into()?;
+            Ok(model.map(SagaView::from))
+        } else {
+            resource_restricted()
+        }
     }
 
     /// Release this node's claim on a saga.
     pub async fn release_saga(
         &self,
+        caller: &Caller<T>,
         saga_id: TypedUuid<SagaId>,
-    ) -> Result<Option<SagaView>, SagaCtxError> {
-        let model = SagaStore::release_claim(&*self.storage, saga_id, self.node_id)
-            .await
-            .map_err(SagaCtxError::Storage)?;
-        Ok(model.map(SagaView::from))
+    ) -> ResourceResult<Option<SagaView>, SagaCtxError> {
+        if caller.can(&VPermission::ManageSagasAll.into()) {
+            let model = SagaStore::release_claim(&*self.storage, saga_id, self.node_id)
+                .await
+                .map_err(ResourceError::InternalError)
+                .inner_err_into()?;
+            Ok(model.map(SagaView::from))
+        } else {
+            resource_restricted()
+        }
     }
 
     /// Delete a completed saga and its events.
     pub async fn delete_saga(
         &self,
+        caller: &Caller<T>,
         saga_id: TypedUuid<SagaId>,
-    ) -> Result<Option<SagaView>, SagaCtxError> {
-        let model = SagaStore::delete(&*self.storage, saga_id)
-            .await
-            .map_err(SagaCtxError::Storage)?;
-        Ok(model.map(SagaView::from))
+    ) -> ResourceResult<Option<SagaView>, SagaCtxError> {
+        if caller.can(&VPermission::ManageSagasAll.into()) {
+            let model = SagaStore::delete(&*self.storage, saga_id)
+                .await
+                .map_err(ResourceError::InternalError)
+                .inner_err_into()?;
+            Ok(model.map(SagaView::from))
+        } else {
+            resource_restricted()
+        }
     }
 
     /// List all events for a saga as deserialized SagaNodeEvent
     pub async fn list_events(
         &self,
+        caller: &Caller<T>,
         saga_id: TypedUuid<SagaId>,
-    ) -> Result<Vec<SagaNodeEvent>, SagaCtxError> {
-        let models = SagaEventStore::list(
-            &*self.storage,
-            vec![SagaEventFilter::default().saga_id(Some(vec![saga_id]))],
-            &ListPagination::unlimited(),
-        )
-        .await
-        .map_err(SagaCtxError::Storage)?;
+    ) -> ResourceResult<Vec<SagaNodeEvent>, SagaCtxError> {
+        if caller.can(&VPermission::GetSagasAll.into()) {
+            let models = self.list_event_models(caller, saga_id).await?;
 
-        models
-            .into_iter()
-            .map(|m| {
-                serde_json::from_value(m.event_data)
-                    .map_err(|e| SagaCtxError::Deserialization(e.to_string()))
-            })
-            .collect()
+            Ok(models
+                .into_iter()
+                .map(|m| {
+                    serde_json::from_value(m.event_data)
+                        .map_err(|e| SagaCtxError::Deserialization(e.to_string()))
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(ResourceError::InternalError)?)
+        } else {
+            resource_restricted()
+        }
     }
 
     /// List all events for a saga as raw SagaEventModel (for API responses)
     pub async fn list_event_models(
         &self,
+        caller: &Caller<T>,
         saga_id: TypedUuid<SagaId>,
-    ) -> Result<Vec<SagaEventModel>, SagaCtxError> {
-        let models = SagaEventStore::list(
-            &*self.storage,
-            vec![SagaEventFilter::default().saga_id(Some(vec![saga_id]))],
-            &ListPagination::unlimited(),
-        )
-        .await
-        .map_err(SagaCtxError::Storage)?;
+    ) -> ResourceResult<Vec<SagaEventModel>, SagaCtxError> {
+        if caller.can(&VPermission::GetSagasAll.into()) {
+            let models = SagaEventStore::list(
+                &*self.storage,
+                vec![SagaEventFilter::default().saga_id(Some(vec![saga_id]))],
+                &ListPagination::unlimited(),
+            )
+            .await
+            .map_err(ResourceError::InternalError)
+            .inner_err_into()?;
 
-        Ok(models)
+            Ok(models)
+        } else {
+            resource_restricted()
+        }
     }
 }
 
@@ -298,23 +375,4 @@ impl<T> SecStore for SecStoreAdapter<T> {
             );
         }
     }
-}
-
-/// Errors that can occur in the saga store.
-#[derive(Debug, Error)]
-pub enum SagaCtxError {
-    #[error("Sec must be configured before sagas can be created")]
-    SecNotConfigured,
-    #[error("Failed to create saga")]
-    Creation(anyhow::Error),
-    #[error("Failed to start saga")]
-    Start(anyhow::Error),
-    #[error("Storage error")]
-    Storage(#[from] v_model::storage::StoreError),
-    #[error("Serialization error")]
-    Serialization(String),
-    #[error("Deserialization error")]
-    Deserialization(String),
-    #[error("Saga not found: {0}")]
-    NotFound(TypedUuid<SagaId>),
 }

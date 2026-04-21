@@ -24,9 +24,10 @@ impl ApiContext for Context {
 
 mod system {
     use super::{Context, Permissions};
-    use v_api::v_system_endpoints;
+    use v_api::{v_saga_endpoints, v_system_endpoints};
 
     v_system_endpoints!(Context, Permissions);
+    v_saga_endpoints!(Context, Permissions);
 }
 
 #[test]
