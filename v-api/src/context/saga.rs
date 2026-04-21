@@ -4,14 +4,22 @@
 
 use async_trait::async_trait;
 use newtype_uuid::{GenericUuid, TypedUuid};
-use slog::{Discard, Logger, o};
-use v_model::{saga::{db::{NewSagaEventModel, NewSagaModel, SagaEventModel}, storage::{SagaEventFilter, SagaEventStore, SagaFilter, SagaStore}, view::{SagaExecNodeId, SagaId, SagaView}}, storage::ListPagination};
+use slog::{o, Discard, Logger};
 use std::{fmt::Debug, future::Future, pin::Pin, sync::Arc};
 use steno::{
-    ActionRegistry, SagaCachedState, SagaCreateParams, SagaDag, SagaId as StenoId, SagaNodeEvent, SagaResult, SagaType, SecClient, SecStore
+    ActionRegistry, SagaCachedState, SagaCreateParams, SagaDag, SagaId as StenoId, SagaNodeEvent,
+    SagaResult, SagaType, SecClient, SecStore,
 };
 use thiserror::Error;
 use uuid::Uuid;
+use v_model::{
+    saga::{
+        db::{NewSagaEventModel, NewSagaModel, SagaEventModel},
+        storage::{SagaEventFilter, SagaEventStore, SagaFilter, SagaStore},
+        view::{SagaExecNodeId, SagaId, SagaView},
+    },
+    storage::ListPagination,
+};
 
 use crate::{ApiContext, VApiStorage};
 
@@ -22,7 +30,10 @@ pub struct SagaContext<T> {
     storage: Arc<dyn VApiStorage<T>>,
 }
 
-impl<T> SagaContext<T> where T: 'static {
+impl<T> SagaContext<T>
+where
+    T: 'static,
+{
     pub fn new(
         node_id: TypedUuid<SagaExecNodeId>,
         storage: Arc<dyn VApiStorage<T>>,
@@ -33,9 +44,7 @@ impl<T> SagaContext<T> where T: 'static {
             storage: storage.clone(),
         };
 
-        let logger = logger.unwrap_or_else(|| {
-            Logger::root(Discard, o!())
-        });
+        let logger = logger.unwrap_or_else(|| Logger::root(Discard, o!()));
 
         Self {
             node_id,
@@ -73,7 +82,10 @@ impl<T> SagaContext<T> where T: 'static {
     }
 
     pub async fn start_saga(&self, saga: StenoId) -> Result<StenoId, SagaCtxError> {
-        self.sec.saga_start(saga).await.map_err(SagaCtxError::Start)?;
+        self.sec
+            .saga_start(saga)
+            .await
+            .map_err(SagaCtxError::Start)?;
         tracing::info!(saga = ?saga, "Started saga");
 
         Ok(saga)
@@ -84,7 +96,7 @@ impl<T> SagaContext<T> where T: 'static {
         &self,
         dag: Arc<SagaDag>,
         context: Arc<S>,
-        registry: Arc<ActionRegistry<R>>
+        registry: Arc<ActionRegistry<R>>,
     ) -> Pin<
         Box<
             dyn Future<
@@ -94,7 +106,11 @@ impl<T> SagaContext<T> where T: 'static {
                     >,
                 > + Send,
         >,
-    > where S: ApiContext, R: SagaType<ExecContextType = S> {
+    >
+    where
+        S: ApiContext,
+        R: SagaType<ExecContextType = S>,
+    {
         let sec = self.sec.clone();
         Box::pin(async move {
             let saga_id = StenoId(Uuid::new_v4());

@@ -17,24 +17,44 @@ use thiserror::Error;
 use tracing::instrument;
 use user::{RegisteredAccessToken, UserContextError};
 use uuid::Uuid;
-use v_model::{
-    AccessGroupId, ApiUserInfo, ApiUserProvider, LinkRequest, NewApiUser, NewApiUserProvider, NewLinkRequest, UserId, UserProviderId, permissions::{Caller, Permission}, storage::{
-        AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore, ApiUserFilter, ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, LinkRequestStore, ListPagination, LoginAttemptStore, MagicLinkAttemptStore, MagicLinkRedirectUriStore, MagicLinkSecretStore, MagicLinkStore, MapperStore, OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore, StoreError, postgres::{PostgresError, PostgresStore}
-    }
-};
 #[cfg(feature = "sagas")]
-use v_model::saga::{storage::{SagaEventStore, SagaStore}, view::SagaExecNodeId};
+use v_model::saga::{
+    storage::{SagaEventStore, SagaStore},
+    view::SagaExecNodeId,
+};
+use v_model::{
+    permissions::{Caller, Permission},
+    storage::{
+        postgres::{PostgresError, PostgresStore},
+        AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore, ApiUserFilter,
+        ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, LinkRequestStore,
+        ListPagination, LoginAttemptStore, MagicLinkAttemptStore, MagicLinkRedirectUriStore,
+        MagicLinkSecretStore, MagicLinkStore, MapperStore, OAuthClientRedirectUriStore,
+        OAuthClientSecretStore, OAuthClientStore, StoreError,
+    },
+    AccessGroupId, ApiUserInfo, ApiUserProvider, LinkRequest, NewApiUser, NewApiUserProvider,
+    NewLinkRequest, UserId, UserProviderId,
+};
 
 use crate::{
     authn::{
-        AuthError, AuthToken, Sign, VerificationResult, Verify, jwt::{Claims, DEFAULT_JWT_EXPIRATION, JwtSigner, JwtSignerError}
-    }, config::{AsymmetricKey, JwtConfig}, endpoints::login::{
-        UserInfo, oauth::{
+        jwt::{Claims, JwtSigner, JwtSignerError, DEFAULT_JWT_EXPIRATION},
+        AuthError, AuthToken, Sign, VerificationResult, Verify,
+    },
+    config::{AsymmetricKey, JwtConfig},
+    endpoints::login::{
+        oauth::{
             ClientType, OAuthProvider, OAuthProviderError, OAuthProviderFn, OAuthProviderName,
-        }
-    }, error::ApiError, mapper::DefaultMappingEngine, permissions::{VAppPermission, VPermission}, response::{OptionalResource, ResourceErrorInner}, util::response::{
-        ResourceResult, client_error, internal_error, resource_error, resource_restricted
-    }
+        },
+        UserInfo,
+    },
+    error::ApiError,
+    mapper::DefaultMappingEngine,
+    permissions::{VAppPermission, VPermission},
+    response::{OptionalResource, ResourceErrorInner},
+    util::response::{
+        client_error, internal_error, resource_error, resource_restricted, ResourceResult,
+    },
 };
 
 pub mod auth;
@@ -757,7 +777,7 @@ where
 
 impl<T> VContextBuilder<T>
 where
-    T: VAppPermission
+    T: VAppPermission,
 {
     pub fn new() -> Self {
         Self {
@@ -809,7 +829,8 @@ where
     }
 
     #[cfg(feature = "sagas")]
-    pub fn with_saga_backend(mut self,
+    pub fn with_saga_backend(
+        mut self,
         node_id: TypedUuid<SagaExecNodeId>,
         logger: Option<Logger>,
     ) -> Self {
@@ -858,7 +879,6 @@ where
                 "keys".to_string(),
             ))?;
 
-
         // `keys` is a list of key components, where each one is either a signer or a verifier.
         // Therefore when constructing our lists we omit any keys from each list which is unable
         // to be resolved into the needed kind.
@@ -895,7 +915,9 @@ where
         let saga = if let Some((node_id, logger)) = self.saga {
             SagaContext::new(node_id, storage.clone(), logger)
         } else {
-            return Err(VContextBuilderError::MissingRequiredConfiguration("saga".to_string()));
+            return Err(VContextBuilderError::MissingRequiredConfiguration(
+                "saga".to_string(),
+            ));
         };
 
         Ok(VContext {
@@ -1188,13 +1210,19 @@ pub(crate) mod test_mocks {
     use std::{collections::HashMap, sync::Arc};
     use uuid::Uuid;
     use v_model::{
-        AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail, ApiUserProvider, LinkRequestId, LoginAttemptId, MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri, MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser, NewApiUserContactEmail, NewApiUserProvider, NewLoginAttempt, NewMagicLink, NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, OAuthClientId, OAuthRedirectUriId, OAuthSecretId, UserContactEmailId, UserId, UserProviderId, permissions::Caller,
+        permissions::Caller,
         saga::{
-            db::{ModelSagaCachedState, NewSagaEventModel, NewSagaModel, SagaEventModel, SagaModel},
-            storage::{MockSagaEventStore, MockSagaStore, SagaEventFilter, SagaEventStore, SagaFilter, SagaStore},
+            db::{
+                ModelSagaCachedState, NewSagaEventModel, NewSagaModel, SagaEventModel, SagaModel,
+            },
+            storage::{
+                MockSagaEventStore, MockSagaStore, SagaEventFilter, SagaEventStore, SagaFilter,
+                SagaStore,
+            },
             view::{SagaExecNodeId, SagaId},
         },
-        schema_ext::MagicLinkAttemptState, storage::{
+        schema_ext::MagicLinkAttemptState,
+        storage::{
             AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore,
             ApiUserProviderStore, ApiUserStore, LinkRequestStore, ListPagination,
             LoginAttemptStore, MagicLinkAttemptFilter, MagicLinkAttemptStore, MagicLinkFilter,
@@ -1206,11 +1234,23 @@ pub(crate) mod test_mocks {
             MockMapperStore, MockOAuthClientRedirectUriStore, MockOAuthClientSecretStore,
             MockOAuthClientStore, OAuthClientRedirectUriStore, OAuthClientSecretStore,
             OAuthClientStore, StoreError,
-        }
+        },
+        AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail,
+        ApiUserProvider, LinkRequestId, LoginAttemptId, MagicLink, MagicLinkAttempt,
+        MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri, MagicLinkRedirectUriId,
+        MagicLinkSecret, MagicLinkSecretId, MapperId, NewAccessGroup, NewAccessToken, NewApiKey,
+        NewApiUser, NewApiUserContactEmail, NewApiUserProvider, NewLoginAttempt, NewMagicLink,
+        NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, OAuthClientId,
+        OAuthRedirectUriId, OAuthSecretId, UserContactEmailId, UserId, UserProviderId,
     };
 
     use crate::{
-        VContextBuilder, config::JwtConfig, endpoints::login::oauth::{OAuthProviderName, google::GoogleOAuthProvider}, mapper::DefaultMappingEngine, permissions::VPermission, util::tests::{MockKey, mock_key}
+        config::JwtConfig,
+        endpoints::login::oauth::{google::GoogleOAuthProvider, OAuthProviderName},
+        mapper::DefaultMappingEngine,
+        permissions::VPermission,
+        util::tests::{mock_key, MockKey},
+        VContextBuilder,
     };
 
     use super::VContext;
@@ -1915,10 +1955,7 @@ pub(crate) mod test_mocks {
 
     #[async_trait]
     impl SagaStore for MockStorage {
-        async fn get(
-            &self,
-            saga_id: TypedUuid<SagaId>,
-        ) -> Result<Option<SagaModel>, StoreError> {
+        async fn get(&self, saga_id: TypedUuid<SagaId>) -> Result<Option<SagaModel>, StoreError> {
             self.saga_store.as_ref().unwrap().get(saga_id).await
         }
 
@@ -1934,10 +1971,7 @@ pub(crate) mod test_mocks {
                 .await
         }
 
-        async fn create(
-            &self,
-            new_saga: NewSagaModel,
-        ) -> Result<SagaModel, StoreError> {
+        async fn create(&self, new_saga: NewSagaModel) -> Result<SagaModel, StoreError> {
             self.saga_store.as_ref().unwrap().create(new_saga).await
         }
 
@@ -1999,10 +2033,7 @@ pub(crate) mod test_mocks {
                 .await
         }
 
-        async fn create(
-            &self,
-            new_event: NewSagaEventModel,
-        ) -> Result<SagaEventModel, StoreError> {
+        async fn create(&self, new_event: NewSagaEventModel) -> Result<SagaEventModel, StoreError> {
             self.saga_event_store
                 .as_ref()
                 .unwrap()
@@ -2010,10 +2041,7 @@ pub(crate) mod test_mocks {
                 .await
         }
 
-        async fn delete_for_saga(
-            &self,
-            saga_id: TypedUuid<SagaId>,
-        ) -> Result<u64, StoreError> {
+        async fn delete_for_saga(&self, saga_id: TypedUuid<SagaId>) -> Result<u64, StoreError> {
             self.saga_event_store
                 .as_ref()
                 .unwrap()

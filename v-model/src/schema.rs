@@ -10,8 +10,6 @@ pub mod sql_types {
     #[derive(diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "mlink_attempt_state"))]
     pub struct MlinkAttemptState;
-
-
 }
 
 diesel::table! {

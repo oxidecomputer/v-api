@@ -41,11 +41,7 @@ impl FromSql<Text, Pg> for ModelSagaCachedState {
             b"done" => Ok(ModelSagaCachedState::Done),
             b"running" => Ok(ModelSagaCachedState::Running),
             b"unwinding" => Ok(ModelSagaCachedState::Unwinding),
-            x => Err(format!(
-                "Unrecognized ModelSagaCachedState variant: {:?}",
-                x
-            )
-            .into()),
+            x => Err(format!("Unrecognized ModelSagaCachedState variant: {:?}", x).into()),
         }
     }
 }

@@ -66,10 +66,12 @@ impl SagaStore for PostgresStore {
                 > = Box::new(diesel::dsl::sql::<diesel::sql_types::Bool>("TRUE"));
 
                 if let Some(saga_ids) = filter.saga_id {
-                    and_expression = Box::new(and_expression.and(
-                        sagas::saga_id
-                            .eq_any(saga_ids.into_iter().map(|id| id.into_untyped_uuid())),
-                    ));
+                    and_expression = Box::new(
+                        and_expression.and(
+                            sagas::saga_id
+                                .eq_any(saga_ids.into_iter().map(|id| id.into_untyped_uuid())),
+                        ),
+                    );
                 }
 
                 if let Some(names) = filter.name {
@@ -77,8 +79,7 @@ impl SagaStore for PostgresStore {
                 }
 
                 if let Some(states) = filter.state {
-                    and_expression =
-                        Box::new(and_expression.and(sagas::state.eq_any(states)));
+                    and_expression = Box::new(and_expression.and(sagas::state.eq_any(states)));
                 }
 
                 if let Some(node_ids) = filter.current_node_id {
@@ -87,17 +88,12 @@ impl SagaStore for PostgresStore {
                         .filter_map(|id| uuid::Uuid::parse_str(&id).ok())
                         .collect();
                     and_expression = Box::new(
-                        and_expression.and(
-                            sagas::current_node_id
-                                .assume_not_null()
-                                .eq_any(uuids),
-                        ),
+                        and_expression.and(sagas::current_node_id.assume_not_null().eq_any(uuids)),
                     );
                 }
 
                 if let Some(true) = filter.unclaimed {
-                    and_expression =
-                        Box::new(and_expression.and(sagas::current_node_id.is_null()));
+                    and_expression = Box::new(and_expression.and(sagas::current_node_id.is_null()));
                 }
 
                 or_expression = Some(match or_expression {
@@ -145,10 +141,7 @@ impl SagaStore for PostgresStore {
         let new_state: ModelSagaCachedState = state;
         let result = update(sagas::dsl::sagas)
             .filter(sagas::saga_id.eq(saga_id.into_untyped_uuid()))
-            .set((
-                sagas::state.eq(new_state),
-                sagas::updated_at.eq(Utc::now()),
-            ))
+            .set((sagas::state.eq(new_state), sagas::updated_at.eq(Utc::now())))
             .get_result_async::<SagaModel>(&*self.pool.get().await?)
             .await
             .optional()?;
@@ -184,9 +177,7 @@ impl SagaStore for PostgresStore {
         let node_uuid = node_id.into_untyped_uuid();
         let result = update(sagas::dsl::sagas)
             .filter(sagas::saga_id.eq(saga_id.into_untyped_uuid()))
-            .filter(
-                sagas::current_node_id.eq(Some(node_uuid)),
-            )
+            .filter(sagas::current_node_id.eq(Some(node_uuid)))
             .set((
                 sagas::current_node_id.eq(None::<uuid::Uuid>),
                 sagas::node_claimed_at.eq(None::<chrono::DateTime<Utc>>),
@@ -249,16 +240,17 @@ impl SagaEventStore for PostgresStore {
                 > = Box::new(diesel::dsl::sql::<diesel::sql_types::Bool>("TRUE"));
 
                 if let Some(saga_ids) = filter.saga_id {
-                    and_expression = Box::new(and_expression.and(
-                        saga_events::saga_id
-                            .eq_any(saga_ids.into_iter().map(|id| id.into_untyped_uuid())),
-                    ));
+                    and_expression = Box::new(
+                        and_expression.and(
+                            saga_events::saga_id
+                                .eq_any(saga_ids.into_iter().map(|id| id.into_untyped_uuid())),
+                        ),
+                    );
                 }
 
                 if let Some(event_types) = filter.event_type {
-                    and_expression = Box::new(
-                        and_expression.and(saga_events::event_type.eq_any(event_types)),
-                    );
+                    and_expression =
+                        Box::new(and_expression.and(saga_events::event_type.eq_any(event_types)));
                 }
 
                 or_expression = Some(match or_expression {

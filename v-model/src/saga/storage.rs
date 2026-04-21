@@ -7,7 +7,13 @@ use async_trait::async_trait;
 use mockall::automock;
 use newtype_uuid::TypedUuid;
 
-use crate::{saga::{db::{ModelSagaCachedState, NewSagaEventModel, NewSagaModel, SagaEventModel, SagaModel}, view::{SagaExecNodeId, SagaId}}, storage::{StoreError, ListPagination}};
+use crate::{
+    saga::{
+        db::{ModelSagaCachedState, NewSagaEventModel, NewSagaModel, SagaEventModel, SagaModel},
+        view::{SagaExecNodeId, SagaId},
+    },
+    storage::{ListPagination, StoreError},
+};
 
 /// Filter for querying sagas.
 #[derive(Debug, Default)]
