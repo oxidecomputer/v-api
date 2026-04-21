@@ -78,7 +78,7 @@ pub async fn list_sagas_op<T>(
 where
     T: VAppPermission + PermissionStorage,
 {
-    let caller = rqctx.v_ctx().get_caller(&rqctx).await?;
+    let caller = rqctx.v_ctx().get_caller(rqctx).await?;
     let sagas = rqctx
         .v_ctx()
         .saga
@@ -106,7 +106,7 @@ where
     T: VAppPermission + PermissionStorage,
 {
     let ctx = rqctx.v_ctx();
-    let caller = ctx.get_caller(&rqctx).await?;
+    let caller = ctx.get_caller(rqctx).await?;
     let saga_id = path.into_inner().saga;
 
     // Get the saga
