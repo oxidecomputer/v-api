@@ -23,6 +23,17 @@ use v_model::{
 
 use crate::{ApiContext, VApiStorage};
 
+pub type CreateSagaFuture = Pin<
+    Box<
+        dyn Future<
+                Output = Result<
+                    (StenoId, Pin<Box<dyn Future<Output = SagaResult> + Send>>),
+                    SagaCtxError,
+                >,
+            > + Send,
+    >,
+>;
+
 #[derive(Clone)]
 pub struct SagaContext<T> {
     node_id: TypedUuid<SagaExecNodeId>,
@@ -40,7 +51,7 @@ where
         logger: Option<Logger>,
     ) -> Self {
         let adapter = SecStoreAdapter {
-            node_id: node_id,
+            node_id,
             storage: storage.clone(),
         };
 
@@ -97,16 +108,7 @@ where
         dag: Arc<SagaDag>,
         context: Arc<S>,
         registry: Arc<ActionRegistry<R>>,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = Result<
-                        (StenoId, Pin<Box<dyn Future<Output = SagaResult> + Send>>),
-                        SagaCtxError,
-                    >,
-                > + Send,
-        >,
-    >
+    ) -> CreateSagaFuture
     where
         S: ApiContext,
         R: SagaType<ExecContextType = S>,
