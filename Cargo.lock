@@ -3550,7 +3550,7 @@ dependencies = [
  "oauth2-reqwest",
  "partial-struct",
  "percent-encoding",
- "rand 0.8.5",
+ "rand 0.9.2",
  "rand_core 0.6.4",
  "reqwest 0.13.2",
  "rsa",
