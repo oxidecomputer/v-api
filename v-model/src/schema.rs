@@ -210,6 +210,31 @@ diesel::table! {
     }
 }
 
+#[cfg(feature = "sagas")]
+diesel::table! {
+    sagas (saga_id) {
+        saga_id -> Uuid,
+        name -> Varchar,
+        dag -> Jsonb,
+        state -> Varchar,
+        current_node_id -> Nullable<Uuid>,
+        node_claimed_at -> Nullable<Timestamptz>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+#[cfg(feature = "sagas")]
+diesel::table! {
+    saga_events (id) {
+        id -> BigInt,
+        saga_id -> Uuid,
+        node_id -> BigInt,
+        event_type -> Varchar,
+        event_data -> Jsonb,
+        created_at -> Timestamptz,
+    }
+}
+
 diesel::joinable!(api_key -> api_user (api_user_id));
 diesel::joinable!(api_user_access_token -> api_user (api_user_id));
 diesel::joinable!(api_user_contact_email -> api_user (api_user_id));
@@ -219,6 +244,9 @@ diesel::joinable!(magic_link_client_redirect_uri -> magic_link_client (magic_lin
 diesel::joinable!(magic_link_client_secret -> magic_link_client (magic_link_client_id));
 diesel::joinable!(oauth_client_redirect_uri -> oauth_client (oauth_client_id));
 diesel::joinable!(oauth_client_secret -> oauth_client (oauth_client_id));
+
+#[cfg(feature = "sagas")]
+diesel::joinable!(saga_events -> sagas (saga_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     access_groups,

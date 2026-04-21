@@ -7,6 +7,7 @@ edition = "2021"
 
 [features]
 mock = ["mockall"]
+sagas = ["steno"]
 
 [dependencies]
 async-bb8-diesel = { workspace = true }
@@ -20,6 +21,7 @@ partial-struct = { workspace = true }
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+steno = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"]  }

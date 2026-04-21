@@ -10,11 +10,18 @@ use futures::future::join_all;
 use jsonwebtoken::jwk::JwkSet;
 use newtype_uuid::TypedUuid;
 use serde::Serialize;
+#[cfg(feature = "sagas")]
+use slog::Logger;
 use std::{fmt::Debug, future::Future, path::PathBuf, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
 use user::{RegisteredAccessToken, UserContextError};
 use uuid::Uuid;
+#[cfg(feature = "sagas")]
+use v_model::saga::{
+    storage::{SagaEventStore, SagaStore},
+    view::SagaExecNodeId,
+};
 use v_model::{
     permissions::{Caller, Permission},
     storage::{
@@ -63,9 +70,67 @@ pub mod mapping;
 pub use mapping::MappingContext;
 pub mod oauth;
 pub use oauth::OAuthContext;
+#[cfg(feature = "sagas")]
+pub mod saga;
+#[cfg(feature = "sagas")]
+pub use saga::SagaContext;
 pub mod user;
 pub use user::{BasePermissions, CallerExtension, ExtensionError, UserContext};
 
+#[cfg(feature = "sagas")]
+pub trait VApiStorage<P: Send + Sync>:
+    ApiUserStore<P>
+    + ApiKeyStore<P>
+    + ApiUserContactEmailStore
+    + ApiUserProviderStore
+    + AccessTokenStore
+    + LoginAttemptStore
+    + OAuthClientStore
+    + OAuthClientSecretStore
+    + OAuthClientRedirectUriStore
+    + AccessGroupStore<P>
+    + MapperStore
+    + LinkRequestStore
+    + MagicLinkStore
+    + MagicLinkSecretStore
+    + MagicLinkRedirectUriStore
+    + MagicLinkAttemptStore
+    + SagaStore
+    + SagaEventStore
+    + Send
+    + Sync
+    + 'static
+{
+}
+#[cfg(feature = "sagas")]
+impl<P, T> VApiStorage<P> for T
+where
+    P: Permission,
+    T: ApiUserStore<P>
+        + ApiKeyStore<P>
+        + ApiUserContactEmailStore
+        + ApiUserProviderStore
+        + AccessTokenStore
+        + LoginAttemptStore
+        + OAuthClientStore
+        + OAuthClientSecretStore
+        + OAuthClientRedirectUriStore
+        + AccessGroupStore<P>
+        + MapperStore
+        + LinkRequestStore
+        + MagicLinkStore
+        + MagicLinkSecretStore
+        + MagicLinkRedirectUriStore
+        + MagicLinkAttemptStore
+        + SagaStore
+        + SagaEventStore
+        + Send
+        + Sync
+        + 'static,
+{
+}
+
+#[cfg(not(feature = "sagas"))]
 pub trait VApiStorage<P: Send + Sync>:
     ApiUserStore<P>
     + ApiKeyStore<P>
@@ -88,6 +153,7 @@ pub trait VApiStorage<P: Send + Sync>:
     + 'static
 {
 }
+#[cfg(not(feature = "sagas"))]
 impl<P, T> VApiStorage<P> for T
 where
     P: Permission,
@@ -124,6 +190,16 @@ pub struct VContext<T> {
     pub mapping: MappingContext<T>,
     pub oauth: OAuthContext<T>,
     pub user: UserContext<T>,
+    #[cfg(feature = "sagas")]
+    pub saga: SagaContext<T>,
+}
+
+impl<T> Debug for VContext<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VContext")
+            .field("public_url", &self.public_url)
+            .finish()
+    }
 }
 
 pub trait ApiContext: ServerContext {
@@ -225,59 +301,6 @@ impl<T> VContext<T>
 where
     T: VAppPermission,
 {
-    async fn new(
-        public_url: String,
-        param_path: Option<PathBuf>,
-        storage: Arc<dyn VApiStorage<T>>,
-        jwt: JwtConfig,
-        keys: Vec<AsymmetricKey>,
-    ) -> Result<Self, VContextError> {
-        // `keys` is a list of key components, where each one is either a signer or a verifier.
-        // Therefore when constructing our lists we omit any keys from each list which is unable
-        // to be resolved into the needed kind.
-        let jwks = JwkSet {
-            keys: keys
-                .iter()
-                .filter_map(|key| key.resolve_jwk(param_path.clone()).ok())
-                .collect::<Vec<_>>(),
-        };
-        let signers = keys
-            .iter()
-            .filter_map(|key| key.resolve_signer(param_path.clone()).ok())
-            .collect::<Vec<_>>();
-        let verifiers = join_all(
-            keys.iter()
-                .map(|key| key.resolve_verifier(param_path.clone())),
-        )
-        .await
-        .into_iter()
-        .filter_map(|key| key.ok())
-        .collect::<Vec<_>>();
-        let auth_ctx = AuthContext::new(jwt, jwks, signers, verifiers).map_err(|err| {
-            tracing::error!(?err, "Auth context construction failed");
-            VContextError::InternalAuthContext
-        })?;
-        let group_ctx = GroupContext::new(storage.clone());
-        let mut mapping_ctx = MappingContext::new(storage.clone());
-        mapping_ctx.set_engine(Some(Arc::new(DefaultMappingEngine::new(
-            auth_ctx.builtin_registration_user(),
-            group_ctx.clone(),
-        ))));
-
-        Ok(Self {
-            public_url,
-            storage: storage.clone(),
-            auth: auth_ctx,
-            group: group_ctx,
-            link: LinkContext::new(storage.clone()),
-            login: LoginContext::new(storage.clone()),
-            magic_link: MagicLinkContext::new(storage.clone()),
-            mapping: mapping_ctx,
-            oauth: OAuthContext::new(storage.clone()),
-            user: UserContext::new(storage.clone()),
-        })
-    }
-
     pub fn device_client(&self) -> ClientType {
         ClientType::Device
     }
@@ -739,6 +762,8 @@ pub struct VContextBuilder<T> {
     storage: Option<Arc<dyn VApiStorage<T>>>,
     storage_url: Option<String>,
     keys: Option<Vec<AsymmetricKey>>,
+    #[cfg(feature = "sagas")]
+    saga: Option<(TypedUuid<SagaExecNodeId>, Option<Logger>)>,
 }
 
 impl<T> Default for VContextBuilder<T>
@@ -763,6 +788,8 @@ where
             storage: None,
             storage_url: None,
             keys: None,
+            #[cfg(feature = "sagas")]
+            saga: None,
         }
     }
 
@@ -798,6 +825,16 @@ where
 
     pub fn with_keys(mut self, keys: Vec<AsymmetricKey>) -> Self {
         self.keys = Some(keys);
+        self
+    }
+
+    #[cfg(feature = "sagas")]
+    pub fn with_saga_backend(
+        mut self,
+        node_id: TypedUuid<SagaExecNodeId>,
+        logger: Option<Logger>,
+    ) -> Self {
+        self.saga = Some((node_id, logger));
         self
     }
 
@@ -842,12 +879,68 @@ where
                 "keys".to_string(),
             ))?;
 
-        VContext::<T>::new(public_url, param_path, storage, jwt, keys)
-            .await
-            .map_err(|err| {
-                tracing::error!(?err, "Failed to construct VContext");
-                VContextBuilderError::VContext(err)
-            })
+        // `keys` is a list of key components, where each one is either a signer or a verifier.
+        // Therefore when constructing our lists we omit any keys from each list which is unable
+        // to be resolved into the needed kind.
+        let jwks = JwkSet {
+            keys: keys
+                .iter()
+                .filter_map(|key| key.resolve_jwk(param_path.clone()).ok())
+                .collect::<Vec<_>>(),
+        };
+        let signers = keys
+            .iter()
+            .filter_map(|key| key.resolve_signer(param_path.clone()).ok())
+            .collect::<Vec<_>>();
+        let verifiers = join_all(
+            keys.iter()
+                .map(|key| key.resolve_verifier(param_path.clone())),
+        )
+        .await
+        .into_iter()
+        .filter_map(|key| key.ok())
+        .collect::<Vec<_>>();
+        let auth_ctx = AuthContext::new(jwt, jwks, signers, verifiers).map_err(|err| {
+            tracing::error!(?err, "Auth context construction failed");
+            VContextError::InternalAuthContext
+        })?;
+        let group_ctx = GroupContext::new(storage.clone());
+        let mut mapping_ctx = MappingContext::new(storage.clone());
+        mapping_ctx.set_engine(Some(Arc::new(DefaultMappingEngine::new(
+            auth_ctx.builtin_registration_user(),
+            group_ctx.clone(),
+        ))));
+
+        #[cfg(feature = "sagas")]
+        let saga = if let Some((node_id, logger)) = self.saga {
+            SagaContext::new(node_id, storage.clone(), logger)
+        } else {
+            return Err(VContextBuilderError::MissingRequiredConfiguration(
+                "saga".to_string(),
+            ));
+        };
+
+        Ok(VContext {
+            public_url,
+            storage: storage.clone(),
+            auth: auth_ctx,
+            group: group_ctx,
+            link: LinkContext::new(storage.clone()),
+            login: LoginContext::new(storage.clone()),
+            magic_link: MagicLinkContext::new(storage.clone()),
+            mapping: mapping_ctx,
+            oauth: OAuthContext::new(storage.clone()),
+            user: UserContext::new(storage.clone()),
+            #[cfg(feature = "sagas")]
+            saga,
+        })
+
+        // VContext::<T>::new(public_url, param_path, storage, jwt, keys)
+        //     .await
+        //     .map_err(|err| {
+        //         tracing::error!(?err, "Failed to construct VContext");
+        //         VContextBuilderError::VContext(err)
+        //     })
     }
 }
 
@@ -1118,6 +1211,16 @@ pub(crate) mod test_mocks {
     use uuid::Uuid;
     use v_model::{
         permissions::Caller,
+        saga::{
+            db::{
+                ModelSagaCachedState, NewSagaEventModel, NewSagaModel, SagaEventModel, SagaModel,
+            },
+            storage::{
+                MockSagaEventStore, MockSagaStore, SagaEventFilter, SagaEventStore, SagaFilter,
+                SagaStore,
+            },
+            view::{SagaExecNodeId, SagaId},
+        },
         schema_ext::MagicLinkAttemptState,
         storage::{
             AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore,
@@ -1147,6 +1250,7 @@ pub(crate) mod test_mocks {
         mapper::DefaultMappingEngine,
         permissions::VPermission,
         util::tests::{mock_key, MockKey},
+        VContextBuilder,
     };
 
     use super::VContext;
@@ -1154,18 +1258,15 @@ pub(crate) mod test_mocks {
     // Construct a mock context that can be used in tests
     pub async fn mock_context(storage: Arc<MockStorage>) -> VContext<VPermission> {
         let MockKey { signer, verifier } = mock_key("test");
-        let mut ctx = VContext::new(
-            "".to_string(),
-            None,
-            storage,
-            JwtConfig::default(),
-            vec![
-                // We are in the context of a test and do not care about the key leaking
-                signer, verifier,
-            ],
-        )
-        .await
-        .unwrap();
+        let mut ctx = VContextBuilder::<VPermission>::new()
+            .with_public_url("".to_string())
+            .with_storage(storage)
+            .with_jwt_expiration(JwtConfig::default().default_expiration)
+            .with_keys(vec![signer, verifier])
+            .with_saga_backend(TypedUuid::new_v4(), None)
+            .build()
+            .await
+            .unwrap();
 
         let mapping_engine = Arc::new(DefaultMappingEngine::new(
             ctx.builtin_registration_user(),
@@ -1207,6 +1308,8 @@ pub(crate) mod test_mocks {
         pub magic_link_secret_store: Option<Arc<MockMagicLinkSecretStore>>,
         pub magic_link_redirect_store: Option<Arc<MockMagicLinkRedirectUriStore>>,
         pub magic_link_attempt_store: Option<Arc<MockMagicLinkAttemptStore>>,
+        pub saga_store: Option<Arc<MockSagaStore>>,
+        pub saga_event_store: Option<Arc<MockSagaEventStore>>,
     }
 
     impl MockStorage {
@@ -1228,6 +1331,8 @@ pub(crate) mod test_mocks {
                 magic_link_secret_store: None,
                 magic_link_redirect_store: None,
                 magic_link_attempt_store: None,
+                saga_store: None,
+                saga_event_store: None,
             }
         }
     }
@@ -1844,6 +1949,103 @@ pub(crate) mod test_mocks {
                 .as_ref()
                 .unwrap()
                 .transition(id, signature, from, to)
+                .await
+        }
+    }
+
+    #[async_trait]
+    impl SagaStore for MockStorage {
+        async fn get(&self, saga_id: TypedUuid<SagaId>) -> Result<Option<SagaModel>, StoreError> {
+            self.saga_store.as_ref().unwrap().get(saga_id).await
+        }
+
+        async fn list(
+            &self,
+            filters: Vec<SagaFilter>,
+            pagination: &ListPagination,
+        ) -> Result<Vec<SagaModel>, StoreError> {
+            self.saga_store
+                .as_ref()
+                .unwrap()
+                .list(filters, pagination)
+                .await
+        }
+
+        async fn create(&self, new_saga: NewSagaModel) -> Result<SagaModel, StoreError> {
+            self.saga_store.as_ref().unwrap().create(new_saga).await
+        }
+
+        async fn update_state(
+            &self,
+            saga_id: TypedUuid<SagaId>,
+            state: ModelSagaCachedState,
+        ) -> Result<Option<SagaModel>, StoreError> {
+            self.saga_store
+                .as_ref()
+                .unwrap()
+                .update_state(saga_id, state)
+                .await
+        }
+
+        async fn try_claim(
+            &self,
+            saga_id: TypedUuid<SagaId>,
+            node_id: TypedUuid<SagaExecNodeId>,
+        ) -> Result<Option<SagaModel>, StoreError> {
+            self.saga_store
+                .as_ref()
+                .unwrap()
+                .try_claim(saga_id, node_id)
+                .await
+        }
+
+        async fn release_claim(
+            &self,
+            saga_id: TypedUuid<SagaId>,
+            node_id: TypedUuid<SagaExecNodeId>,
+        ) -> Result<Option<SagaModel>, StoreError> {
+            self.saga_store
+                .as_ref()
+                .unwrap()
+                .release_claim(saga_id, node_id)
+                .await
+        }
+
+        async fn delete(
+            &self,
+            saga_id: TypedUuid<SagaId>,
+        ) -> Result<Option<SagaModel>, StoreError> {
+            self.saga_store.as_ref().unwrap().delete(saga_id).await
+        }
+    }
+
+    #[async_trait]
+    impl SagaEventStore for MockStorage {
+        async fn list(
+            &self,
+            filters: Vec<SagaEventFilter>,
+            pagination: &ListPagination,
+        ) -> Result<Vec<SagaEventModel>, StoreError> {
+            self.saga_event_store
+                .as_ref()
+                .unwrap()
+                .list(filters, pagination)
+                .await
+        }
+
+        async fn create(&self, new_event: NewSagaEventModel) -> Result<SagaEventModel, StoreError> {
+            self.saga_event_store
+                .as_ref()
+                .unwrap()
+                .create(new_event)
+                .await
+        }
+
+        async fn delete_for_saga(&self, saga_id: TypedUuid<SagaId>) -> Result<u64, StoreError> {
+            self.saga_event_store
+                .as_ref()
+                .unwrap()
+                .delete_for_saga(saga_id)
                 .await
         }
     }

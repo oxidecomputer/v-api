@@ -10,6 +10,7 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
+anyhow = "1.0"
 async-bb8-diesel = "0.3"
 async-trait = "0.1.89"
 base64 = "0.22"
@@ -49,6 +50,8 @@ serde = "1.0.228"
 serde_json = "1"
 serde_urlencoded = "0.7.1"
 sha2 = "0.10.9"
+slog = "2.8.2"
+steno = { git = "https://github.com/oxidecomputer/steno" }
 syn = "2"
 tap = "1.0.1"
 tempfile = "3"

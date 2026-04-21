@@ -23,6 +23,8 @@ use thiserror::Error;
 
 pub mod db;
 pub mod permissions;
+#[cfg(feature = "sagas")]
+pub mod saga;
 pub mod schema;
 pub mod schema_ext;
 pub mod storage;
