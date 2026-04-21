@@ -439,6 +439,10 @@ fn from_system_permission_tokens(
                         VPermission::ManageMagicLinkClientsAll => Self::ManageMagicLinkClientsAll,
 
                         VPermission::CreateAccessToken => Self::CreateAccessToken,
+
+                        VPermission::GetSagasAll => Self::GetSagasAll,
+                        VPermission::ManageSagasAll => Self::ManageSagasAll,
+
                         VPermission::Unsupported(inner) => Self::Unsupported(inner),
                     }
                 }
@@ -718,6 +722,11 @@ fn system_permission_tokens() -> TokenStream {
             ManageMagicLinkClientsAll,
 
             CreateAccessToken,
+
+            #[v_api(scope(to = "saga:r", from = "saga:r"))]
+            GetSagasAll,
+            #[v_api(scope(to = "saga:w", from = "saga:w"))]
+            ManageSagasAll,
 
             #[serde(untagged)]
             Unsupported(serde_json::Value),

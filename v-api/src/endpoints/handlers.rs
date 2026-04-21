@@ -673,6 +673,43 @@ mod macros {
         };
     }
 
+    #[cfg(feature = "sagas")]
+    #[macro_export]
+    macro_rules! v_saga_endpoints {
+        ($context_type:ident, $permission_type:ident) => {
+            use v_api::endpoints::saga::{
+                list_sagas_op,
+                view_saga_op,
+                SagaDetailView,
+                SagaPath,
+            };
+            use v_model::saga::view::SagaView;
+
+            /// List all sagas
+            #[endpoint {
+                method = GET,
+                path = "/saga"
+            }]
+            pub async fn list_sagas(
+                rqctx: RequestContext<$context_type>,
+            ) -> Result<HttpResponseOk<Vec<SagaView>>, HttpError> {
+                unimplemented!()
+            }
+
+            /// Get detailed information about a specific saga including its events
+            #[endpoint {
+                method = GET,
+                path = "/saga/{saga}"
+            }]
+            pub async fn view_saga(
+                rqctx: RequestContext<$context_type>,
+                path: Path<SagaPath>,
+            ) -> Result<HttpResponseOk<SagaDetailView>, HttpError> {
+                unimplemented!()
+            }
+        }
+    }
+
     #[macro_export]
     macro_rules! inject_endpoints {
         ($api:ident) => {
@@ -787,6 +824,17 @@ mod macros {
             // Local development mock login
             #[cfg(feature = "local-dev")]
             $api.register(local_login)
+                .expect("Failed to register endpoint");
+        };
+    }
+
+    #[macro_export]
+    macro_rules! inject_v_saga_endpoints {
+        ($api:ident) => {
+            // Saga endpoints
+            $api.register(list_sagas)
+                .expect("Failed to register endpoint");
+            $api.register(view_saga)
                 .expect("Failed to register endpoint");
         };
     }
