@@ -11,13 +11,13 @@ use google_cloudkms1::{
     api::AsymmetricSignRequest, hyper_rustls::HttpsConnector,
     hyper_util::client::legacy::connect::HttpConnector, CloudKMS,
 };
+use rsa::sha2::{Digest, Sha256};
 use rsa::{
     pkcs1v15::Signature,
     pkcs1v15::{SigningKey, VerifyingKey},
     signature::{RandomizedSigner, SignatureEncoding, Verifier as RsaVerifier},
 };
 use serde::{Deserialize, Serialize};
-use rsa::sha2::{Digest, Sha256};
 use std::fmt::Debug;
 use thiserror::Error;
 use v_api_param::ParamResolutionError;
