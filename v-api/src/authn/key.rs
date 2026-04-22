@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use hex::FromHexError;
-use rand::{rngs::OsRng, RngCore};
+use rand::Rng as _;
 use secrecy::{ExposeSecret, SecretSlice, SecretString};
 use thiserror::Error;
 use uuid::Uuid;
@@ -35,7 +35,7 @@ impl RawKey {
     pub fn generate<const N: usize>(id: &Uuid) -> Self {
         // Generate random data to extend the token id with
         let mut token_raw = [0; N];
-        OsRng.fill_bytes(&mut token_raw);
+        rand::rng().fill_bytes(&mut token_raw);
 
         let mut clear = id.as_bytes().to_vec();
         clear.append(&mut token_raw.to_vec());

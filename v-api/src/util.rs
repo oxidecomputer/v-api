@@ -269,7 +269,7 @@ pub mod tests {
     }
 
     pub fn mock_key(kid: &str) -> MockKey {
-        let mut rng = rand::thread_rng();
+        let mut rng = rsa::rand_core::OsRng;
         let bits = 2048;
         let priv_key = RsaPrivateKey::new(&mut rng, bits).expect("Failed to generate a key");
         let pub_key = RsaPublicKey::from(&priv_key);

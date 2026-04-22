@@ -17,7 +17,7 @@ use rsa::{
     signature::{RandomizedSigner, SignatureEncoding, Verifier as RsaVerifier},
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use rsa::sha2::{Digest, Sha256};
 use std::fmt::Debug;
 use thiserror::Error;
 use v_api_param::ParamResolutionError;
@@ -244,7 +244,7 @@ impl Signer {
         match &self.key {
             SignerKey::Local(local) => {
                 tracing::trace!("Signing message");
-                let mut rng = rand::thread_rng();
+                let mut rng = rsa::rand_core::OsRng;
                 let signature = local.signing_key.sign_with_rng(&mut rng, message).to_vec();
 
                 Ok(signature)
