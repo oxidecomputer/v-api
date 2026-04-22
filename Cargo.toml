@@ -41,7 +41,7 @@ quote = "1"
 rand = "0.10.1"
 rand_core = "0.10.1"
 regex = "1.12.3"
-reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls"] }
 rsa = "0.9.10"
 schemars = { version = "0.8.22", features = ["url"] }
 secrecy = "0.10.3"
