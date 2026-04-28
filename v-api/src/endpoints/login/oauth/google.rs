@@ -162,8 +162,8 @@ impl OAuthProvider for GoogleOAuthProvider {
         ]
     }
 
-    fn device_code_endpoint(&self) -> &str {
-        "https://oauth2.googleapis.com/device/code"
+    fn device_code_endpoint(&self) -> Option<&str> {
+        Some("https://oauth2.googleapis.com/device/code")
     }
 
     fn auth_url_endpoint(&self) -> &str {

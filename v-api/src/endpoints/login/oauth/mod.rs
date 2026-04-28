@@ -27,6 +27,7 @@ pub mod code;
 pub mod device_token;
 pub mod github;
 pub mod google;
+pub mod zendesk;
 
 #[derive(Debug, Error)]
 pub enum OAuthProviderError {
@@ -76,7 +77,7 @@ pub trait OAuthProvider: ExtractUserInfo + Debug + Send + Sync {
 
     // TODO: How can user info be change to something statically checked instead of a runtime check
     fn user_info_endpoints(&self) -> Vec<&str>;
-    fn device_code_endpoint(&self) -> &str;
+    fn device_code_endpoint(&self) -> Option<&str>;
     fn auth_url_endpoint(&self) -> &str;
     fn token_exchange_content_type(&self) -> &str;
     fn token_exchange_endpoint(&self) -> &str;
@@ -88,7 +89,7 @@ pub trait OAuthProvider: ExtractUserInfo + Debug + Send + Sync {
             provider: self.name(),
             client_id: self.client_id(client_type).to_string(),
             auth_url_endpoint: self.auth_url_endpoint().to_string(),
-            device_code_endpoint: self.device_code_endpoint().to_string(),
+            device_code_endpoint: self.device_code_endpoint().map(|s| s.to_string()),
             token_endpoint: format!("{}/login/oauth/{}/device/exchange", public_url, self.name(),),
             scopes: self
                 .scopes()
@@ -171,7 +172,7 @@ pub struct OAuthProviderInfo {
     provider: OAuthProviderName,
     client_id: String,
     auth_url_endpoint: String,
-    device_code_endpoint: String,
+    device_code_endpoint: Option<String>,
     token_endpoint: String,
     scopes: Vec<String>,
 }
@@ -182,6 +183,7 @@ pub enum OAuthProviderName {
     #[serde(rename = "github")]
     GitHub,
     Google,
+    Zendesk,
 }
 
 impl Display for OAuthProviderName {
@@ -189,6 +191,7 @@ impl Display for OAuthProviderName {
         match self {
             OAuthProviderName::GitHub => write!(f, "github"),
             OAuthProviderName::Google => write!(f, "google"),
+            OAuthProviderName::Zendesk => write!(f, "zendesk"),
         }
     }
 }

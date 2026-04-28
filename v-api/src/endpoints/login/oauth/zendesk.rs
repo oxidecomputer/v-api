@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use http::{header::USER_AGENT, HeaderMap, HeaderValue};
 use hyper::body::Bytes;
 use reqwest::Request;
 use secrecy::SecretString;
@@ -16,34 +15,34 @@ use super::{
     OAuthPublicCredentials,
 };
 
-pub struct GitHubOAuthProvider {
-    // public: GitHubPublicProvider,
-    // private: Option<GitHubPrivateProvider>,
+pub struct ZendeskOAuthProvider {
     device_public: OAuthPublicCredentials,
     device_private: Option<OAuthPrivateCredentials>,
     web_public: OAuthPublicCredentials,
     web_private: Option<OAuthPrivateCredentials>,
     additional_scopes: Vec<String>,
-    default_headers: HeaderMap,
     client: reqwest::Client,
+    user_info_endpoint: String,
+    auth_url_endpoint: String,
+    token_exchange_endpoint: String,
 }
 
-impl fmt::Debug for GitHubOAuthProvider {
+impl fmt::Debug for ZendeskOAuthProvider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("GitHubOAuthProvider").finish()
+        f.debug_struct("ZendeskOAuthProvider").finish()
     }
 }
 
-impl GitHubOAuthProvider {
+impl ZendeskOAuthProvider {
     pub fn new(
+        subdomain: String,
         device_client_id: String,
         device_client_secret: SecretString,
         web_client_id: String,
         web_client_secret: SecretString,
         additional_scopes: Option<Vec<String>>,
     ) -> Self {
-        let mut headers = HeaderMap::new();
-        headers.insert(USER_AGENT, HeaderValue::from_static("v-api"));
+        let base_url = format!("https://{}.zendesk.com", subdomain);
 
         Self {
             device_public: OAuthPublicCredentials {
@@ -59,11 +58,13 @@ impl GitHubOAuthProvider {
                 client_secret: web_client_secret,
             }),
             additional_scopes: additional_scopes.unwrap_or_default(),
-            default_headers: headers,
             client: reqwest::ClientBuilder::new()
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .expect("Static client must build"),
+            user_info_endpoint: format!("{}/api/v2/users/me.json", base_url),
+            auth_url_endpoint: format!("{}/oauth/authorizations/new", base_url),
+            token_exchange_endpoint: format!("{}/oauth/tokens", base_url),
         }
     }
 
@@ -74,54 +75,49 @@ impl GitHubOAuthProvider {
 }
 
 #[derive(Debug, Deserialize)]
-struct GitHubUser {
-    id: u32,
-    login: String,
+struct ZendeskUserResponse {
+    user: ZendeskUser,
 }
 
 #[derive(Debug, Deserialize)]
-struct GitHubUserEmails {
+struct ZendeskUser {
+    id: u64,
+    name: String,
     email: String,
     verified: bool,
 }
 
-impl ExtractUserInfo for GitHubOAuthProvider {
-    // There should always be as many entries in the data list as there are endpoints. This should
-    // be changed in the future to be a static check
+impl ExtractUserInfo for ZendeskOAuthProvider {
     fn extract_user_info(&self, data: &[Bytes]) -> Result<UserInfo, UserInfoError> {
-        tracing::debug!("Extracting user information from GitHub responses");
+        let response: ZendeskUserResponse = serde_json::from_slice(&data[0])?;
+        let user = response.user;
 
-        let user: GitHubUser = serde_json::from_slice(&data[0])?;
-
-        let remote_emails: Vec<GitHubUserEmails> = serde_json::from_slice(&data[1])?;
-        let verified_emails = remote_emails
-            .into_iter()
-            .filter(|email| email.verified)
-            .map(|e| e.email)
-            .collect::<Vec<_>>();
+        let verified_emails = if user.verified {
+            vec![user.email]
+        } else {
+            vec![]
+        };
 
         Ok(UserInfo {
-            external_id: ExternalUserId::GitHub(user.id.to_string()),
+            external_id: ExternalUserId::Zendesk(user.id.to_string()),
             verified_emails,
-            display_name: Some(user.login),
+            display_name: Some(user.name),
         })
     }
 }
 
-impl OAuthProvider for GitHubOAuthProvider {
+impl OAuthProvider for ZendeskOAuthProvider {
     fn name(&self) -> OAuthProviderName {
-        OAuthProviderName::GitHub
+        OAuthProviderName::Zendesk
     }
 
     fn scopes(&self) -> Vec<&str> {
-        let mut default = vec!["user:email"];
+        let mut default = vec!["users:read"];
         default.extend(self.additional_scopes.iter().map(|s| s.as_str()));
         default
     }
 
-    fn initialize_headers(&self, request: &mut Request) {
-        *request.headers_mut() = self.default_headers.clone();
-    }
+    fn initialize_headers(&self, _request: &mut Request) {}
 
     fn client(&self) -> &reqwest::Client {
         &self.client
@@ -148,18 +144,15 @@ impl OAuthProvider for GitHubOAuthProvider {
     }
 
     fn user_info_endpoints(&self) -> Vec<&str> {
-        vec![
-            "https://api.github.com/user",
-            "https://api.github.com/user/emails",
-        ]
+        vec![&self.user_info_endpoint]
     }
 
     fn device_code_endpoint(&self) -> Option<&str> {
-        Some("https://github.com/login/device/code")
+        None
     }
 
     fn auth_url_endpoint(&self) -> &str {
-        "https://github.com/login/oauth/authorize"
+        &self.auth_url_endpoint
     }
 
     fn token_exchange_content_type(&self) -> &str {
@@ -167,7 +160,7 @@ impl OAuthProvider for GitHubOAuthProvider {
     }
 
     fn token_exchange_endpoint(&self) -> &str {
-        "https://github.com/login/oauth/access_token"
+        &self.token_exchange_endpoint
     }
 
     fn token_revocation_endpoint(&self) -> Option<&str> {
@@ -175,6 +168,6 @@ impl OAuthProvider for GitHubOAuthProvider {
     }
 
     fn supports_pkce(&self) -> bool {
-        true
+        false
     }
 }
