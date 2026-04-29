@@ -1,0 +1,15 @@
+[package]
+name = "v-cli-sdk"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+oauth2 = { workspace = true }
+oauth2-reqwest = { workspace = true }
+progenitor-client = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
