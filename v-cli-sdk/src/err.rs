@@ -2,12 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{Error, anyhow};
+use anyhow::{anyhow, Error};
 use progenitor_client::Error as ProgenitorClientError;
 
 use crate::{ApiErrorMessage, CliContext, VerbosityLevel};
 
-pub fn format_api_err<C, P, T, E>(ctx: &T, client_err: ProgenitorClientError<E>) -> Error where T: CliContext<C, P>, E: ApiErrorMessage {
+pub fn format_api_err<C, P, T, E>(ctx: &T, client_err: ProgenitorClientError<E>) -> Error
+where
+    T: CliContext<C, P>,
+    E: ApiErrorMessage,
+{
     let mut err = anyhow!("API Request failed");
 
     match client_err {
@@ -25,14 +29,23 @@ pub fn format_api_err<C, P, T, E>(ctx: &T, client_err: ProgenitorClientError<E>)
             let response_message = response.into_inner();
 
             if ctx.verbosity() >= VerbosityLevel::All {
-                err = err.context(format!("Request {}", response_message.request_id().as_deref().unwrap_or("")));
+                err = err.context(format!(
+                    "Request {}",
+                    response_message.request_id().as_deref().unwrap_or("")
+                ));
             }
 
             err = err.context(format!(
                 "Code: {}",
                 response_message.error_code().as_deref().unwrap_or("")
             ));
-            err = err.context(response_message.message().as_deref().unwrap_or("").to_string());
+            err = err.context(
+                response_message
+                    .message()
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_string(),
+            );
         }
         ProgenitorClientError::InvalidRequest(message) => {
             err = err.context("Invalid request").context(message);

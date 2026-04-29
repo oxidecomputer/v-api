@@ -40,10 +40,7 @@ where
         .await
         .map_err(ApiError::OAuth)?;
 
-    Ok(HttpResponseOk(provider.provider_info(
-        rqctx.v_ctx().public_url(),
-        &ClientType::Device,
-    )))
+    Ok(HttpResponseOk(provider.provider_info(&ClientType::Device)))
 }
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]

@@ -4,29 +4,43 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::error::Error as StdError;
 
-use crate::CliContext;
+use crate::{cmd::auth::login::CliConsumerLoginProvider, CliContext};
 
-// mod link;
 pub mod login;
 pub mod oauth;
+pub mod proxy;
 
 // Authenticate against the Meetings API
 #[derive(Parser, Debug)]
 #[clap(name = "auth")]
-pub struct Auth {
+pub struct Auth<P>
+where
+    P: CliConsumerLoginProvider,
+{
     #[command(subcommand)]
-    auth: AuthCommands,
+    auth: AuthCommands<P>,
 }
 
 #[derive(Subcommand, Debug, Clone)]
-enum AuthCommands {
+enum AuthCommands<P>
+where
+    P: CliConsumerLoginProvider,
+{
     /// Login via an authentication provider
-    Login(login::Login),
+    Login(login::Login<P>),
 }
 
-impl Auth {
-    pub async fn run<T, C, P>(&self, ctx: &mut T) -> Result<()> where T: CliContext<C, P> {
+impl<P> Auth<P>
+where
+    P: CliConsumerLoginProvider,
+{
+    pub async fn run<T, C>(&self, ctx: &mut T) -> Result<()>
+    where
+        T: CliContext<C, P>,
+        <T as CliContext<C, P>>::Error: StdError + Send + Sync + 'static,
+    {
         match &self.auth {
             AuthCommands::Login(login) => login.run(ctx).await,
         }

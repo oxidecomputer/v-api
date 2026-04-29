@@ -1259,7 +1259,7 @@ pub(crate) mod test_mocks {
     pub async fn mock_context(storage: Arc<MockStorage>) -> VContext<VPermission> {
         let MockKey { signer, verifier } = mock_key("test");
         let mut ctx = VContextBuilder::<VPermission>::new()
-            .with_public_url("".to_string())
+            .with_public_url("https://test_public_url".to_string())
             .with_storage(storage)
             .with_jwt_expiration(JwtConfig::default().default_expiration)
             .with_keys(vec![signer, verifier])
@@ -1278,6 +1278,7 @@ pub(crate) mod test_mocks {
             OAuthProviderName::Google,
             Box::new(move || {
                 Box::new(GoogleOAuthProvider::new(
+                    "https://test_public_url".to_string(),
                     "google_device_client_id".to_string(),
                     "google_device_client_secret".to_string().into(),
                     "google_web_client_id".to_string(),

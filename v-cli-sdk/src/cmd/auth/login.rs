@@ -5,24 +5,44 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use oauth2::TokenResponse;
-use std::{error::Error as StdError, future::Future, io::Write, pin::Pin};
+use std::{error::Error as StdError, fmt::Debug, future::Future, io::Write, pin::Pin, sync::Arc};
 
-use crate::{CliContext, cmd::{auth::oauth::{self, CliOAuthProviderInfo}, config::CliConfig}};
+use crate::{
+    cmd::{
+        auth::oauth::{self, CliOAuthAdapter, CliOAuthProviderInfo},
+        config::CliConfig,
+    },
+    CliContext,
+};
+
+pub trait CliAdapterToken {
+    fn access_token(&self) -> &str;
+}
+
+pub trait CliConsumerLoginProvider: Into<LoginProvider> + Subcommand + Debug + Clone {}
+impl<T> CliConsumerLoginProvider for T where T: Into<LoginProvider> + Subcommand + Debug + Clone {}
 
 // Authenticates and generates an access token for interacting with the api
 #[derive(Parser, Debug, Clone)]
 #[clap(name = "login")]
-pub struct Login {
+pub struct Login<P>
+where
+    P: CliConsumerLoginProvider,
+{
     #[command(subcommand)]
-    method: LoginMethod,
+    method: LoginMethod<P>,
     #[arg(short = 'm', default_value = "id")]
     mode: AuthenticationMode,
 }
 
-impl Login {
-    pub async fn run<T, C, P>(&self, ctx: &mut T) -> Result<()>
+impl<P> Login<P>
+where
+    P: CliConsumerLoginProvider,
+{
+    pub async fn run<T, C, R>(&self, ctx: &mut T) -> Result<()>
     where
-        T: CliContext<C, P>,
+        T: CliContext<C, R>,
+        <T as CliContext<C, R>>::Error: StdError + Send + Sync + 'static,
     {
         let access_token = self.method.run(ctx, &self.mode).await?;
 
@@ -34,12 +54,15 @@ impl Login {
 }
 
 #[derive(Subcommand, Debug, Clone)]
-pub enum LoginMethod {
+pub enum LoginMethod<P>
+where
+    P: Subcommand + Debug + Clone,
+{
     #[command(name = "oauth")]
     /// Login via OAuth
     OAuth {
         #[command(subcommand)]
-        provider: LoginProvider,
+        provider: P,
     },
     /// Login via Magic Link
     #[command(name = "mlink")]
@@ -51,11 +74,10 @@ pub enum LoginMethod {
     },
 }
 
-#[derive(Subcommand, Debug, Clone)]
 pub enum LoginProvider {
-    #[command(name = "google")]
-    /// Login via Google
     Google,
+    GitHub,
+    Zendesk,
 }
 
 #[derive(ValueEnum, Debug, Clone, PartialEq)]
@@ -68,17 +90,40 @@ pub enum AuthenticationMode {
     /// a machine for continued access. This requires the permission to create api tokens
     #[value(name = "token")]
     Token,
+    /// Retrieve and store a remote token. Remote mode should be used when you want to authenticate
+    /// and retrieve a token for use against the underlying authentication provider
+    #[value(name = "remote")]
+    Remote,
 }
 
-impl LoginMethod {
-    pub async fn run<T, C, P>(&self, ctx: &T, mode: &AuthenticationMode) -> Result<String>
+impl<P> LoginMethod<P>
+where
+    P: CliConsumerLoginProvider,
+{
+    pub async fn run<T, C, R>(&self, ctx: &T, mode: &AuthenticationMode) -> Result<String>
     where
-        T: CliContext<C, P>,
+        T: CliContext<C, R>,
+        <T as CliContext<C, R>>::Error: StdError + Send + Sync + 'static,
     {
         match self {
             Self::OAuth { provider } => {
-                self.run_oauth_provider(provider, mode, ctx.oauth_adapter())
-                    .await
+                let adapter = ctx.oauth_adapter();
+                let provider = provider.clone().into();
+                let provider = adapter.provider(&provider).await?;
+
+                // We now need to inspect the provider to determine the correct flow to use. If
+                // possible we use a limited input device flow, but not all providers support it.
+                // To handle those cases we need to use a proxy path that emulates an authorization
+                // code flow.
+                if provider.device_code_endpoint().is_some() {
+                    self.run_oauth_device_provider(provider, mode, ctx.oauth_adapter())
+                        .await
+                } else if provider.code_redirect_proxy_endpoint().is_some() {
+                    self.run_oauth_code_provider(provider, mode, ctx.oauth_adapter())
+                        .await
+                } else {
+                    anyhow::bail!("OAuth provider does not support any CLI authentication methods")
+                }
             }
             Self::MagicLink { email, scope } => {
                 self.run_magic_link(email, scope.as_deref(), ctx.mlink_adapter())
@@ -87,13 +132,16 @@ impl LoginMethod {
         }
     }
 
-    async fn run_oauth_provider<T>(
+    async fn run_oauth_device_provider<T, V>(
         &self,
-        provider: &LoginProvider,
+        provider: V,
         mode: &AuthenticationMode,
-        adapter: T
-    ) -> Result<String> where T: CliOAuthAdapter {
-        let provider = adapter.provider(provider).await?;
+        adapter: T,
+    ) -> Result<String>
+    where
+        T: CliOAuthAdapter,
+        V: CliOAuthProviderInfo,
+    {
         let oauth_client = oauth::DeviceOAuth::new(provider)?;
         let details = oauth_client.get_device_authorization().await?;
 
@@ -111,10 +159,35 @@ impl LoginMethod {
         }?;
 
         if mode == &AuthenticationMode::Token {
-            let token = adapter.get_long_lived_token(identity_token.secret()).await?;
+            let token = adapter
+                .get_long_lived_token(identity_token.secret())
+                .await?;
             Ok(token.access_token().to_string())
         } else {
             Ok(identity_token.secret().to_string())
+        }
+    }
+
+    async fn run_oauth_code_provider<T, V>(
+        &self,
+        provider: V,
+        mode: &AuthenticationMode,
+        adapter: T,
+    ) -> Result<String>
+    where
+        T: CliOAuthAdapter + Send + Sync + 'static,
+        V: CliOAuthProviderInfo,
+    {
+        let oauth_client = oauth::CodeOAuth::new(provider)?;
+        let adapter = Arc::new(adapter);
+
+        let identity_token = oauth_client.login(Arc::clone(&adapter)).await?;
+
+        if mode == &AuthenticationMode::Token {
+            let token = adapter.get_long_lived_token(&identity_token).await?;
+            Ok(token.access_token().to_string())
+        } else {
+            Ok(identity_token)
         }
     }
 
@@ -140,23 +213,20 @@ impl LoginMethod {
     }
 }
 
-pub trait CliOAuthAdapter {
-    type Token: CliAdapterToken;
-    type Error: StdError + Send + Sync + 'static;
-
-    fn provider(&self, provider: &LoginProvider) -> Pin<Box<dyn Future<Output = Result<impl CliOAuthProviderInfo, Self::Error>> + Send>>;
-    fn get_long_lived_token(&self, access_token: &str) -> Pin<Box<dyn Future<Output = Result<Self::Token, Self::Error>> + Send>>;
-}
-
 pub trait CliMagicLinkAdapter {
     type Attempt;
     type Token: CliAdapterToken;
     type Error: StdError + Send + Sync + 'static;
 
-    fn create_attempt(&self, email: &str, scope: Option<&str>) -> Pin<Box<dyn Future<Output = Result<Self::Attempt, Self::Error>> + Send>>;
-    fn exchange(&self, attempt: Self::Attempt, email: &str, token: &str) -> Pin<Box<dyn Future<Output = Result<Self::Token, Self::Error>> + Send>>;
-}
-
-pub trait CliAdapterToken {
-    fn access_token(&self) -> &str;
+    fn create_attempt(
+        &self,
+        email: &str,
+        scope: Option<&str>,
+    ) -> Pin<Box<dyn Future<Output = Result<Self::Attempt, Self::Error>> + Send>>;
+    fn exchange(
+        &self,
+        attempt: Self::Attempt,
+        email: &str,
+        token: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Self::Token, Self::Error>> + Send>>;
 }

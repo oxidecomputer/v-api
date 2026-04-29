@@ -30,7 +30,7 @@ use v_model::{
     LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient, OAuthClientId,
 };
 
-use super::{OAuthProvider, OAuthProviderNameParam, UserInfoProvider, WebClientConfig};
+use super::{OAuthProvider, OAuthProviderNameParam, UserInfoProvider};
 use crate::{
     authn::key::RawKey,
     context::{ApiContext, VContext},
@@ -239,11 +239,7 @@ fn oauth_redirect_response(
     // TODO: This behavior should be changed so that clients are precomputed. We do not need to be
     // constructing a new client on every request. That said, we need to ensure the client does not
     // maintain state between requests
-    let client = provider
-        .as_web_client(&WebClientConfig {
-            prefix: public_url.to_string(),
-        })
-        .map_err(to_internal_error)?;
+    let client = provider.as_web_client().map_err(to_internal_error)?;
 
     // Create an attempt cookie header for storing the login attempt. This also acts as our csrf
     // check
@@ -715,11 +711,7 @@ async fn fetch_user_info(
     attempt: &LoginAttempt,
 ) -> Result<UserInfo, HttpError> {
     // Exchange the stored authorization code with the remote provider for a remote access token
-    let client = provider
-        .as_web_client(&WebClientConfig {
-            prefix: public_url.to_string(),
-        })
-        .map_err(to_internal_error)?;
+    let client = provider.as_web_client().map_err(to_internal_error)?;
 
     let mut request = client.exchange_code(AuthorizationCode::new(
         attempt
@@ -889,8 +881,7 @@ mod tests {
     #[tokio::test]
     async fn test_remote_provider_redirect_url() {
         let storage = MockStorage::new();
-        let mut ctx = mock_context(Arc::new(storage)).await;
-        ctx.with_public_url("https://api.oxeng.dev");
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let (challenge, _) = PkceCodeChallenge::new_random_sha256();
         let attempt = LoginAttempt {
@@ -927,7 +918,7 @@ mod tests {
         .unwrap();
         let headers = response.headers();
 
-        let expected_location = format!("https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=google_web_client_id&state={}&code_challenge={}&code_challenge_method=S256&redirect_uri=https%3A%2F%2Fapi.oxeng.dev%2Flogin%2Foauth%2Fgoogle%2Fcode%2Fcallback&scope=openid+email+profile", attempt.id, challenge.as_str());
+        let expected_location = format!("https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=google_web_client_id&state={}&code_challenge={}&code_challenge_method=S256&redirect_uri=https%3A%2F%2Ftest_public_url%2Flogin%2Foauth%2Fgoogle%2Fcode%2Fcallback&scope=openid+email+profile", attempt.id, challenge.as_str());
 
         assert_eq!(
             expected_location,

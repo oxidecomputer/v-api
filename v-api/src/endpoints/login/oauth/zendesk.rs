@@ -25,6 +25,9 @@ pub struct ZendeskOAuthProvider {
     user_info_endpoint: String,
     auth_url_endpoint: String,
     token_exchange_endpoint: String,
+    token_endpoint: Option<String>,
+    redirect_endpoint: Option<String>,
+    redirect_proxy_endpoint: Option<String>,
 }
 
 impl fmt::Debug for ZendeskOAuthProvider {
@@ -35,12 +38,14 @@ impl fmt::Debug for ZendeskOAuthProvider {
 
 impl ZendeskOAuthProvider {
     pub fn new(
+        public_url: String,
         subdomain: String,
         device_client_id: String,
         device_client_secret: SecretString,
         web_client_id: String,
         web_client_secret: SecretString,
         additional_scopes: Option<Vec<String>>,
+        redirect_proxy_port: u16,
     ) -> Self {
         let base_url = format!("https://{}.zendesk.com", subdomain);
 
@@ -65,6 +70,15 @@ impl ZendeskOAuthProvider {
             user_info_endpoint: format!("{}/api/v2/users/me.json", base_url),
             auth_url_endpoint: format!("{}/oauth/authorizations/new", base_url),
             token_exchange_endpoint: format!("{}/oauth/tokens", base_url),
+            token_endpoint: Some(format!(
+                "{}/login/oauth/zendesk/device/exchange",
+                public_url
+            )),
+            redirect_endpoint: Some(format!("{}/login/oauth/zendesk/code/callback", public_url,)),
+            redirect_proxy_endpoint: Some(format!(
+                "http://localhost:{}/login/oauth/zendesk/code/callback",
+                redirect_proxy_port
+            )),
         }
     }
 
@@ -85,12 +99,17 @@ struct ZendeskUser {
     name: String,
     email: String,
     verified: bool,
+    suspended: bool,
 }
 
 impl ExtractUserInfo for ZendeskOAuthProvider {
     fn extract_user_info(&self, data: &[Bytes]) -> Result<UserInfo, UserInfoError> {
         let response: ZendeskUserResponse = serde_json::from_slice(&data[0])?;
         let user = response.user;
+
+        if user.suspended {
+            return Err(UserInfoError::Locked);
+        }
 
         let verified_emails = if user.verified {
             vec![user.email]
@@ -169,5 +188,15 @@ impl OAuthProvider for ZendeskOAuthProvider {
 
     fn supports_pkce(&self) -> bool {
         false
+    }
+
+    fn token_endpoint(&self) -> Option<&str> {
+        self.token_endpoint.as_deref()
+    }
+    fn redirect_endpoint(&self) -> Option<&str> {
+        self.redirect_endpoint.as_deref()
+    }
+    fn redirect_proxy_endpoint(&self) -> Option<&str> {
+        self.redirect_proxy_endpoint.as_deref()
     }
 }

@@ -33,17 +33,16 @@ pub mod zendesk;
 pub enum OAuthProviderError {
     #[error("Unable to instantiate invalid provider")]
     FailToCreateInvalidProvider,
+    #[error("Missing redirect URI")]
+    MissingRedirectUri,
+    #[error("Failed to parse URL")]
+    UrlParseError(#[from] ParseError),
 }
 
 #[derive(Debug)]
 pub enum ClientType {
     Device,
     Web,
-}
-
-#[derive(Debug)]
-pub struct WebClientConfig {
-    prefix: String,
 }
 
 pub type WebClient = BasicClient<
@@ -84,13 +83,19 @@ pub trait OAuthProvider: ExtractUserInfo + Debug + Send + Sync {
     fn token_revocation_endpoint(&self) -> Option<&str>;
     fn supports_pkce(&self) -> bool;
 
-    fn provider_info(&self, public_url: &str, client_type: &ClientType) -> OAuthProviderInfo {
+    fn token_endpoint(&self) -> Option<&str>;
+    fn redirect_endpoint(&self) -> Option<&str>;
+    fn redirect_proxy_endpoint(&self) -> Option<&str>;
+
+    fn provider_info(&self, client_type: &ClientType) -> OAuthProviderInfo {
         OAuthProviderInfo {
             provider: self.name(),
             client_id: self.client_id(client_type).to_string(),
             auth_url_endpoint: self.auth_url_endpoint().to_string(),
             device_code_endpoint: self.device_code_endpoint().map(|s| s.to_string()),
-            token_endpoint: format!("{}/login/oauth/{}/device/exchange", public_url, self.name(),),
+            token_endpoint: self.token_endpoint().map(|s| s.to_string()),
+            redirect_endpoint: self.redirect_endpoint().map(|s| s.to_string()),
+            redirect_proxy_endpoint: self.redirect_proxy_endpoint().map(|s| s.to_string()),
             scopes: self
                 .scopes()
                 .into_iter()
@@ -99,7 +104,7 @@ pub trait OAuthProvider: ExtractUserInfo + Debug + Send + Sync {
         }
     }
 
-    fn as_web_client(&self, config: &WebClientConfig) -> Result<WebClient, ParseError> {
+    fn as_web_client(&self) -> Result<WebClient, OAuthProviderError> {
         let mut client =
             BasicClient::new(ClientId::new(self.client_id(&ClientType::Web).to_string()))
                 .set_auth_uri(AuthUrl::new(self.auth_url_endpoint().to_string())?)
@@ -109,11 +114,11 @@ pub trait OAuthProvider: ExtractUserInfo + Debug + Send + Sync {
                         .map(|s| RevocationUrl::new(s.to_string()))
                         .transpose()?,
                 )
-                .set_redirect_uri(RedirectUrl::new(format!(
-                    "{}/login/oauth/{}/code/callback",
-                    &config.prefix,
-                    self.name()
-                ))?);
+                .set_redirect_uri(RedirectUrl::new(
+                    self.redirect_endpoint()
+                        .ok_or(OAuthProviderError::MissingRedirectUri)?
+                        .to_string(),
+                )?);
 
         if let Some(secret) = self.client_secret(&ClientType::Web) {
             client = client.set_client_secret(ClientSecret::new(secret.expose_secret().to_string()))
@@ -173,7 +178,9 @@ pub struct OAuthProviderInfo {
     client_id: String,
     auth_url_endpoint: String,
     device_code_endpoint: Option<String>,
-    token_endpoint: String,
+    token_endpoint: Option<String>,
+    redirect_endpoint: Option<String>,
+    redirect_proxy_endpoint: Option<String>,
     scopes: Vec<String>,
 }
 

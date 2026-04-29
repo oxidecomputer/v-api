@@ -74,7 +74,10 @@ pub enum SetCmd {
 }
 
 impl ConfigCmd {
-    pub async fn run<T, C, P>(&self, ctx: &mut T) -> Result<()> where T: CliContext<C, P> {
+    pub async fn run<T, C, P>(&self, ctx: &mut T) -> Result<()>
+    where
+        T: CliContext<C, P>,
+    {
         match &self.setting {
             SettingCmd::Get(get) => get.run(ctx.config()).await?,
             SettingCmd::Set(set) => set.run(ctx.config_mut()).await?,
@@ -85,10 +88,19 @@ impl ConfigCmd {
 }
 
 impl GetCmd {
-    pub async fn run<T>(&self, config: &T) -> Result<()> where T: CliConfig {
+    pub async fn run<T>(&self, config: &T) -> Result<()>
+    where
+        T: CliConfig,
+    {
         match &self {
             GetCmd::Format => {
-                println!("{}", config.default_format().map(|f| *f).unwrap_or(FormatStyle::Json));
+                println!(
+                    "{}",
+                    config
+                        .default_format()
+                        .map(|f| *f)
+                        .unwrap_or(FormatStyle::Json)
+                );
             }
             GetCmd::Host => {
                 println!("{}", config.host().unwrap_or("None"));
@@ -109,7 +121,10 @@ impl GetCmd {
 }
 
 impl SetCmd {
-    pub async fn run<T>(&self, config: &mut T) -> Result<()> where T: CliConfig {
+    pub async fn run<T>(&self, config: &mut T) -> Result<()>
+    where
+        T: CliConfig,
+    {
         match &self {
             SetCmd::Format { format } => {
                 config.set_default_format(format.clone());

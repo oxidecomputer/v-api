@@ -2,7 +2,10 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
-use crate::cmd::{auth::login::{CliMagicLinkAdapter, CliOAuthAdapter}, config::CliConfig};
+use crate::cmd::{
+    auth::{login::CliMagicLinkAdapter, oauth::CliOAuthAdapter},
+    config::CliConfig,
+};
 
 pub mod cmd;
 pub mod err;
@@ -41,8 +44,12 @@ pub trait CliContext<C, P> {
     fn printer(&self) -> Option<&P>;
     fn verbosity(&self) -> VerbosityLevel;
 
-    fn oauth_adapter(&self) -> impl CliOAuthAdapter<Token = Self::Token, Error = Self::Error>;
-    fn mlink_adapter(&self) -> impl CliMagicLinkAdapter<Token = Self::Token, Error = Self::Error>;
+    fn oauth_adapter(
+        &self,
+    ) -> impl CliOAuthAdapter<Token = Self::Token, Error = Self::Error> + Send + Sync + 'static;
+    fn mlink_adapter(
+        &self,
+    ) -> impl CliMagicLinkAdapter<Token = Self::Token, Error = Self::Error> + Send + Sync + 'static;
 }
 
 pub trait ApiErrorMessage {

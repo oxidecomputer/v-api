@@ -201,6 +201,8 @@ pub enum UserInfoError {
     Deserialize(#[from] serde_json::Error),
     #[error("Failed to create user info request {0}")]
     Http(#[from] http::Error),
+    #[error("User account is locked")]
+    Locked,
     #[error("User information is missing")]
     MissingUserInfoData(String),
 }
