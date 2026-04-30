@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use schemars::{
-    JsonSchema,
     schema::{InstanceType, SchemaObject},
+    JsonSchema,
 };
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize, Serializer};
