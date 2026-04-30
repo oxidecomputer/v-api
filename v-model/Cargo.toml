@@ -27,6 +27,6 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"]  }
 
 [dev-dependencies]
-diesel_migrations = { version = "2.3.1", features = ["postgres"] }
+diesel_migrations = { version = "2.3.2", features = ["postgres"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 v-api-installer = { path = "../v-api-installer" }
