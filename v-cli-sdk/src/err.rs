@@ -31,21 +31,15 @@ where
             if ctx.verbosity() >= VerbosityLevel::All {
                 err = err.context(format!(
                     "Request {}",
-                    response_message.request_id().as_deref().unwrap_or("")
+                    response_message.request_id().unwrap_or("")
                 ));
             }
 
             err = err.context(format!(
                 "Code: {}",
-                response_message.error_code().as_deref().unwrap_or("")
+                response_message.error_code().unwrap_or("")
             ));
-            err = err.context(
-                response_message
-                    .message()
-                    .as_deref()
-                    .unwrap_or("")
-                    .to_string(),
-            );
+            err = err.context(response_message.message().unwrap_or("").to_string());
         }
         ProgenitorClientError::InvalidRequest(message) => {
             err = err.context("Invalid request").context(message);

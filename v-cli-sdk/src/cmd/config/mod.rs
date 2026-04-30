@@ -98,7 +98,7 @@ impl GetCmd {
                     "{}",
                     config
                         .default_format()
-                        .map(|f| *f)
+                        .copied()
                         .unwrap_or(FormatStyle::Json)
                 );
             }
@@ -127,7 +127,7 @@ impl SetCmd {
     {
         match &self {
             SetCmd::Format { format } => {
-                config.set_default_format(format.clone());
+                config.set_default_format(*format);
                 config.save()?;
             }
             SetCmd::Host { host } => {
