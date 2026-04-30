@@ -839,15 +839,17 @@ impl OAuthClientStore for PostgresStore {
 
                     // Only include secrets that have not been deleted
                     if let Some(secret) = secret
-                        && secret.deleted_at.is_none() {
-                            value.1.push(secret.into());
-                        }
+                        && secret.deleted_at.is_none()
+                    {
+                        value.1.push(secret.into());
+                    }
 
                     // Only include redirect URIs that have not been deleted
                     if let Some(redirect) = redirect
-                        && redirect.deleted_at.is_none() {
-                            value.2.push(redirect.into());
-                        }
+                        && redirect.deleted_at.is_none()
+                    {
+                        value.2.push(redirect.into());
+                    }
 
                     clients
                 },
