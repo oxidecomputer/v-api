@@ -60,6 +60,7 @@ impl From<LoginError> for HttpError {
 pub enum ExternalUserId {
     GitHub(String),
     Google(String),
+    Zendesk(String),
     #[cfg(feature = "local-dev")]
     Local(String),
     MagicLink(String),
@@ -70,6 +71,7 @@ impl ExternalUserId {
         match self {
             Self::GitHub(id) => id,
             Self::Google(id) => id,
+            Self::Zendesk(id) => id,
             #[cfg(feature = "local-dev")]
             Self::Local(id) => id,
             Self::MagicLink(id) => id,
@@ -80,6 +82,7 @@ impl ExternalUserId {
         match self {
             Self::GitHub(_) => "github",
             Self::Google(_) => "google",
+            Self::Zendesk(_) => "zendesk",
             #[cfg(feature = "local-dev")]
             Self::Local(_) => "local",
             Self::MagicLink(_) => "magic-link",
@@ -103,6 +106,7 @@ impl Serialize for ExternalUserId {
         match self {
             ExternalUserId::GitHub(id) => serializer.serialize_str(&format!("github-{}", id)),
             ExternalUserId::Google(id) => serializer.serialize_str(&format!("google-{}", id)),
+            ExternalUserId::Zendesk(id) => serializer.serialize_str(&format!("zendesk-{}", id)),
             #[cfg(feature = "local-dev")]
             ExternalUserId::Local(id) => serializer.serialize_str(&format!("local-{}", id)),
             ExternalUserId::MagicLink(id) => {
@@ -139,6 +143,12 @@ impl<'de> Deserialize<'de> for ExternalUserId {
                 } else if let Some(("", id)) = value.split_once("google-") {
                     if !id.is_empty() {
                         Ok(ExternalUserId::Google(id.to_string()))
+                    } else {
+                        Err(de::Error::custom(ExternalUserIdDeserializeError::Empty))
+                    }
+                } else if let Some(("", id)) = value.split_once("zendesk-") {
+                    if !id.is_empty() {
+                        Ok(ExternalUserId::Zendesk(id.to_string()))
                     } else {
                         Err(de::Error::custom(ExternalUserIdDeserializeError::Empty))
                     }
@@ -191,6 +201,8 @@ pub enum UserInfoError {
     Deserialize(#[from] serde_json::Error),
     #[error("Failed to create user info request {0}")]
     Http(#[from] http::Error),
+    #[error("User account is locked")]
+    Locked,
     #[error("User information is missing")]
     MissingUserInfoData(String),
 }

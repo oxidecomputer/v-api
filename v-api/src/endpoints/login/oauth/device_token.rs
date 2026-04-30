@@ -40,10 +40,7 @@ where
         .await
         .map_err(ApiError::OAuth)?;
 
-    Ok(HttpResponseOk(provider.provider_info(
-        rqctx.v_ctx().public_url(),
-        &ClientType::Device,
-    )))
+    Ok(HttpResponseOk(provider.provider_info(&ClientType::Device)))
 }
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
@@ -123,6 +120,24 @@ where
         .map_err(ApiError::OAuth)?;
 
     tracing::debug!(provider = ?provider.name(), "Acquired OAuth provider for token exchange");
+
+    if provider.device_code_endpoint().is_none() {
+        return Ok(Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(
+                serde_json::to_vec(&ProxyTokenError {
+                    error: "unsupported_grant_type".to_string(),
+                    error_description: Some(format!(
+                        "{} does not support device code flow",
+                        path.provider
+                    )),
+                    error_uri: None,
+                })
+                .unwrap()
+                .into(),
+            )?);
+    }
 
     let exchange_request = body.into_inner();
 

@@ -1,0 +1,19 @@
+[package]
+name = "v-cli-sdk"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["server", "http1"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+oauth2 = { workspace = true }
+oauth2-reqwest = { workspace = true }
+progenitor-client = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "net", "sync"] }

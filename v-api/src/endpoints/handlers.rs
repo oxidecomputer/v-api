@@ -72,7 +72,7 @@ mod macros {
                         code::{
                             authz_code_callback_op, authz_code_exchange_op, authz_code_redirect_op,
                             OAuthAuthzCodeExchangeBody, OAuthAuthzCodeExchangeResponse,
-                            OAuthAuthzCodeQuery, OAuthAuthzCodeReturnQuery,
+                            OAuthAuthzCodeQuery, OAuthAuthzCodeReturnQuery, OAuthAuthzCodeExchangeQuery
                         },
                         device_token::{
                             exchange_device_token_op, get_device_provider_op, AccessTokenExchangeRequest,
@@ -296,9 +296,10 @@ mod macros {
             pub async fn authz_code_exchange(
                 rqctx: RequestContext<$context_type>,
                 path: Path<OAuthProviderNameParam>,
+                query: Query<OAuthAuthzCodeExchangeQuery>,
                 body: TypedBody<OAuthAuthzCodeExchangeBody>,
             ) -> Result<HttpResponseOk<OAuthAuthzCodeExchangeResponse>, HttpError> {
-                authz_code_exchange_op(&rqctx, path, body).await
+                authz_code_exchange_op(&rqctx, path, query, body).await
             }
 
             // DEVICE CODE

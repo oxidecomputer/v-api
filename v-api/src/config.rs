@@ -151,6 +151,7 @@ pub struct SendGridConfig {
 pub struct OAuthProviders {
     pub github: Option<OAuthConfig>,
     pub google: Option<OAuthConfig>,
+    pub zendesk: Option<OAuthConfig>,
 }
 
 #[derive(Debug, Deserialize)]

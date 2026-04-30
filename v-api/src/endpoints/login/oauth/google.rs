@@ -22,6 +22,9 @@ pub struct GoogleOAuthProvider {
     web_private: Option<OAuthPrivateCredentials>,
     additional_scopes: Vec<String>,
     client: reqwest::Client,
+    token_endpoint: Option<String>,
+    redirect_endpoint: Option<String>,
+    redirect_proxy_endpoint: Option<String>,
 }
 
 impl fmt::Debug for GoogleOAuthProvider {
@@ -32,6 +35,7 @@ impl fmt::Debug for GoogleOAuthProvider {
 
 impl GoogleOAuthProvider {
     pub fn new(
+        public_url: String,
         device_client_id: String,
         device_client_secret: SecretString,
         web_client_id: String,
@@ -56,6 +60,9 @@ impl GoogleOAuthProvider {
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .expect("Static client must build"),
+            token_endpoint: Some(format!("{}/login/oauth/google/device/exchange", public_url)),
+            redirect_endpoint: Some(format!("{}/login/oauth/google/code/callback", public_url,)),
+            redirect_proxy_endpoint: None,
         }
     }
 
@@ -162,8 +169,8 @@ impl OAuthProvider for GoogleOAuthProvider {
         ]
     }
 
-    fn device_code_endpoint(&self) -> &str {
-        "https://oauth2.googleapis.com/device/code"
+    fn device_code_endpoint(&self) -> Option<&str> {
+        Some("https://oauth2.googleapis.com/device/code")
     }
 
     fn auth_url_endpoint(&self) -> &str {
@@ -184,5 +191,15 @@ impl OAuthProvider for GoogleOAuthProvider {
 
     fn supports_pkce(&self) -> bool {
         true
+    }
+
+    fn token_endpoint(&self) -> Option<&str> {
+        self.token_endpoint.as_deref()
+    }
+    fn redirect_endpoint(&self) -> Option<&str> {
+        self.redirect_endpoint.as_deref()
+    }
+    fn redirect_proxy_endpoint(&self) -> Option<&str> {
+        self.redirect_proxy_endpoint.as_deref()
     }
 }

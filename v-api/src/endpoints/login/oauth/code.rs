@@ -30,7 +30,7 @@ use v_model::{
     LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient, OAuthClientId,
 };
 
-use super::{OAuthProvider, OAuthProviderNameParam, UserInfoProvider, WebClientConfig};
+use super::{OAuthProvider, OAuthProviderNameParam, UserInfoProvider};
 use crate::{
     authn::key::RawKey,
     context::{ApiContext, VContext},
@@ -239,11 +239,7 @@ fn oauth_redirect_response(
     // TODO: This behavior should be changed so that clients are precomputed. We do not need to be
     // constructing a new client on every request. That said, we need to ensure the client does not
     // maintain state between requests
-    let client = provider
-        .as_web_client(&WebClientConfig {
-            prefix: public_url.to_string(),
-        })
-        .map_err(to_internal_error)?;
+    let client = provider.as_web_client().map_err(to_internal_error)?;
 
     // Create an attempt cookie header for storing the login attempt. This also acts as our csrf
     // check
@@ -441,6 +437,12 @@ where
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct OAuthAuthzCodeExchangeQuery {
+    #[serde(default)]
+    pub include_idp_token: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct OAuthAuthzCodeExchangeBody {
     pub client_id: Option<TypedUuid<OAuthClientId>>,
     pub client_secret: Option<OpenApiSecretString>,
@@ -455,12 +457,19 @@ pub struct OAuthAuthzCodeExchangeResponse {
     pub access_token: String,
     pub token_type: String,
     pub expires_in: i64,
+    pub idp_token: Option<OAuthAuthzCodeIdpToken>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
+pub struct OAuthAuthzCodeIdpToken {
+    pub token: String,
 }
 
 #[instrument(skip(rqctx), err(Debug))]
 pub async fn authz_code_exchange_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<OAuthProviderNameParam>,
+    query: Query<OAuthAuthzCodeExchangeQuery>,
     body: TypedBody<OAuthAuthzCodeExchangeBody>,
 ) -> Result<HttpResponseOk<OAuthAuthzCodeExchangeResponse>, HttpError>
 where
@@ -468,6 +477,7 @@ where
 {
     let ctx = rqctx.v_ctx();
     let path = path.into_inner();
+    let query = query.into_inner();
     let body = body.into_inner();
 
     let (client_id, client_secret) =
@@ -541,7 +551,14 @@ where
 
     // Now that the attempt has been confirmed, use it to fetch user information form the remote
     // provider
-    let info = fetch_user_info(ctx.public_url(), &ctx.web_client(), &*provider, &attempt).await?;
+    let (info, raw_token) = fetch_user_info(
+        ctx.public_url(),
+        &ctx.web_client(),
+        &*provider,
+        &attempt,
+        query.include_idp_token,
+    )
+    .await?;
 
     tracing::debug!("Retrieved user information from remote provider");
 
@@ -589,6 +606,9 @@ where
         token_type: "Bearer".to_string(),
         access_token: token.signed_token,
         expires_in: token.expires_in,
+        idp_token: query.include_idp_token.then(|| OAuthAuthzCodeIdpToken {
+            token: raw_token.unwrap(),
+        }),
     }))
 }
 
@@ -713,13 +733,10 @@ async fn fetch_user_info(
     client_type: &ClientType,
     provider: &dyn OAuthProvider,
     attempt: &LoginAttempt,
-) -> Result<UserInfo, HttpError> {
+    return_raw: bool,
+) -> Result<(UserInfo, Option<String>), HttpError> {
     // Exchange the stored authorization code with the remote provider for a remote access token
-    let client = provider
-        .as_web_client(&WebClientConfig {
-            prefix: public_url.to_string(),
-        })
-        .map_err(to_internal_error)?;
+    let client = provider.as_web_client().map_err(to_internal_error)?;
 
     let mut request = client.exchange_code(AuthorizationCode::new(
         attempt
@@ -754,7 +771,7 @@ async fn fetch_user_info(
 
     // Now that we are done with fetching user information from the remote API, we can revoke it if
     // the provider supports it
-    if provider.token_revocation_endpoint().is_some() {
+    if !return_raw && provider.token_revocation_endpoint().is_some() {
         client
             .revoke_token(response.access_token().into())
             .map_err(internal_error)?
@@ -763,7 +780,11 @@ async fn fetch_user_info(
             .map_err(internal_error)?;
     }
 
-    Ok(info)
+    if return_raw {
+        Ok((info, Some(response.access_token().secret().to_string())))
+    } else {
+        Ok((info, None))
+    }
 }
 
 #[cfg(test)]
@@ -889,8 +910,7 @@ mod tests {
     #[tokio::test]
     async fn test_remote_provider_redirect_url() {
         let storage = MockStorage::new();
-        let mut ctx = mock_context(Arc::new(storage)).await;
-        ctx.with_public_url("https://api.oxeng.dev");
+        let ctx = mock_context(Arc::new(storage)).await;
 
         let (challenge, _) = PkceCodeChallenge::new_random_sha256();
         let attempt = LoginAttempt {
@@ -927,7 +947,7 @@ mod tests {
         .unwrap();
         let headers = response.headers();
 
-        let expected_location = format!("https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=google_web_client_id&state={}&code_challenge={}&code_challenge_method=S256&redirect_uri=https%3A%2F%2Fapi.oxeng.dev%2Flogin%2Foauth%2Fgoogle%2Fcode%2Fcallback&scope=openid+email+profile", attempt.id, challenge.as_str());
+        let expected_location = format!("https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=google_web_client_id&state={}&code_challenge={}&code_challenge_method=S256&redirect_uri=https%3A%2F%2Ftest_public_url%2Flogin%2Foauth%2Fgoogle%2Fcode%2Fcallback&scope=openid+email+profile", attempt.id, challenge.as_str());
 
         assert_eq!(
             expected_location,
