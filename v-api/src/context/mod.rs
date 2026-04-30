@@ -494,7 +494,7 @@ where
         tracing::debug!(?mapped_permissions, "Computed mapping permissions");
         tracing::debug!(?mapped_groups, "Computed mapped groups");
 
-        let user = match api_user_providers.len() {
+        match api_user_providers.len() {
             0 => {
                 tracing::info!(
                     ?mapped_permissions,
@@ -585,9 +585,7 @@ where
                     "Multiple providers for external id found".to_string(),
                 )))
             }
-        };
-
-        user
+        }
     }
 
     pub async fn generate_access_token(
