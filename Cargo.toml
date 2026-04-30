@@ -9,6 +9,11 @@ members = [
 ]
 resolver = "2"
 
+[workspace.package]
+publish = true
+edition = "2024"
+version = "0.3.0"
+
 [workspace.dependencies]
 anyhow = "1.0"
 async-bb8-diesel = "0.3"
