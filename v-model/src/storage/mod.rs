@@ -16,7 +16,6 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    schema_ext::{LoginAttemptState, MagicLinkAttemptState},
     AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail,
     ApiUserInfo, ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt, LoginAttemptId,
     MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri,
@@ -26,6 +25,7 @@ use crate::{
     NewMagicLinkSecret, NewMapper, NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret,
     OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId,
     OAuthSecretId, UserContactEmailId, UserId, UserProviderId,
+    schema_ext::{LoginAttemptState, MagicLinkAttemptState},
 };
 
 pub mod postgres;
@@ -263,7 +263,7 @@ pub struct LoginAttemptFilter {
 #[async_trait]
 pub trait LoginAttemptStore {
     async fn get(&self, id: &TypedUuid<LoginAttemptId>)
-        -> Result<Option<LoginAttempt>, StoreError>;
+    -> Result<Option<LoginAttempt>, StoreError>;
     async fn list(
         &self,
         filter: LoginAttemptFilter,

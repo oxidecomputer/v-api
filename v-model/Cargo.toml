@@ -1,7 +1,8 @@
 [package]
 name = "v-model"
-version = "0.2.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -27,6 +28,6 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"]  }
 
 [dev-dependencies]
-diesel_migrations = { version = "2.3.1", features = ["postgres"] }
+diesel_migrations = { version = "2.3.2", features = ["postgres"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 v-api-installer = { path = "../v-api-installer" }

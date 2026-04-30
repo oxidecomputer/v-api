@@ -15,18 +15,18 @@ use tracing::instrument;
 use url::Url;
 use uuid::Uuid;
 use v_model::{
+    MagicLink, MagicLinkAttemptId,
     permissions::PermissionStorage,
     schema_ext::{MagicLinkAttemptState, MagicLinkMedium},
-    MagicLink, MagicLinkAttemptId,
 };
 
 use crate::{
-    authn::{key::RawKey, Verify},
+    ApiContext, VContext,
+    authn::{Verify, key::RawKey},
     context::magic_link::{MagicLinkSendError, MagicLinkTransitionError},
     endpoints::login::{ExternalUserId, UserInfo},
     permissions::VAppPermission,
-    response::{bad_request, internal_error, to_internal_error, ResourceError},
-    ApiContext, VContext,
+    response::{ResourceError, bad_request, internal_error, to_internal_error},
 };
 
 pub mod client;

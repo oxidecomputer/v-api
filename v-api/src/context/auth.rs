@@ -10,9 +10,10 @@ use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use v_model::permissions::Caller;
 
 use crate::{
+    ApiContext,
     authn::{
-        jwt::{JwtSigner, JwtSignerError},
         AuthError, AuthToken, Sign, Signer, VerificationResult, Verifier, Verify,
+        jwt::{JwtSigner, JwtSignerError},
     },
     config::JwtConfig,
     endpoints::login::oauth::{
@@ -20,7 +21,6 @@ use crate::{
     },
     error::AppError,
     permissions::{VAppPermission, VPermission},
-    ApiContext,
 };
 
 pub struct AuthContext<T> {
@@ -195,7 +195,7 @@ mod tests {
         config::JwtConfig,
         context::auth::AuthContext,
         permissions::VPermission,
-        util::tests::{mock_key, MockKey},
+        util::tests::{MockKey, mock_key},
     };
 
     #[tokio::test]

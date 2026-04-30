@@ -5,15 +5,15 @@
 use newtype_uuid::TypedUuid;
 use std::sync::Arc;
 use v_model::{
+    AccessGroup, AccessGroupId, NewAccessGroup,
     permissions::Caller,
     storage::{AccessGroupFilter, AccessGroupStore, ListPagination, StoreError},
-    AccessGroup, AccessGroupId, NewAccessGroup,
 };
 
 use crate::{
-    permissions::{VAppPermission, VPermission},
-    response::{resource_restricted, OptionalResource, ResourceResult},
     VApiStorage,
+    permissions::{VAppPermission, VPermission},
+    response::{OptionalResource, ResourceResult, resource_restricted},
 };
 
 #[derive(Clone)]

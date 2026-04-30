@@ -8,9 +8,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use v_model::{
+    AccessGroupId,
     permissions::{Caller, Permissions},
     storage::StoreError,
-    AccessGroupId,
 };
 
 use crate::{

@@ -2,21 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use chrono::{TimeDelta, Utc};
 use cookie::{Cookie, SameSite};
 use dropshot::{
-    http_response_temporary_redirect, ClientErrorStatusCode, HttpError, HttpResponseOk,
-    HttpResponseTemporaryRedirect, Path, Query, RequestContext, RequestInfo, SharedExtractor,
-    TypedBody,
+    ClientErrorStatusCode, HttpError, HttpResponseOk, HttpResponseTemporaryRedirect, Path, Query,
+    RequestContext, RequestInfo, SharedExtractor, TypedBody, http_response_temporary_redirect,
 };
 use dropshot_authorization_header::basic::BasicAuth;
-use http::{header::SET_COOKIE, HeaderValue};
+use http::{HeaderValue, header::SET_COOKIE};
 use newtype_uuid::TypedUuid;
 use oauth2::{
     AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope, TokenResponse,
 };
-use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
+use percent_encoding::{NON_ALPHANUMERIC, percent_encode};
 use schemars::JsonSchema;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
@@ -25,9 +24,9 @@ use std::{fmt::Debug, ops::Add};
 use tap::TapFallible;
 use tracing::instrument;
 use v_model::{
+    LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient, OAuthClientId,
     permissions::{AsScope, PermissionStorage},
     schema_ext::LoginAttemptState,
-    LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient, OAuthClientId,
 };
 
 use super::{OAuthProvider, OAuthProviderNameParam, UserInfoProvider, WebClientConfig};
@@ -35,15 +34,15 @@ use crate::{
     authn::key::RawKey,
     context::{ApiContext, VContext},
     endpoints::login::{
-        oauth::{CheckOAuthClient, ClientType},
         LoginError, UserInfo,
+        oauth::{CheckOAuthClient, ClientType},
     },
     error::ApiError,
     permissions::{VAppPermission, VPermission},
     secrets::OpenApiSecretString,
     util::{
         request::RequestCookies,
-        response::{internal_error, to_internal_error, unauthorized, ResourceError},
+        response::{ResourceError, internal_error, to_internal_error, unauthorized},
     },
 };
 
@@ -777,8 +776,8 @@ mod tests {
     use chrono::{TimeDelta, Utc};
     use dropshot::{HttpResponse, RequestInfo};
     use http::{
-        header::{COOKIE, LOCATION, SET_COOKIE},
         HeaderValue, StatusCode,
+        header::{COOKIE, LOCATION, SET_COOKIE},
     };
     use http_body_util::Empty;
     use mockall::predicate::eq;
@@ -787,23 +786,23 @@ mod tests {
     use secrecy::SecretString;
     use uuid::Uuid;
     use v_model::{
+        LoginAttempt, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret,
         schema_ext::LoginAttemptState,
         storage::{MockLoginAttemptStore, MockOAuthClientStore},
-        LoginAttempt, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret,
     };
 
     use crate::{
         authn::key::RawKey,
         context::{
-            test_mocks::{mock_context, MockStorage},
             VContext,
+            test_mocks::{MockStorage, mock_context},
         },
         endpoints::login::oauth::{
-            code::{
-                authz_code_callback_op_inner, verify_csrf, verify_login_attempt,
-                OAuthAuthzCodeReturnQuery, OAuthError, OAuthErrorCode, LOGIN_ATTEMPT_COOKIE,
-            },
             OAuthProviderName,
+            code::{
+                LOGIN_ATTEMPT_COOKIE, OAuthAuthzCodeReturnQuery, OAuthError, OAuthErrorCode,
+                authz_code_callback_op_inner, verify_csrf, verify_login_attempt,
+            },
         },
         permissions::VPermission,
     };
@@ -927,7 +926,11 @@ mod tests {
         .unwrap();
         let headers = response.headers();
 
-        let expected_location = format!("https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=google_web_client_id&state={}&code_challenge={}&code_challenge_method=S256&redirect_uri=https%3A%2F%2Fapi.oxeng.dev%2Flogin%2Foauth%2Fgoogle%2Fcode%2Fcallback&scope=openid+email+profile", attempt.id, challenge.as_str());
+        let expected_location = format!(
+            "https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=google_web_client_id&state={}&code_challenge={}&code_challenge_method=S256&redirect_uri=https%3A%2F%2Fapi.oxeng.dev%2Flogin%2Foauth%2Fgoogle%2Fcode%2Fcallback&scope=openid+email+profile",
+            attempt.id,
+            challenge.as_str()
+        );
 
         assert_eq!(
             expected_location,

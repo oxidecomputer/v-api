@@ -6,17 +6,17 @@ use newtype_uuid::TypedUuid;
 use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc};
 use v_model::{
+    AccessGroupId, Mapper, MapperId, NewMapper, Permissions,
     permissions::Caller,
     storage::{ListPagination, MapperFilter, MapperStore, StoreError},
-    AccessGroupId, Mapper, MapperId, NewMapper, Permissions,
 };
 
 use crate::{
+    VApiStorage,
     endpoints::login::UserInfo,
     mapper::MappingEngine,
     permissions::{VAppPermission, VPermission},
-    response::{resource_restricted, OptionalResource, ResourceResult},
-    VApiStorage,
+    response::{OptionalResource, ResourceResult, resource_restricted},
 };
 
 pub struct MappingContext<T> {
@@ -150,7 +150,10 @@ where
                             Err(err) => {
                                 // TODO: Inspect the error. We expect to see a conflict error, and
                                 // should is expected to be seen. Other errors are problematic.
-                                tracing::warn!(?err, "Login may have attempted to use depleted mapper. This may be ok if it is an isolated occurrence, but should occur repeatedly.");
+                                tracing::warn!(
+                                    ?err,
+                                    "Login may have attempted to use depleted mapper. This may be ok if it is an isolated occurrence, but should occur repeatedly."
+                                );
                                 false
                             }
                         }

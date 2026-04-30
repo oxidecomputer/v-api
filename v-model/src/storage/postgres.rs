@@ -7,8 +7,8 @@ use async_trait::async_trait;
 use bb8::Pool;
 use chrono::Utc;
 use diesel::{
-    insert_into, pg::PgConnection, query_dsl::QueryDsl, update, upsert::excluded,
     ExpressionMethods, OptionalExtension as OptionalExtension2, PgArrayExpressionMethods,
+    insert_into, pg::PgConnection, query_dsl::QueryDsl, update, upsert::excluded,
 };
 use newtype_uuid::{GenericUuid, TypedUuid};
 use std::{collections::BTreeMap, time::Duration};
@@ -16,6 +16,16 @@ use thiserror::Error;
 use tracing::instrument;
 
 use crate::{
+    AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUser,
+    ApiUserContactEmail, ApiUserInfo, ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt,
+    LoginAttemptId, MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId,
+    MagicLinkRedirectUri, MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, Mapper,
+    MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser, NewApiUserContactEmail,
+    NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMagicLink, NewMagicLinkAttempt,
+    NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, NewOAuthClient,
+    NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
+    OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId,
+    UserContactEmailId, UserId, UserProviderId,
     db::{
         AccessGroupModel, ApiKeyModel, ApiUserAccessTokenModel, ApiUserContactEmailModel,
         ApiUserModel, ApiUserProviderModel, LinkRequestModel, LoginAttemptModel,
@@ -31,16 +41,6 @@ use crate::{
     },
     schema_ext::MagicLinkAttemptState,
     storage::{LinkRequestFilter, LinkRequestStore, StoreError},
-    AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUser,
-    ApiUserContactEmail, ApiUserInfo, ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt,
-    LoginAttemptId, MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId,
-    MagicLinkRedirectUri, MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, Mapper,
-    MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser, NewApiUserContactEmail,
-    NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMagicLink, NewMagicLinkAttempt,
-    NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, NewOAuthClient,
-    NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
-    OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId,
-    UserContactEmailId, UserId, UserProviderId,
 };
 
 use super::{
@@ -838,17 +838,17 @@ impl OAuthClientStore for PostgresStore {
                     ));
 
                     // Only include secrets that have not been deleted
-                    if let Some(secret) = secret {
-                        if secret.deleted_at.is_none() {
-                            value.1.push(secret.into());
-                        }
+                    if let Some(secret) = secret
+                        && secret.deleted_at.is_none()
+                    {
+                        value.1.push(secret.into());
                     }
 
                     // Only include redirect URIs that have not been deleted
-                    if let Some(redirect) = redirect {
-                        if redirect.deleted_at.is_none() {
-                            value.2.push(redirect.into());
-                        }
+                    if let Some(redirect) = redirect
+                        && redirect.deleted_at.is_none()
+                    {
+                        value.2.push(redirect.into());
                     }
 
                     clients

@@ -11,16 +11,16 @@ use std::{
 };
 
 use diesel::{
+    AsExpression, FromSqlRow,
     backend::Backend,
     deserialize::{self, FromSql},
     pg::Pg,
     serialize::{self, Output, ToSql},
     sql_types::Jsonb,
-    AsExpression, FromSqlRow,
 };
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
 use crate::{ApiUser, UserId};

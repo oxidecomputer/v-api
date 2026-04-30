@@ -144,7 +144,7 @@ mod tests {
     use super::RawKey;
     use crate::{
         authn::{VerificationResult, Verify},
-        util::tests::{mock_key, MockKey},
+        util::tests::{MockKey, mock_key},
     };
 
     struct TestVerifier {

@@ -11,10 +11,10 @@ use std::{
     hash::{Hash, Hasher},
 };
 use syn::{
+    Data, DeriveInput, Error, Ident, Result, Token, Variant,
     parse::{Parse, ParseStream},
     parse_macro_input,
     spanned::Spanned,
-    Data, DeriveInput, Error, Ident, Result, Token, Variant,
 };
 
 static MACRO_ID: &str = "v_api";

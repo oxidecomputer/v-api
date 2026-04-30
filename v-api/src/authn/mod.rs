@@ -3,13 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use async_trait::async_trait;
-use base64::{prelude::BASE64_STANDARD, Engine};
+use base64::{Engine, prelude::BASE64_STANDARD};
 use crc32c::crc32c;
 use dropshot::{HttpError, RequestContext, SharedExtractor};
 use dropshot_authorization_header::bearer::BearerAuth;
 use google_cloudkms1::{
-    api::AsymmetricSignRequest, hyper_rustls::HttpsConnector,
-    hyper_util::client::legacy::connect::HttpConnector, CloudKMS,
+    CloudKMS, api::AsymmetricSignRequest, hyper_rustls::HttpsConnector,
+    hyper_util::client::legacy::connect::HttpConnector,
 };
 use rsa::sha2::{Digest, Sha256};
 use rsa::{
