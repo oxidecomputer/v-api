@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use http::{header::USER_AGENT, HeaderMap, HeaderValue};
+use http::{HeaderMap, HeaderValue, header::USER_AGENT};
 use hyper::body::Bytes;
 use reqwest::Request;
 use secrecy::SecretString;

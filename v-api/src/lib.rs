@@ -14,10 +14,10 @@ mod secrets;
 mod util;
 
 pub use context::{
-    auth::SecretContext, ApiContext, BasePermissions, CallerExtension, ExtensionError,
-    GroupContext, LinkContext, LoginContext, MagicLinkContext, MagicLinkMessage, MagicLinkTarget,
-    MappingContext, OAuthContext, UserContext, VApiStorage, VContext, VContextBuilder,
-    VContextBuilderError, VContextError, VContextWithCaller,
+    ApiContext, BasePermissions, CallerExtension, ExtensionError, GroupContext, LinkContext,
+    LoginContext, MagicLinkContext, MagicLinkMessage, MagicLinkTarget, MappingContext,
+    OAuthContext, UserContext, VApiStorage, VContext, VContextBuilder, VContextBuilderError,
+    VContextError, VContextWithCaller, auth::SecretContext,
 };
 pub use util::response;
 

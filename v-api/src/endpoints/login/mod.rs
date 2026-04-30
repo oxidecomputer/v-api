@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use dropshot::HttpError;
 use schemars::JsonSchema;
 use serde::{
-    de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, Visitor},
 };
 use thiserror::Error;
 

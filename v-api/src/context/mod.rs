@@ -23,37 +23,37 @@ use v_model::saga::{
     view::SagaExecNodeId,
 };
 use v_model::{
+    AccessGroupId, ApiUserInfo, ApiUserProvider, LinkRequest, NewApiUser, NewApiUserProvider,
+    NewLinkRequest, UserId, UserProviderId,
     permissions::{Caller, Permission},
     storage::{
-        postgres::{PostgresError, PostgresStore},
         AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore, ApiUserFilter,
         ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, LinkRequestStore,
         ListPagination, LoginAttemptStore, MagicLinkAttemptStore, MagicLinkRedirectUriStore,
         MagicLinkSecretStore, MagicLinkStore, MapperStore, OAuthClientRedirectUriStore,
         OAuthClientSecretStore, OAuthClientStore, StoreError,
+        postgres::{PostgresError, PostgresStore},
     },
-    AccessGroupId, ApiUserInfo, ApiUserProvider, LinkRequest, NewApiUser, NewApiUserProvider,
-    NewLinkRequest, UserId, UserProviderId,
 };
 
 use crate::{
     authn::{
-        jwt::{Claims, JwtSigner, JwtSignerError, DEFAULT_JWT_EXPIRATION},
         AuthError, AuthToken, Sign, VerificationResult, Verify,
+        jwt::{Claims, DEFAULT_JWT_EXPIRATION, JwtSigner, JwtSignerError},
     },
     config::{AsymmetricKey, JwtConfig},
     endpoints::login::{
+        UserInfo,
         oauth::{
             ClientType, OAuthProvider, OAuthProviderError, OAuthProviderFn, OAuthProviderName,
         },
-        UserInfo,
     },
     error::ApiError,
     mapper::DefaultMappingEngine,
     permissions::{VAppPermission, VPermission},
     response::{OptionalResource, ResourceErrorInner},
     util::response::{
-        client_error, internal_error, resource_error, resource_restricted, ResourceResult,
+        ResourceResult, client_error, internal_error, resource_error, resource_restricted,
     },
 };
 
@@ -530,7 +530,9 @@ where
                 Ok((user, user_provider))
             }
             1 => {
-                tracing::info!("Found an existing user provider. Ensuring mapped permissions and groups for user.");
+                tracing::info!(
+                    "Found an existing user provider. Ensuring mapped permissions and groups for user."
+                );
 
                 // This branch ensures that there is a 0th indexed item
                 let mut provider = api_user_providers.into_iter().nth(0).unwrap();
@@ -949,27 +951,27 @@ mod tests {
     use newtype_uuid::TypedUuid;
     use std::{collections::BTreeSet, ops::Add, sync::Arc};
     use v_model::{
+        AccessGroup, AccessToken, AccessTokenId, ApiUser, ApiUserInfo, ApiUserProvider, UserId,
         permissions::Permissions,
         storage::{
             AccessGroupFilter, ListPagination, MockAccessGroupStore, MockAccessTokenStore,
             MockApiUserStore,
         },
-        AccessGroup, AccessToken, AccessTokenId, ApiUser, ApiUserInfo, ApiUserProvider, UserId,
     };
 
     use crate::{
+        VContextBuilder, VContextBuilderError,
         authn::{
-            jwt::{Claims, Jwt},
             AuthToken,
+            jwt::{Claims, Jwt},
         },
         context::user::UserContextError,
         permissions::VPermission,
-        VContextBuilder, VContextBuilderError,
     };
 
     use super::{
-        test_mocks::{mock_context, MockStorage},
         VContext, VContextCallerError,
+        test_mocks::{MockStorage, mock_context},
     };
 
     async fn create_token(
@@ -1167,10 +1169,12 @@ mod tests {
         let result = VContextBuilder::<VPermission>::new().build().await;
 
         match result {
-            Ok(_) => panic!("Expected to receive PostgresError::MissingRequiredConfiguration error"),
+            Ok(_) => {
+                panic!("Expected to receive PostgresError::MissingRequiredConfiguration error")
+            }
             Err(VContextBuilderError::MissingRequiredConfiguration(a)) => {
                 assert_eq!(a, "storage");
-            },
+            }
             Err(other) => panic!(
                 "Expected to receive PostgresError::MissingRequiredConfiguration error. Instead found {:?}",
                 other
@@ -1187,11 +1191,13 @@ mod tests {
             .await;
 
         match result {
-            Ok(_) => panic!("Expected to receive PostgresError::MissingRequiredConfiguration error"),
+            Ok(_) => {
+                panic!("Expected to receive PostgresError::MissingRequiredConfiguration error")
+            }
             Err(VContextBuilderError::ConfigConflict(a, b)) => {
                 assert_eq!(a, "storage");
                 assert_eq!(b, "storage_url");
-            },
+            }
             Err(other) => panic!(
                 "Expected to receive PostgresError::MissingRequiredConfiguration error. Instead found {:?}",
                 other
@@ -1208,6 +1214,13 @@ pub(crate) mod test_mocks {
     use std::{collections::HashMap, sync::Arc};
     use uuid::Uuid;
     use v_model::{
+        AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail,
+        ApiUserProvider, LinkRequestId, LoginAttemptId, MagicLink, MagicLinkAttempt,
+        MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri, MagicLinkRedirectUriId,
+        MagicLinkSecret, MagicLinkSecretId, MapperId, NewAccessGroup, NewAccessToken, NewApiKey,
+        NewApiUser, NewApiUserContactEmail, NewApiUserProvider, NewLoginAttempt, NewMagicLink,
+        NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, OAuthClientId,
+        OAuthRedirectUriId, OAuthSecretId, UserContactEmailId, UserId, UserProviderId,
         permissions::Caller,
         saga::{
             db::{
@@ -1233,22 +1246,15 @@ pub(crate) mod test_mocks {
             MockOAuthClientStore, OAuthClientRedirectUriStore, OAuthClientSecretStore,
             OAuthClientStore, StoreError,
         },
-        AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail,
-        ApiUserProvider, LinkRequestId, LoginAttemptId, MagicLink, MagicLinkAttempt,
-        MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri, MagicLinkRedirectUriId,
-        MagicLinkSecret, MagicLinkSecretId, MapperId, NewAccessGroup, NewAccessToken, NewApiKey,
-        NewApiUser, NewApiUserContactEmail, NewApiUserProvider, NewLoginAttempt, NewMagicLink,
-        NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, OAuthClientId,
-        OAuthRedirectUriId, OAuthSecretId, UserContactEmailId, UserId, UserProviderId,
     };
 
     use crate::{
+        VContextBuilder,
         config::JwtConfig,
-        endpoints::login::oauth::{google::GoogleOAuthProvider, OAuthProviderName},
+        endpoints::login::oauth::{OAuthProviderName, google::GoogleOAuthProvider},
         mapper::DefaultMappingEngine,
         permissions::VPermission,
-        util::tests::{mock_key, MockKey},
-        VContextBuilder,
+        util::tests::{MockKey, mock_key},
     };
 
     use super::VContext;

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::{hash_map::Entry, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, hash_map::Entry};
 
 use chrono::{DateTime, Utc};
 use dropshot::{
@@ -17,20 +17,20 @@ use tap::TapFallible;
 use tracing::instrument;
 use uuid::Uuid;
 use v_model::{
-    permissions::{Caller, Permission, PermissionStorage, Permissions},
-    storage::{ApiUserFilter, ApiUserProviderFilter, ListPagination},
     AccessGroupId, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserProvider, NewApiKey, NewApiUser,
     UserId,
+    permissions::{Caller, Permission, PermissionStorage, Permissions},
+    storage::{ApiUserFilter, ApiUserProviderFilter, ListPagination},
 };
 
 use crate::{
+    VContext,
     authn::key::RawKey,
     context::{ApiContext, VContextWithCaller},
     error::ApiError,
     permissions::{VAppPermission, VAppPermissionResponse},
     secrets::OpenApiSecretString,
     util::response::{bad_request, not_found, to_internal_error, unauthorized},
-    VContext,
 };
 
 fn into_user_response<T, U>(user: ApiUser<T>) -> ApiUser<U>
@@ -772,21 +772,21 @@ mod tests {
     use mockall::predicate::eq;
     use newtype_uuid::TypedUuid;
     use v_model::{
+        ApiKey, ApiUser, ApiUserContactEmail, ApiUserInfo, ApiUserProvider, NewApiUser,
         permissions::{Caller, Permissions},
         storage::{
             ApiKeyFilter, ListPagination, MockApiKeyStore, MockApiUserContactEmailStore,
             MockApiUserProviderStore, MockApiUserStore, StoreError,
         },
-        ApiKey, ApiUser, ApiUserContactEmail, ApiUserInfo, ApiUserProvider, NewApiUser,
     };
 
     use crate::{
-        context::test_mocks::{mock_context, MockStorage},
+        context::test_mocks::{MockStorage, mock_context},
         endpoints::api_user::{
+            ApiKeyCreateParams, ApiUserEmailUpdateParams, ApiUserPath, ApiUserTokenPath,
             create_api_user_inner, create_api_user_token_inner, delete_api_user_token_inner,
             get_api_user_token_inner, list_api_user_tokens_inner, set_api_user_contact_email_inner,
-            update_api_user_inner, ApiKeyCreateParams, ApiUserEmailUpdateParams, ApiUserPath,
-            ApiUserTokenPath,
+            update_api_user_inner,
         },
         permissions::{VPermission, VPermissionResponse},
         util::tests::get_status,

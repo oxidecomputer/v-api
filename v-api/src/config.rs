@@ -2,22 +2,22 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use futures::executor::block_on;
 use jsonwebtoken::jwk::{
     AlgorithmParameters, CommonParameters, Jwk, KeyAlgorithm, PublicKeyUse, RSAKeyParameters,
     RSAKeyType,
 };
 use rsa::{
+    RsaPrivateKey, RsaPublicKey,
     pkcs1v15::{SigningKey, VerifyingKey},
     pkcs8::{DecodePrivateKey, DecodePublicKey},
     traits::PublicKeyParts,
-    RsaPrivateKey, RsaPublicKey,
 };
 use secrecy::ExposeSecret;
 use serde::{
-    de::{self, Visitor},
     Deserialize, Deserializer,
+    de::{self, Visitor},
 };
 use std::path::PathBuf;
 use thiserror::Error;
@@ -25,8 +25,8 @@ use v_api_param::StringParam;
 
 use crate::{
     authn::{
-        jwt::JwtSignerError, CloudKmsError, CloudKmsSigningKey, CloudKmsVerifyingKey,
-        LocalSigningKey, LocalVerifyingKey, Signer, SignerKey, SigningKeyError, Verifier,
+        CloudKmsError, CloudKmsSigningKey, CloudKmsVerifyingKey, LocalSigningKey,
+        LocalVerifyingKey, Signer, SignerKey, SigningKeyError, Verifier, jwt::JwtSignerError,
     },
     util::cloud_kms_client,
 };
