@@ -6,11 +6,11 @@ use newtype_uuid::TypedUuid;
 use oauth2::CsrfToken;
 use std::sync::Arc;
 use v_model::{
-    storage::{ListPagination, LoginAttemptFilter, LoginAttemptStore, StoreError},
     LoginAttempt, LoginAttemptId, LoginAttemptState, NewLoginAttempt,
+    storage::{ListPagination, LoginAttemptFilter, LoginAttemptStore, StoreError},
 };
 
-use crate::{permissions::VAppPermission, VApiStorage};
+use crate::{VApiStorage, permissions::VAppPermission};
 
 #[derive(Clone)]
 pub struct LoginContext<T> {

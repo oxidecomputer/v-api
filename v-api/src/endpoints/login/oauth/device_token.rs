@@ -4,8 +4,8 @@
 
 use chrono::{DateTime, Utc};
 use dropshot::{Body, HttpError, HttpResponseOk, Method, Path, RequestContext, TypedBody};
-use http::{header, HeaderValue, Response, StatusCode};
-use oauth2::{basic::BasicTokenType, EmptyExtraTokenFields, StandardTokenResponse, TokenResponse};
+use http::{HeaderValue, Response, StatusCode, header};
+use oauth2::{EmptyExtraTokenFields, StandardTokenResponse, TokenResponse, basic::BasicTokenType};
 use schemars::JsonSchema;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};

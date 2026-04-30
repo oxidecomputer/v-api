@@ -17,7 +17,7 @@ use v_model::{
     },
 };
 
-use crate::{permissions::VAppPermission, ApiContext};
+use crate::{ApiContext, permissions::VAppPermission};
 
 /// An enriched view of a saga event that includes the node name from the dag
 #[derive(Debug, Serialize, JsonSchema)]

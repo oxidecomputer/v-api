@@ -4,10 +4,10 @@
 
 use async_trait::async_trait;
 use http::Method;
-use hyper::{body::Bytes, header::HeaderValue, header::AUTHORIZATION};
+use hyper::{body::Bytes, header::AUTHORIZATION, header::HeaderValue};
 use oauth2::{
-    basic::BasicClient, url::ParseError, AuthUrl, ClientId, ClientSecret, EndpointMaybeSet,
-    EndpointNotSet, EndpointSet, RedirectUrl, RevocationUrl, TokenUrl,
+    AuthUrl, ClientId, ClientSecret, EndpointMaybeSet, EndpointNotSet, EndpointSet, RedirectUrl,
+    RevocationUrl, TokenUrl, basic::BasicClient, url::ParseError,
 };
 use reqwest::Request;
 use schemars::JsonSchema;
@@ -18,7 +18,7 @@ use thiserror::Error;
 use tracing::instrument;
 use v_model::OAuthClient;
 
-use crate::authn::{key::RawKey, Verify};
+use crate::authn::{Verify, key::RawKey};
 
 use super::{UserInfo, UserInfoError, UserInfoProvider};
 

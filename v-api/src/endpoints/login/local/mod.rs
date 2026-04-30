@@ -4,7 +4,7 @@
 
 use chrono::{Duration, Utc};
 use dropshot::{Body, HttpError, RequestContext, TypedBody};
-use http::{header, Response, StatusCode};
+use http::{Response, StatusCode, header};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
@@ -13,7 +13,7 @@ use v_model::permissions::PermissionStorage;
 use crate::{
     authn::jwt::Claims,
     context::ApiContext,
-    endpoints::login::{oauth::device_token::ProxyTokenResponse, ExternalUserId, UserInfo},
+    endpoints::login::{ExternalUserId, UserInfo, oauth::device_token::ProxyTokenResponse},
     permissions::{VAppPermission, VPermission},
 };
 

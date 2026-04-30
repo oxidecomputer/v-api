@@ -6,19 +6,19 @@ use chrono::{TimeDelta, Utc};
 use newtype_uuid::{GenericUuid, TypedUuid};
 use std::{ops::Add, sync::Arc};
 use v_model::{
+    LinkRequest, LinkRequestId, NewLinkRequest, UserId, UserProviderId,
     permissions::Caller,
     storage::{LinkRequestStore, StoreError},
-    LinkRequest, LinkRequestId, NewLinkRequest, UserId, UserProviderId,
 };
 
 use crate::{
+    VApiStorage,
     authn::{
-        key::{RawKey, SignedKey},
         Sign,
+        key::{RawKey, SignedKey},
     },
     permissions::{VAppPermission, VPermission},
-    response::{resource_restricted, ResourceResult},
-    VApiStorage,
+    response::{ResourceResult, resource_restricted},
 };
 
 #[derive(Clone)]
