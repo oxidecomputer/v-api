@@ -6,22 +6,24 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
-use crate::cmd::{
-    auth::{login::CliMagicLinkAdapter, oauth::CliOAuthAdapter},
-    config::CliConfig,
-};
-
 pub mod cmd;
 pub mod err;
+pub mod printer;
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+use crate::cmd::auth::{login::CliMagicLinkAdapter, oauth::CliOAuthAdapter};
+pub use cmd::config::VCliConfig;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum VerbosityLevel {
     None,
     All,
 }
 
-#[derive(Copy, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Clone, Serialize, Deserialize)]
+#[derive(
+    Copy, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Clone, Serialize, Deserialize, Default,
+)]
 pub enum FormatStyle {
+    #[default]
     #[value(name = "json")]
     Json,
     #[value(name = "tab")]
@@ -37,14 +39,13 @@ impl Display for FormatStyle {
     }
 }
 
-pub trait CliContext<C, P> {
-    type Attempt;
+pub trait VCliContext<C, P> {
     type Token;
     type Error;
 
-    fn config(&self) -> &impl CliConfig;
-    fn config_mut(&mut self) -> &mut impl CliConfig;
-    fn client(&self) -> Option<&C>;
+    fn config(&self) -> &impl VCliConfig;
+    fn config_mut(&mut self) -> &mut impl VCliConfig;
+    fn client(&self) -> Option<C>;
     fn printer(&self) -> Option<&P>;
     fn verbosity(&self) -> VerbosityLevel;
 
@@ -56,7 +57,7 @@ pub trait CliContext<C, P> {
     ) -> impl CliMagicLinkAdapter<Token = Self::Token, Error = Self::Error> + Send + Sync + 'static;
 }
 
-pub trait ApiErrorMessage {
+pub trait VApiErrorMessage {
     fn message(&self) -> Option<&str>;
     fn error_code(&self) -> Option<&str>;
     fn request_id(&self) -> Option<&str>;

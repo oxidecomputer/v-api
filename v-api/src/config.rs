@@ -8,20 +8,21 @@ use jsonwebtoken::jwk::{
     AlgorithmParameters, CommonParameters, Jwk, KeyAlgorithm, PublicKeyUse, RSAKeyParameters,
     RSAKeyType,
 };
+use partial_struct::partial;
 use rsa::{
     pkcs1v15::{SigningKey, VerifyingKey},
     pkcs8::{DecodePrivateKey, DecodePublicKey},
     traits::PublicKeyParts,
     RsaPrivateKey, RsaPublicKey,
 };
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, SecretString};
 use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer,
 };
 use std::path::PathBuf;
 use thiserror::Error;
-use v_api_param::StringParam;
+use v_api_param::{ParamResolutionError, StringParam};
 
 use crate::{
     authn::{
@@ -154,23 +155,91 @@ pub struct OAuthProviders {
     pub zendesk: Option<OAuthConfig>,
 }
 
+#[partial(ResolvedOAuthConfig)]
 #[derive(Debug, Deserialize)]
 pub struct OAuthConfig {
-    pub device: OAuthDeviceConfig,
-    pub web: OAuthWebConfig,
+    #[partial(ResolvedOAuthConfig(retype = Option<ResolvedOAuthDeviceConfig>))]
+    pub device: Option<OAuthDeviceConfig>,
+    #[partial(ResolvedOAuthConfig(retype = Option<ResolvedOAuthWebConfig>))]
+    pub web: Option<OAuthWebConfig>,
+    #[partial(ResolvedOAuthConfig(retype = Option<ResolvedOAuthWebProxyConfig>))]
+    pub proxy_web: Option<OAuthWebProxyConfig>,
 }
 
+#[partial(ResolvedOAuthDeviceConfig)]
 #[derive(Debug, Deserialize)]
 pub struct OAuthDeviceConfig {
     pub client_id: String,
+    #[partial(ResolvedOAuthDeviceConfig(retype = SecretString))]
     pub client_secret: StringParam,
 }
 
+#[partial(ResolvedOAuthWebConfig)]
 #[derive(Debug, Deserialize)]
 pub struct OAuthWebConfig {
     pub client_id: String,
+    #[partial(ResolvedOAuthWebConfig(retype = SecretString))]
     pub client_secret: StringParam,
     pub redirect_uri: String,
+}
+
+#[partial(ResolvedOAuthWebProxyConfig)]
+#[derive(Debug, Deserialize)]
+pub struct OAuthWebProxyConfig {
+    pub client_id: String,
+    pub proxy_port: u16,
+}
+
+impl OAuthConfig {
+    pub fn resolve(
+        &self,
+        base: Option<PathBuf>,
+    ) -> Result<ResolvedOAuthConfig, ParamResolutionError> {
+        let device = self.device.as_ref().and_then(|d| d.resolve(base).ok());
+        let web = self.web.as_ref().and_then(|w| w.resolve(base).ok());
+        let proxy_web = self.proxy_web.as_ref().and_then(|p| p.resolve(base).ok());
+        Ok(ResolvedOAuthConfig {
+            device,
+            web,
+            proxy_web,
+        })
+    }
+}
+impl OAuthDeviceConfig {
+    pub fn resolve(
+        &self,
+        base: Option<PathBuf>,
+    ) -> Result<ResolvedOAuthDeviceConfig, ParamResolutionError> {
+        let client_secret = self.client_secret.resolve(base)?;
+        Ok(ResolvedOAuthDeviceConfig {
+            client_id: self.client_id.clone(),
+            client_secret,
+        })
+    }
+}
+impl OAuthWebConfig {
+    pub fn resolve(
+        &self,
+        base: Option<PathBuf>,
+    ) -> Result<ResolvedOAuthWebConfig, ParamResolutionError> {
+        let client_secret = self.client_secret.resolve(base)?;
+        Ok(ResolvedOAuthWebConfig {
+            client_id: self.client_id.clone(),
+            client_secret,
+            redirect_uri: self.redirect_uri.clone(),
+        })
+    }
+}
+impl OAuthWebProxyConfig {
+    pub fn resolve(
+        &self,
+        base: Option<PathBuf>,
+    ) -> Result<ResolvedOAuthWebProxyConfig, ParamResolutionError> {
+        Ok(ResolvedOAuthWebProxyConfig {
+            client_id: self.client_id.clone(),
+            proxy_port: self.proxy_port,
+        })
+    }
 }
 
 impl AsymmetricKey {

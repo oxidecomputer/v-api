@@ -4,27 +4,28 @@
 
 use hyper::body::Bytes;
 use reqwest::Request;
-use secrecy::SecretString;
 use serde::Deserialize;
 use std::fmt;
 
-use crate::endpoints::login::{ExternalUserId, UserInfo, UserInfoError};
-
-use super::{
-    ClientType, ExtractUserInfo, OAuthPrivateCredentials, OAuthProvider, OAuthProviderName,
-    OAuthPublicCredentials,
+use crate::{
+    config::ResolvedOAuthConfig,
+    endpoints::login::{
+        oauth::{
+            OAuthProviderAuthorizationCodeInfo, OAuthProviderAuthorizationCodePkceInfo,
+            OAuthProviderDeviceInfo,
+        },
+        ExternalUserId, UserInfo, UserInfoError,
+    },
 };
 
+use super::{ExtractUserInfo, OAuthProvider, OAuthProviderName};
+
 pub struct GoogleOAuthProvider {
-    device_public: OAuthPublicCredentials,
-    device_private: Option<OAuthPrivateCredentials>,
-    web_public: OAuthPublicCredentials,
-    web_private: Option<OAuthPrivateCredentials>,
-    additional_scopes: Vec<String>,
+    authz_code_flow_info: Option<OAuthProviderAuthorizationCodeInfo>,
+    authz_code_pkce_flow_info: Option<OAuthProviderAuthorizationCodePkceInfo>,
+    device_code_flow_info: Option<OAuthProviderDeviceInfo>,
+    default_scopes: Vec<String>,
     client: reqwest::Client,
-    token_endpoint: Option<String>,
-    redirect_endpoint: Option<String>,
-    redirect_proxy_endpoint: Option<String>,
 }
 
 impl fmt::Debug for GoogleOAuthProvider {
@@ -35,34 +36,56 @@ impl fmt::Debug for GoogleOAuthProvider {
 
 impl GoogleOAuthProvider {
     pub fn new(
+        config: ResolvedOAuthConfig,
         public_url: String,
-        device_client_id: String,
-        device_client_secret: SecretString,
-        web_client_id: String,
-        web_client_secret: SecretString,
         additional_scopes: Option<Vec<String>>,
     ) -> Self {
+        let mut default_scopes = vec![
+            "openid".to_string(),
+            "email".to_string(),
+            "profile".to_string(),
+        ];
+        default_scopes.extend(additional_scopes.unwrap_or_default());
+
+        let authz_code_flow_info = config.web.map(|web| OAuthProviderAuthorizationCodeInfo {
+            client_id: web.client_id,
+            client_secret: web.client_secret.into(),
+            auth_url_endpoint: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
+            redirect_endpoint: format!("{}/login/oauth/github/code/callback", public_url,),
+            token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
+            token_endpoint: "https://oauth2.googleapis.com/token".to_string(),
+            revocation_endpoint: None,
+        });
+        let authz_code_pkce_flow_info =
+            config
+                .proxy_web
+                .map(|proxy| OAuthProviderAuthorizationCodePkceInfo {
+                    client_id: proxy.client_id,
+                    auth_url_endpoint: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
+                    redirect_endpoint: format!("{}/login/oauth/github/code/callback", public_url,),
+                    token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
+                    token_endpoint: "https://oauth2.googleapis.com/token".to_string(),
+                    proxy_port: proxy.proxy_port,
+                    revocation_endpoint: None,
+                });
+        let device_code_flow_info = config.device.map(|device| OAuthProviderDeviceInfo {
+            client_id: device.client_id,
+            client_secret: device.client_secret.into(),
+            device_code_endpoint: "https://github.com/login/device/code".to_string(),
+            token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
+            token_endpoint: "https://github.com/login/oauth/access_token".to_string(),
+            revocation_endpoint: None,
+        });
+
         Self {
-            device_public: OAuthPublicCredentials {
-                client_id: device_client_id,
-            },
-            device_private: Some(OAuthPrivateCredentials {
-                client_secret: device_client_secret,
-            }),
-            web_public: OAuthPublicCredentials {
-                client_id: web_client_id,
-            },
-            web_private: Some(OAuthPrivateCredentials {
-                client_secret: web_client_secret,
-            }),
-            additional_scopes: additional_scopes.unwrap_or_default(),
+            authz_code_flow_info,
+            authz_code_pkce_flow_info,
+            device_code_flow_info,
+            default_scopes,
             client: reqwest::ClientBuilder::new()
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .expect("Static client must build"),
-            token_endpoint: Some(format!("{}/login/oauth/google/device/exchange", public_url)),
-            redirect_endpoint: Some(format!("{}/login/oauth/google/code/callback", public_url,)),
-            redirect_proxy_endpoint: None,
         }
     }
 
@@ -129,77 +152,27 @@ impl OAuthProvider for GoogleOAuthProvider {
     fn name(&self) -> OAuthProviderName {
         OAuthProviderName::Google
     }
-
-    fn scopes(&self) -> Vec<&str> {
-        let mut default = vec!["openid", "email", "profile"];
-        default.extend(self.additional_scopes.iter().map(|s| s.as_str()));
-        default
-    }
-
     fn initialize_headers(&self, _request: &mut Request) {}
-
     fn client(&self) -> &reqwest::Client {
         &self.client
     }
-
-    fn client_id(&self, client_type: &ClientType) -> &str {
-        match client_type {
-            ClientType::Device => &self.device_public.client_id,
-            ClientType::Web => &self.web_public.client_id,
-        }
-    }
-
-    fn client_secret(&self, client_type: &ClientType) -> Option<&SecretString> {
-        match client_type {
-            ClientType::Device => self
-                .device_private
-                .as_ref()
-                .map(|private| &private.client_secret),
-            ClientType::Web => self
-                .web_private
-                .as_ref()
-                .map(|private| &private.client_secret),
-        }
-    }
-
     fn user_info_endpoints(&self) -> Vec<&str> {
         vec![
             "https://openidconnect.googleapis.com/v1/userinfo",
             "https://people.googleapis.com/v1/people/me?personFields=names",
         ]
     }
-
-    fn device_code_endpoint(&self) -> Option<&str> {
-        Some("https://oauth2.googleapis.com/device/code")
+    fn default_scopes(&self) -> &[String] {
+        &self.default_scopes
     }
 
-    fn auth_url_endpoint(&self) -> &str {
-        "https://accounts.google.com/o/oauth2/v2/auth"
+    fn authz_code_flow_info(&self) -> Option<&OAuthProviderAuthorizationCodeInfo> {
+        self.authz_code_flow_info.as_ref()
     }
-
-    fn token_exchange_content_type(&self) -> &str {
-        "application/x-www-form-urlencoded"
+    fn authz_code_pkce_flow_info(&self) -> Option<&OAuthProviderAuthorizationCodePkceInfo> {
+        None
     }
-
-    fn token_exchange_endpoint(&self) -> &str {
-        "https://oauth2.googleapis.com/token"
-    }
-
-    fn token_revocation_endpoint(&self) -> Option<&str> {
-        Some("https://oauth2.googleapis.com/revoke")
-    }
-
-    fn supports_pkce(&self) -> bool {
-        true
-    }
-
-    fn token_endpoint(&self) -> Option<&str> {
-        self.token_endpoint.as_deref()
-    }
-    fn redirect_endpoint(&self) -> Option<&str> {
-        self.redirect_endpoint.as_deref()
-    }
-    fn redirect_proxy_endpoint(&self) -> Option<&str> {
-        self.redirect_proxy_endpoint.as_deref()
+    fn device_code_flow_info(&self) -> Option<&OAuthProviderDeviceInfo> {
+        self.device_code_flow_info.as_ref()
     }
 }

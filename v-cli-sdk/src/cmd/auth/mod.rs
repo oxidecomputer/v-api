@@ -6,7 +6,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::error::Error as StdError;
 
-use crate::{cmd::auth::login::CliConsumerLoginProvider, CliContext};
+use crate::{cmd::auth::login::CliConsumerLoginProvider, VCliContext};
 
 pub mod login;
 pub mod oauth;
@@ -36,10 +36,10 @@ impl<P> Auth<P>
 where
     P: CliConsumerLoginProvider,
 {
-    pub async fn run<T, C>(&self, ctx: &mut T) -> Result<()>
+    pub async fn run<T, C, R>(&self, ctx: &mut T) -> Result<()>
     where
-        T: CliContext<C, P>,
-        <T as CliContext<C, P>>::Error: StdError + Send + Sync + 'static,
+        T: VCliContext<C, R>,
+        <T as VCliContext<C, R>>::Error: StdError + Send + Sync + 'static,
     {
         match &self.auth {
             AuthCommands::Login(login) => login.run(ctx).await,

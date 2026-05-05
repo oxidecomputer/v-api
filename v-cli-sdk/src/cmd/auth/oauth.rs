@@ -12,17 +12,18 @@ use http::{Request, Response, StatusCode};
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
 use oauth2::basic::{BasicClient, BasicTokenType};
-use oauth2::StandardDeviceAuthorizationResponse;
 use oauth2::{
     AuthType, AuthUrl, ClientId, CsrfToken, DeviceAuthorizationUrl, EmptyExtraTokenFields,
     EndpointNotSet, EndpointSet, RedirectUrl, Scope, StandardTokenResponse, TokenUrl,
 };
-use reqwest::Url;
+use oauth2::{PkceCodeChallenge, StandardDeviceAuthorizationResponse};
 use tokio::sync::oneshot;
 
 use crate::cmd::auth::login::CliAdapterToken;
 
 use super::proxy::run_proxy_server;
+
+static PROXY_PORT: u16 = 8174;
 
 pub trait CliOAuthAdapter {
     type Token: CliAdapterToken;
@@ -30,7 +31,7 @@ pub trait CliOAuthAdapter {
 
     fn provider(
         &self,
-        provider: &super::login::LoginProvider,
+        provider: super::login::LoginProvider,
     ) -> Pin<Box<dyn Future<Output = Result<impl CliOAuthProviderInfo, Self::Error>> + Send>>;
     fn exchange_authorization_code(
         &self,
@@ -43,10 +44,11 @@ pub trait CliOAuthAdapter {
 }
 
 pub trait CliOAuthProviderInfo {
+    fn supports_pkce_only(&self) -> bool;
     fn device_code_endpoint(&self) -> Option<&str>;
-    fn code_redirect_proxy_endpoint(&self) -> Option<&str>;
     fn auth_url_endpoint(&self) -> &str;
     fn token_endpoint(&self) -> &str;
+    fn redirect_endpoint(&self) -> Option<&str>;
     fn client_id(&self) -> &str;
     fn scopes(&self) -> &[String];
 }
@@ -75,45 +77,34 @@ impl CodeOAuth {
     where
         T: CliOAuthProviderInfo,
     {
-        let redirect_url = provider
-            .code_redirect_proxy_endpoint()
-            .ok_or_else(|| anyhow::anyhow!("Provider does not support code redirect proxy flow"))?;
-
-        let parsed_url = Url::parse(redirect_url)?;
-
-        let port = parsed_url.port().ok_or_else(|| {
-            anyhow::anyhow!("Provider proxy url does not have a defined port to listen on")
-        })?;
-
-        if parsed_url.scheme() != "http" {
-            anyhow::bail!("Provider proxy url scheme must be http");
-        }
-
-        if parsed_url
-            .host_str()
-            .map(|h| h != "localhost" && h != "127.0.0.1")
-            .unwrap_or(true)
-        {
-            anyhow::bail!("Provider proxy url host must be localhost");
-        }
-
         let client = BasicClient::new(ClientId::new(provider.client_id().to_string()))
             .set_auth_uri(AuthUrl::new(provider.auth_url_endpoint().to_string())?)
             .set_auth_type(AuthType::RequestBody)
             .set_token_uri(TokenUrl::new(provider.token_endpoint().to_string())?)
-            .set_redirect_uri(RedirectUrl::new(redirect_url.to_string())?);
+            .set_redirect_uri(RedirectUrl::new(
+                provider
+                    .redirect_endpoint()
+                    .expect("OAuth code flow provider must define a redirect url")
+                    .to_string(),
+            )?);
 
         Ok(Self {
             client,
             scopes: provider.scopes().iter().map(|s| s.to_string()).collect(),
-            port,
+            port: PROXY_PORT,
         })
     }
 
     /// Build the authorization URL that the user should visit in a browser.
     /// Returns the full URL and the CSRF state token used for verification.
-    pub fn authorize_url(&self) -> (oauth2::url::Url, CsrfToken) {
-        let mut req = self.client.authorize_url(CsrfToken::new_random);
+    pub fn authorize_url(
+        &self,
+        pkce_challenge: PkceCodeChallenge,
+    ) -> (oauth2::url::Url, CsrfToken) {
+        let mut req = self
+            .client
+            .authorize_url(CsrfToken::new_random)
+            .set_pkce_challenge(pkce_challenge);
 
         for scope in &self.scopes {
             req = req.add_scope(Scope::new(scope.to_string()));
@@ -133,7 +124,8 @@ impl CodeOAuth {
     where
         T: CliOAuthAdapter + Send + Sync + 'static,
     {
-        let (auth_url, _csrf_state) = self.authorize_url();
+        let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+        let (auth_url, _csrf_state) = self.authorize_url(pkce_challenge);
 
         println!(
             "Open the following URL in your browser to authenticate:\n\n  {}\n",

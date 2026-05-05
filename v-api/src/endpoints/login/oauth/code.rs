@@ -12,7 +12,7 @@ use dropshot::{
 };
 use dropshot_authorization_header::basic::BasicAuth;
 use http::{header::SET_COOKIE, HeaderValue};
-use newtype_uuid::TypedUuid;
+use newtype_uuid::{GenericUuid, TypedUuid};
 use oauth2::{
     AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope, TokenResponse,
 };
@@ -24,6 +24,7 @@ use sha2::{Digest, Sha256};
 use std::{fmt::Debug, ops::Add};
 use tap::TapFallible;
 use tracing::instrument;
+use uuid::Uuid;
 use v_model::{
     permissions::{AsScope, PermissionStorage},
     schema_ext::LoginAttemptState,
@@ -35,11 +36,12 @@ use crate::{
     authn::key::RawKey,
     context::{ApiContext, VContext},
     endpoints::login::{
-        oauth::{CheckOAuthClient, ClientType},
+        oauth::{CheckOAuthClient, ClientType, OAuthProviderAuthorizationCodePkceInfo},
         LoginError, UserInfo,
     },
     error::ApiError,
     permissions::{VAppPermission, VPermission},
+    response::bad_request,
     secrets::OpenApiSecretString,
     util::{
         request::RequestCookies,
@@ -153,6 +155,32 @@ where
 }
 
 #[instrument(skip(rqctx), err(Debug))]
+pub async fn get_web_pkce_provider_op<T>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+    path: Path<OAuthProviderNameParam>,
+) -> Result<HttpResponseOk<OAuthProviderAuthorizationCodePkceInfo>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+{
+    let path = path.into_inner();
+
+    tracing::trace!("Getting OAuth data for {}", path.provider);
+
+    let provider = rqctx
+        .v_ctx()
+        .get_oauth_provider(&path.provider)
+        .await
+        .map_err(ApiError::OAuth)?;
+
+    Ok(HttpResponseOk(
+        provider
+            .authz_code_pkce_flow_info()
+            .cloned()
+            .ok_or_else(|| bad_request("Provider does not support web pkce clients"))?,
+    ))
+}
+
+#[instrument(skip(rqctx), err(Debug))]
 pub async fn authz_code_redirect_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<OAuthProviderNameParam>,
@@ -256,7 +284,7 @@ fn oauth_redirect_response(
         .authorize_url(|| CsrfToken::new(attempt.id.to_string()))
         .add_scopes(
             provider
-                .scopes()
+                .default_scopes()
                 .into_iter()
                 .map(|s| Scope::new(s.to_string()))
                 .collect::<Vec<_>>(),
@@ -306,7 +334,7 @@ fn verify_csrf(
         .value()
         .parse()
         .map_err(|err| {
-            tracing::warn!(?err, "Failed to parse state");
+            tracing::warn!(?err, "Failed to parse state cookie");
             unauthorized()
         })?;
 
@@ -480,46 +508,71 @@ where
     let query = query.into_inner();
     let body = body.into_inner();
 
-    let (client_id, client_secret) =
-        if let (Some(client_id), Some(client_secret)) = (body.client_id, body.client_secret) {
-            Ok::<_, HttpError>((client_id, client_secret))
-        } else {
-            // Attempt to extract basic authorization credentials from the request if they were not
-            // present in the request body
-            let auth = <BasicAuth as SharedExtractor>::from_request(rqctx)
-                .await
-                .tap_err(|err| {
-                    tracing::warn!(?err, "Failed to extract basic authentication values");
-                });
-            let (client_id, client_secret) = match auth {
-                Ok(auth) if auth.username().is_some() && auth.password().is_some() => Ok((
-                    auth.username().unwrap().to_string(),
-                    auth.password().unwrap().to_string(),
-                )),
-                _ => Err(internal_error(
-                    "Missing client id and client secret from authz code exchange",
-                )),
-            }?;
-
-            Ok((
-                client_id.parse().map_err(to_internal_error)?,
-                OpenApiSecretString(client_secret.into()),
-            ))
-        }?;
-
     let provider = ctx
         .get_oauth_provider(&path.provider)
         .await
         .map_err(ApiError::OAuth)?;
+
+    // Extract basic authorization credentials from the request if they were provided.
+    let auth = <BasicAuth as SharedExtractor>::from_request(rqctx)
+        .await
+        .tap_err(|err| {
+            tracing::warn!(?err, "Failed to extract basic authentication values");
+        });
+    let basic_credentials = match auth {
+        Ok(auth) if auth.username().is_some() && auth.password().is_some() => Ok(Some((
+            TypedUuid::from_untyped_uuid(
+                Uuid::parse_str(auth.username().unwrap())
+                    .map_err(|_| bad_request("Malformed client ID presented to code exchange"))?,
+            ),
+            auth.password().unwrap().to_string(),
+        ))),
+        Ok(_) => Err(bad_request(
+            "Malformed credentials presented to code exchange",
+        )),
+        Err(err) => {
+            tracing::info!(
+                ?err,
+                "Credentials for code exchange not defined via basic auth"
+            );
+            Ok(None)
+        }
+    }?;
+
+    // Extract credentials from the request body if they were provided.
+    let body_credentials = (body.client_id, body.client_secret);
+
+    // Now validate if the credentials provided by the client support one of our expected schemes.
+    // We of course deny underspecifying credentials, but we also want to disallow over specifying
+    // them. For example, if the client provides both basic auth and a client id/secret in the
+    // request body, we should reject the request.
+    let (client_id, client_secret) = match (basic_credentials, body_credentials) {
+        (Some(_), (Some(_), _)) => Err(bad_request(
+            "Cannot provide both basic auth and client credentials",
+        )),
+        (Some(_), (_, Some(_))) => Err(bad_request(
+            "Cannot provide both basic auth and client credentials",
+        )),
+        (Some((client_id, client_secret)), (None, None)) => Ok((
+            client_id,
+            Some(OpenApiSecretString(SecretString::from(client_secret))),
+        )),
+        (None, (Some(client_id), Some(client_secret))) => Ok((client_id, Some(client_secret))),
+        (None, (Some(client_id), _)) if provider.authz_code_pkce_flow_info().is_some() => {
+            Ok((client_id, None))
+        }
+        _ => Err(bad_request("Missing client credentials")),
+    }?;
 
     tracing::debug!("Attempting code exchange");
 
     // Verify the submitted client credentials
     authorize_code_exchange(
         ctx,
+        &*provider,
         &body.grant_type,
         client_id,
-        &client_secret.0,
+        client_secret.map(|s| s.0).as_ref(),
         &body.redirect_uri,
     )
     .await?;
@@ -614,9 +667,10 @@ where
 
 async fn authorize_code_exchange<T>(
     ctx: &VContext<T>,
+    provider: &dyn OAuthProvider,
     grant_type: &str,
     client_id: TypedUuid<OAuthClientId>,
-    client_secret: &SecretString,
+    client_secret: Option<&SecretString>,
     redirect_uri: &str,
 ) -> Result<(), OAuthError>
 where
@@ -636,30 +690,44 @@ where
 
     tracing::debug!(grant_type, "Verified grant type");
 
-    let client_secret = RawKey::try_from(client_secret).map_err(|err| {
-        tracing::warn!(?err, "Failed to parse OAuth client secret");
+    // If we were provided a client secret, then it must be verified. If a client secret was not
+    // provided, then we can skip this step as long as the provider supports pkce_only
+    // authentication.
+    if let Some(client_secret) = client_secret {
+        let client_secret = RawKey::try_from(client_secret).map_err(|err| {
+            tracing::warn!(?err, "Failed to parse OAuth client secret");
 
-        OAuthError {
-            error: OAuthErrorCode::InvalidRequest,
-            error_description: Some("Malformed client secret".to_string()),
-            error_uri: None,
-            state: None,
+            OAuthError {
+                error: OAuthErrorCode::InvalidRequest,
+                error_description: Some("Malformed client secret".to_string()),
+                error_uri: None,
+                state: None,
+            }
+        })?;
+
+        tracing::debug!("Constructed client secret");
+
+        if !client.is_secret_valid(&client_secret, ctx) {
+            Err(OAuthError {
+                error: OAuthErrorCode::InvalidClient,
+                error_description: Some("Invalid client secret".to_string()),
+                error_uri: None,
+                state: None,
+            })
+        } else {
+            tracing::debug!("Verified client secret validity");
+
+            Ok(())
         }
-    })?;
-
-    tracing::debug!("Constructed client secret");
-
-    if !client.is_secret_valid(&client_secret, ctx) {
+    } else if provider.authz_code_pkce_flow_info().is_some() {
+        Ok(())
+    } else {
         Err(OAuthError {
-            error: OAuthErrorCode::InvalidClient,
-            error_description: Some("Invalid client secret".to_string()),
+            error: OAuthErrorCode::InvalidRequest,
+            error_description: Some("Client secret required".to_string()),
             error_uri: None,
             state: None,
         })
-    } else {
-        tracing::debug!("Verified client secret validity");
-
-        Ok(())
     }
 }
 
@@ -735,6 +803,9 @@ async fn fetch_user_info(
     attempt: &LoginAttempt,
     return_raw: bool,
 ) -> Result<(UserInfo, Option<String>), HttpError> {
+    let provider_info = provider
+        .authz_code_flow_info()
+        .ok_or_else(|| internal_error("Authorization code flow not supported"))?;
     // Exchange the stored authorization code with the remote provider for a remote access token
     let client = provider.as_web_client().map_err(to_internal_error)?;
 
@@ -771,7 +842,7 @@ async fn fetch_user_info(
 
     // Now that we are done with fetching user information from the remote API, we can revoke it if
     // the provider supports it
-    if !return_raw && provider.token_revocation_endpoint().is_some() {
+    if !return_raw && provider_info.revocation_endpoint.is_some() {
         client
             .revoke_token(response.access_token().into())
             .map_err(internal_error)?
@@ -1295,15 +1366,20 @@ mod tests {
         storage.oauth_client_store = Some(Arc::new(client_store));
 
         ctx.set_storage(Arc::new(storage));
+        let provider = ctx
+            .get_oauth_provider(&OAuthProviderName::Google)
+            .await
+            .unwrap();
 
         // 1. Verify exchange fails when passing an incorrect client id
         assert_eq!(
             Some("Unknown client id".to_string()),
             authorize_code_exchange(
                 &ctx,
+                &*provider,
                 "authorization_code",
                 wrong_client_id,
-                &client_secret,
+                Some(&client_secret),
                 &redirect_uri,
             )
             .await
@@ -1316,9 +1392,10 @@ mod tests {
             Some("Invalid redirect uri".to_string()),
             authorize_code_exchange(
                 &ctx,
+                &*provider,
                 "authorization_code",
                 client_id,
-                &client_secret,
+                Some(&client_secret),
                 "wrong-callback-destination",
             )
             .await
@@ -1326,14 +1403,75 @@ mod tests {
             .error_description
         );
 
-        // 3. Verify a successful exchange
+        // 3. Verify a successful exchange with a client secret
         assert_eq!(
             (),
             authorize_code_exchange(
                 &ctx,
+                &*provider,
                 "authorization_code",
                 client_id,
-                &client_secret,
+                Some(&client_secret),
+                &redirect_uri,
+            )
+            .await
+            .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_exchange_requires_secret_except_for_pkce_only() {
+        let (mut ctx, client, _) = mock_client().await;
+        let client_id = client.id;
+        let redirect_uri = client.redirect_uris[0].redirect_uri.clone();
+
+        let mut client_store = MockOAuthClientStore::new();
+        client_store
+            .expect_get()
+            .with(eq(client_id), eq(false))
+            .returning(move |_, _| Ok(Some(client.clone())));
+
+        let mut storage = MockStorage::new();
+        storage.oauth_client_store = Some(Arc::new(client_store));
+
+        ctx.set_storage(Arc::new(storage));
+
+        let provider = ctx
+            .get_oauth_provider(&OAuthProviderName::Google)
+            .await
+            .unwrap();
+        let pkce_only_provider = ctx
+            .get_oauth_provider(&OAuthProviderName::Zendesk)
+            .await
+            .unwrap();
+
+        // 1. Verify exchange fails when not passing a client secret for a client that does not
+        // support pkce_only
+        assert_eq!(
+            Some("Client secret required".to_string()),
+            authorize_code_exchange(
+                &ctx,
+                &*provider,
+                "authorization_code",
+                client_id,
+                None,
+                &redirect_uri,
+            )
+            .await
+            .unwrap_err()
+            .error_description
+        );
+
+        // 2. Verify exchange passes when omitting the client secret for a client that does
+        // support pkce_only
+        assert_eq!(
+            (),
+            authorize_code_exchange(
+                &ctx,
+                &*pkce_only_provider,
+                "authorization_code",
+                client_id,
+                None,
                 &redirect_uri,
             )
             .await
@@ -1357,14 +1495,19 @@ mod tests {
         storage.oauth_client_store = Some(Arc::new(client_store));
 
         ctx.set_storage(Arc::new(storage));
+        let provider = ctx
+            .get_oauth_provider(&OAuthProviderName::Google)
+            .await
+            .unwrap();
 
         assert_eq!(
             OAuthErrorCode::UnsupportedGrantType,
             authorize_code_exchange(
                 &ctx,
+                &*provider,
                 "not_authorization_code",
                 client_id,
-                &client_secret,
+                Some(&client_secret),
                 &redirect_uri
             )
             .await
@@ -1376,9 +1519,10 @@ mod tests {
             (),
             authorize_code_exchange(
                 &ctx,
+                &*provider,
                 "authorization_code",
                 client_id,
-                &client_secret,
+                Some(&client_secret),
                 &redirect_uri
             )
             .await
@@ -1402,6 +1546,10 @@ mod tests {
         storage.oauth_client_store = Some(Arc::new(client_store));
 
         ctx.set_storage(Arc::new(storage));
+        let provider = ctx
+            .get_oauth_provider(&OAuthProviderName::Google)
+            .await
+            .unwrap();
 
         let invalid_secret = RawKey::generate::<8>(&Uuid::new_v4())
             .sign(&*ctx.signer())
@@ -1414,9 +1562,10 @@ mod tests {
             OAuthErrorCode::InvalidRequest,
             authorize_code_exchange(
                 &ctx,
+                &*provider,
                 "authorization_code",
                 client_id,
-                &"too-short".to_string().into(),
+                Some(&"too-short".to_string().into()),
                 &redirect_uri
             )
             .await
@@ -1428,9 +1577,10 @@ mod tests {
             OAuthErrorCode::InvalidClient,
             authorize_code_exchange(
                 &ctx,
+                &*provider,
                 "authorization_code",
                 client_id,
-                &invalid_secret.into(),
+                Some(&invalid_secret.into()),
                 &redirect_uri
             )
             .await
@@ -1442,9 +1592,10 @@ mod tests {
             (),
             authorize_code_exchange(
                 &ctx,
+                &*provider,
                 "authorization_code",
                 client_id,
-                &client_secret,
+                Some(&client_secret),
                 &redirect_uri
             )
             .await

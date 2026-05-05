@@ -8,11 +8,8 @@ use oauth2::TokenResponse;
 use std::{error::Error as StdError, fmt::Debug, future::Future, io::Write, pin::Pin, sync::Arc};
 
 use crate::{
-    cmd::{
-        auth::oauth::{self, CliOAuthAdapter, CliOAuthProviderInfo},
-        config::CliConfig,
-    },
-    CliContext,
+    cmd::auth::oauth::{self, CliOAuthAdapter, CliOAuthProviderInfo},
+    VCliConfig, VCliContext,
 };
 
 pub trait CliAdapterToken {
@@ -25,12 +22,12 @@ impl<T> CliConsumerLoginProvider for T where T: Into<LoginProvider> + Subcommand
 // Authenticates and generates an access token for interacting with the api
 #[derive(Parser, Debug, Clone)]
 #[clap(name = "login")]
-pub struct Login<P>
+pub struct Login<SupportedProviders>
 where
-    P: CliConsumerLoginProvider,
+    SupportedProviders: CliConsumerLoginProvider,
 {
     #[command(subcommand)]
-    method: LoginMethod<P>,
+    method: LoginMethod<SupportedProviders>,
     #[arg(short = 'm', default_value = "id")]
     mode: AuthenticationMode,
 }
@@ -41,8 +38,8 @@ where
 {
     pub async fn run<T, C, R>(&self, ctx: &mut T) -> Result<()>
     where
-        T: CliContext<C, R>,
-        <T as CliContext<C, R>>::Error: StdError + Send + Sync + 'static,
+        T: VCliContext<C, R>,
+        <T as VCliContext<C, R>>::Error: StdError + Send + Sync + 'static,
     {
         let access_token = self.method.run(ctx, &self.mode).await?;
 
@@ -54,15 +51,15 @@ where
 }
 
 #[derive(Subcommand, Debug, Clone)]
-pub enum LoginMethod<P>
+pub enum LoginMethod<SupportedProviders>
 where
-    P: Subcommand + Debug + Clone,
+    SupportedProviders: Subcommand + Debug + Clone,
 {
     #[command(name = "oauth")]
     /// Login via OAuth
     OAuth {
         #[command(subcommand)]
-        provider: P,
+        provider: SupportedProviders,
     },
     /// Login via Magic Link
     #[command(name = "mlink")]
@@ -96,20 +93,20 @@ pub enum AuthenticationMode {
     Remote,
 }
 
-impl<P> LoginMethod<P>
+impl<SupportedProviders> LoginMethod<SupportedProviders>
 where
-    P: CliConsumerLoginProvider,
+    SupportedProviders: CliConsumerLoginProvider,
 {
     pub async fn run<T, C, R>(&self, ctx: &T, mode: &AuthenticationMode) -> Result<String>
     where
-        T: CliContext<C, R>,
-        <T as CliContext<C, R>>::Error: StdError + Send + Sync + 'static,
+        T: VCliContext<C, R>,
+        <T as VCliContext<C, R>>::Error: StdError + Send + Sync + 'static,
     {
         match self {
             Self::OAuth { provider } => {
                 let adapter = ctx.oauth_adapter();
                 let provider = provider.clone().into();
-                let provider = adapter.provider(&provider).await?;
+                let provider = adapter.provider(provider).await?;
 
                 // We now need to inspect the provider to determine the correct flow to use. If
                 // possible we use a limited input device flow, but not all providers support it.
@@ -118,7 +115,7 @@ where
                 if provider.device_code_endpoint().is_some() {
                     self.run_oauth_device_provider(provider, mode, ctx.oauth_adapter())
                         .await
-                } else if provider.code_redirect_proxy_endpoint().is_some() {
+                } else if provider.supports_pkce_only() {
                     self.run_oauth_code_provider(provider, mode, ctx.oauth_adapter())
                         .await
                 } else {
@@ -170,13 +167,13 @@ where
 
     async fn run_oauth_code_provider<T, V>(
         &self,
-        provider: V,
+        provider: T,
         mode: &AuthenticationMode,
-        adapter: T,
+        adapter: V,
     ) -> Result<String>
     where
-        T: CliOAuthAdapter + Send + Sync + 'static,
-        V: CliOAuthProviderInfo,
+        T: CliOAuthProviderInfo,
+        V: CliOAuthAdapter + Send + Sync + 'static,
     {
         let oauth_client = oauth::CodeOAuth::new(provider)?;
         let adapter = Arc::new(adapter);

@@ -71,6 +71,7 @@ mod macros {
                         },
                         code::{
                             authz_code_callback_op, authz_code_exchange_op, authz_code_redirect_op,
+                            get_web_pkce_provider_op,
                             OAuthAuthzCodeExchangeBody, OAuthAuthzCodeExchangeResponse,
                             OAuthAuthzCodeQuery, OAuthAuthzCodeReturnQuery, OAuthAuthzCodeExchangeQuery
                         },
@@ -304,7 +305,19 @@ mod macros {
 
             // DEVICE CODE
 
-            /// Retrieve the metadata about an OAuth provider
+            /// Retrieve the metadata about an OAuth provider for public authorization code flow
+            #[endpoint {
+                method = GET,
+                path = "/login/oauth/{provider}/web-pkce"
+            }]
+            pub async fn get_web_pkce_provider(
+                rqctx: RequestContext<$context_type>,
+                path: Path<OAuthProviderNameParam>,
+            ) -> Result<HttpResponseOk<OAuthProviderInfo>, HttpError> {
+                get_web_pkce_provider_op(&rqctx, path).await
+            }
+
+            /// Retrieve the metadata about an OAuth provider for limited input flow
             #[endpoint {
                 method = GET,
                 path = "/login/oauth/{provider}/device"
@@ -757,7 +770,9 @@ mod macros {
             $api.register(authz_code_exchange)
                 .expect("Failed to register endpoint");
 
-            // OAuth Device Login
+            // OAuth Login
+            $api.register(get_web_provider)
+                .expect("Failed to register endpoint");
             $api.register(get_device_provider)
                 .expect("Failed to register endpoint");
             $api.register(exchange_device_token)

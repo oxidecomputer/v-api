@@ -14,19 +14,21 @@ use tap::TapFallible;
 use tracing::instrument;
 use v_model::permissions::PermissionStorage;
 
-use super::{
-    ClientType, OAuthProvider, OAuthProviderInfo, OAuthProviderNameParam, UserInfoProvider,
-};
+use super::{OAuthProviderNameParam, UserInfoProvider};
 use crate::{
-    context::ApiContext, endpoints::login::LoginError, error::ApiError,
-    permissions::VAppPermission, response::internal_error, util::response::bad_request,
+    context::ApiContext,
+    endpoints::login::{oauth::OAuthProviderDeviceInfo, LoginError},
+    error::ApiError,
+    permissions::VAppPermission,
+    response::internal_error,
+    util::response::bad_request,
 };
 
 #[instrument(skip(rqctx), err(Debug))]
 pub async fn get_device_provider_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<OAuthProviderNameParam>,
-) -> Result<HttpResponseOk<OAuthProviderInfo>, HttpError>
+) -> Result<HttpResponseOk<OAuthProviderDeviceInfo>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
 {
@@ -40,10 +42,15 @@ where
         .await
         .map_err(ApiError::OAuth)?;
 
-    Ok(HttpResponseOk(provider.provider_info(&ClientType::Device)))
+    Ok(HttpResponseOk(
+        provider
+            .device_code_flow_info()
+            .cloned()
+            .ok_or_else(|| bad_request("Provider does not support device clients"))?,
+    ))
 }
 
-#[derive(Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AccessTokenExchangeRequest {
     pub device_code: String,
     pub grant_type: String,
@@ -65,21 +72,16 @@ pub struct ProviderTokenExchange {
 }
 
 impl AccessTokenExchange {
-    pub fn new(
-        req: AccessTokenExchangeRequest,
-        provider: &(dyn OAuthProvider + Send + Sync),
-    ) -> Option<Self> {
-        provider
-            .client_secret(&ClientType::Device)
-            .map(|client_secret| Self {
-                provider: ProviderTokenExchange {
-                    client_id: provider.client_id(&ClientType::Device).to_string(),
-                    device_code: req.device_code,
-                    grant_type: req.grant_type,
-                    client_secret: client_secret.expose_secret().to_string(),
-                },
-                expires_at: req.expires_at,
-            })
+    pub fn new(req: AccessTokenExchangeRequest, provider: &OAuthProviderDeviceInfo) -> Self {
+        Self {
+            provider: ProviderTokenExchange {
+                client_id: provider.client_id.clone(),
+                device_code: req.device_code,
+                grant_type: req.grant_type,
+                client_secret: provider.client_secret.0.expose_secret().to_string(),
+            },
+            expires_at: req.expires_at,
+        }
     }
 }
 
@@ -118,10 +120,11 @@ where
         .get_oauth_provider(&path.provider)
         .await
         .map_err(ApiError::OAuth)?;
+    let device_info = provider.device_code_flow_info();
 
     tracing::debug!(provider = ?provider.name(), "Acquired OAuth provider for token exchange");
 
-    if provider.device_code_endpoint().is_none() {
+    if device_info.is_none() {
         return Ok(Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .header(header::CONTENT_TYPE, "application/json")
@@ -139,156 +142,151 @@ where
             )?);
     }
 
+    let device_info = device_info.unwrap();
     let exchange_request = body.into_inner();
+    let exchange = AccessTokenExchange::new(exchange_request, &device_info);
 
-    if let Some(exchange) = AccessTokenExchange::new(exchange_request, &*provider) {
-        let token_exchange_endpoint = provider.token_exchange_endpoint();
-        let client = reqwest::Client::new();
+    let client = reqwest::Client::new();
 
-        let response = client
-            .request(Method::POST, token_exchange_endpoint)
-            .header(header::CONTENT_TYPE, provider.token_exchange_content_type())
-            .header(header::ACCEPT, HeaderValue::from_static("application/json"))
-            .body(
-                // We know that this is safe to unwrap as we just deserialized it via the body Extractor
-                serde_urlencoded::to_string(&exchange.provider).unwrap(),
-            )
-            .send()
-            .await
-            .tap_err(|err| tracing::error!(?err, "Token exchange request failed"))
-            .map_err(internal_error)?;
+    let response = client
+        .request(Method::POST, &device_info.token_endpoint)
+        .header(
+            header::CONTENT_TYPE,
+            &device_info.token_endpoint_content_type,
+        )
+        .header(header::ACCEPT, HeaderValue::from_static("application/json"))
+        .body(
+            // We know that this is safe to unwrap as we just deserialized it via the body Extractor
+            serde_urlencoded::to_string(&exchange.provider).unwrap(),
+        )
+        .send()
+        .await
+        .tap_err(|err| tracing::error!(?err, "Token exchange request failed"))
+        .map_err(internal_error)?;
 
-        // Take a part the response as we will need the individual parts later
-        let status = response.status();
-        let headers = response.headers().clone();
-        let bytes = response.bytes().await.map_err(internal_error)?;
+    // Take a part the response as we will need the individual parts later
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = response.bytes().await.map_err(internal_error)?;
 
-        // We unfortunately can not trust our providers to follow specs and therefore need to do
-        // our own inspection of the response to determine what to do
-        if !status.is_success() {
-            // If the server returned a non-success status then we are going to trust the server and
-            // report their error back to the client
-            tracing::debug!(provider = ?path.provider, ?headers, ?status, "Received error response from OAuth provider");
+    // We unfortunately can not trust our providers to follow specs and therefore need to do
+    // our own inspection of the response to determine what to do
+    if !status.is_success() {
+        // If the server returned a non-success status then we are going to trust the server and
+        // report their error back to the client
+        tracing::debug!(provider = ?path.provider, ?headers, ?status, "Received error response from OAuth provider");
 
-            let mut client_response = Response::new(Body::from(bytes));
-            *client_response.headers_mut() = headers;
-            *client_response.status_mut() = status;
+        let mut client_response = Response::new(Body::from(bytes));
+        *client_response.headers_mut() = headers;
+        *client_response.status_mut() = status;
 
-            Ok(client_response)
-        } else {
-            // The server gave us back a non-error response but it still may not be a success.
-            // GitHub for instance does not use a status code for indicating the success or failure
-            // of a call. So instead we try to deserialize the body into an access token, with the
-            // understanding that it may fail and we will need to try and treat the response as
-            // an error instead.
+        Ok(client_response)
+    } else {
+        // The server gave us back a non-error response but it still may not be a success.
+        // GitHub for instance does not use a status code for indicating the success or failure
+        // of a call. So instead we try to deserialize the body into an access token, with the
+        // understanding that it may fail and we will need to try and treat the response as
+        // an error instead.
 
-            let parsed: Result<
-                StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>,
-                serde_json::Error,
-            > = serde_json::from_slice(&bytes);
+        let parsed: Result<
+            StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>,
+            serde_json::Error,
+        > = serde_json::from_slice(&bytes);
 
-            match parsed {
-                Ok(parsed) => {
-                    let info = provider
-                        .get_user_info(parsed.access_token().secret())
-                        .await
-                        .map_err(LoginError::UserInfo)
-                        .tap_err(|err| {
-                            tracing::error!(?err, "Failed to look up user information")
-                        })?;
+        match parsed {
+            Ok(parsed) => {
+                let info = provider
+                    .get_user_info(parsed.access_token().secret())
+                    .await
+                    .map_err(LoginError::UserInfo)
+                    .tap_err(|err| tracing::error!(?err, "Failed to look up user information"))?;
 
-                    tracing::debug!("Verified and validated OAuth user");
+                tracing::debug!("Verified and validated OAuth user");
 
-                    let (api_user_info, api_user_provider) = ctx
-                        .register_api_user(&ctx.builtin_registration_user(), info)
-                        .await?;
+                let (api_user_info, api_user_provider) = ctx
+                    .register_api_user(&ctx.builtin_registration_user(), info)
+                    .await?;
 
-                    tracing::info!(api_user_id = ?api_user_info.user.id, api_user_provider_id = ?api_user_provider.id, "Retrieved api user to generate device token for");
+                tracing::info!(api_user_id = ?api_user_info.user.id, api_user_provider_id = ?api_user_provider.id, "Retrieved api user to generate device token for");
 
-                    let claims =
-                        ctx.generate_claims(&api_user_info.user.id, &api_user_provider.id, None);
-                    let token = ctx
-                        .user
-                        .register_access_token(
-                            &ctx.builtin_registration_user(),
-                            ctx.jwt_signer(),
-                            &api_user_info.user.id,
-                            &claims,
-                        )
-                        .await?;
+                let claims =
+                    ctx.generate_claims(&api_user_info.user.id, &api_user_provider.id, None);
+                let token = ctx
+                    .user
+                    .register_access_token(
+                        &ctx.builtin_registration_user(),
+                        ctx.jwt_signer(),
+                        &api_user_info.user.id,
+                        &claims,
+                    )
+                    .await?;
 
-                    tracing::info!(provider = ?path.provider, api_user_id = ?api_user_info.user.id, "Generated access token");
+                tracing::info!(provider = ?path.provider, api_user_id = ?api_user_info.user.id, "Generated access token");
 
-                    Ok(Response::builder()
-                        .status(StatusCode::OK)
-                        .header(header::CONTENT_TYPE, "application/json")
-                        .body(
-                            serde_json::to_string(&ProxyTokenResponse {
-                                access_token: token.signed_token,
-                                token_type: "Bearer".to_string(),
-                                expires_in: Some(claims.exp - Utc::now().timestamp()),
-                                refresh_token: None,
-                                scopes: None,
+                Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(
+                        serde_json::to_string(&ProxyTokenResponse {
+                            access_token: token.signed_token,
+                            token_type: "Bearer".to_string(),
+                            expires_in: Some(claims.exp - Utc::now().timestamp()),
+                            refresh_token: None,
+                            scopes: None,
+                        })
+                        .unwrap()
+                        .into(),
+                    )?)
+            }
+            Err(_) => {
+                // Do not log the error here as we want to ensure we do not leak token information
+                tracing::debug!(
+                    "Failed to parse a success response from the remote token endpoint"
+                );
+
+                // Try to deserialize the body again, but this time as an error
+                let mut error_response = match serde_json::from_slice::<ProxyTokenError>(&bytes) {
+                    Ok(error) => {
+                        // We found an error in the message body. This is not ideal, but we at
+                        // least can understand what the server was trying to tell us
+                        tracing::debug!(?error, provider = ?path.provider, "Parsed error response from OAuth provider");
+
+                        let mut client_response = Response::new(Body::from(bytes));
+                        *client_response.headers_mut() = headers;
+                        *client_response.status_mut() = status;
+
+                        client_response
+                    }
+                    Err(_) => {
+                        // We still do not know what the remote server is doing... and need to
+                        // cancel the request ourselves
+                        tracing::warn!(
+                            "Remote OAuth provide returned a response that we do not undestand"
+                        );
+
+                        Response::new(
+                            serde_json::to_vec(&ProxyTokenError {
+                                error: "access_denied".to_string(),
+                                error_description: Some(format!(
+                                    "{} returned a malformed response",
+                                    path.provider
+                                )),
+                                error_uri: None,
                             })
                             .unwrap()
                             .into(),
-                        )?)
-                }
-                Err(_) => {
-                    // Do not log the error here as we want to ensure we do not leak token information
-                    tracing::debug!(
-                        "Failed to parse a success response from the remote token endpoint"
-                    );
+                        )
+                    }
+                };
 
-                    // Try to deserialize the body again, but this time as an error
-                    let mut error_response = match serde_json::from_slice::<ProxyTokenError>(&bytes)
-                    {
-                        Ok(error) => {
-                            // We found an error in the message body. This is not ideal, but we at
-                            // least can understand what the server was trying to tell us
-                            tracing::debug!(?error, provider = ?path.provider, "Parsed error response from OAuth provider");
+                *error_response.status_mut() = StatusCode::BAD_REQUEST;
+                error_response.headers_mut().insert(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("application/json"),
+                );
 
-                            let mut client_response = Response::new(Body::from(bytes));
-                            *client_response.headers_mut() = headers;
-                            *client_response.status_mut() = status;
-
-                            client_response
-                        }
-                        Err(_) => {
-                            // We still do not know what the remote server is doing... and need to
-                            // cancel the request ourselves
-                            tracing::warn!(
-                                "Remote OAuth provide returned a response that we do not undestand"
-                            );
-
-                            Response::new(
-                                serde_json::to_vec(&ProxyTokenError {
-                                    error: "access_denied".to_string(),
-                                    error_description: Some(format!(
-                                        "{} returned a malformed response",
-                                        path.provider
-                                    )),
-                                    error_uri: None,
-                                })
-                                .unwrap()
-                                .into(),
-                            )
-                        }
-                    };
-
-                    *error_response.status_mut() = StatusCode::BAD_REQUEST;
-                    error_response.headers_mut().insert(
-                        header::CONTENT_TYPE,
-                        HeaderValue::from_static("application/json"),
-                    );
-
-                    Ok(error_response)
-                }
+                Ok(error_response)
             }
         }
-    } else {
-        tracing::info!(provider = ?path.provider, "Found an OAuth provider, but it is not configured properly");
-
-        Err(bad_request("Invalid provider"))
     }
 }

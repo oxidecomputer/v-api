@@ -5,12 +5,12 @@
 use anyhow::{anyhow, Error};
 use progenitor_client::Error as ProgenitorClientError;
 
-use crate::{ApiErrorMessage, CliContext, VerbosityLevel};
+use crate::{VApiErrorMessage, VCliContext, VerbosityLevel};
 
 pub fn format_api_err<C, P, T, E>(ctx: &T, client_err: ProgenitorClientError<E>) -> Error
 where
-    T: CliContext<C, P>,
-    E: ApiErrorMessage,
+    T: VCliContext<C, P>,
+    E: VApiErrorMessage,
 {
     let mut err = anyhow!("API Request failed");
 

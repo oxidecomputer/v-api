@@ -5,14 +5,14 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use crate::{CliContext, FormatStyle};
+use crate::{FormatStyle, VCliContext};
 
-pub trait CliConfig {
+pub trait VCliConfig {
     fn host(&self) -> Option<&str>;
     fn set_host(&mut self, host: String);
     fn token(&self) -> Option<&str>;
     fn set_token(&mut self, token: String);
-    fn default_format(&self) -> Option<&FormatStyle>;
+    fn default_format(&self) -> FormatStyle;
     fn set_default_format(&mut self, format: FormatStyle);
     fn mlink_redirect(&self) -> Option<&str>;
     fn set_mlink_redirect(&mut self, redirect: String);
@@ -76,7 +76,7 @@ pub enum SetCmd {
 impl ConfigCmd {
     pub async fn run<T, C, P>(&self, ctx: &mut T) -> Result<()>
     where
-        T: CliContext<C, P>,
+        T: VCliContext<C, P>,
     {
         match &self.setting {
             SettingCmd::Get(get) => get.run(ctx.config()).await?,
@@ -90,17 +90,11 @@ impl ConfigCmd {
 impl GetCmd {
     pub async fn run<T>(&self, config: &T) -> Result<()>
     where
-        T: CliConfig,
+        T: VCliConfig,
     {
         match &self {
             GetCmd::Format => {
-                println!(
-                    "{}",
-                    config
-                        .default_format()
-                        .copied()
-                        .unwrap_or(FormatStyle::Json)
-                );
+                println!("{}", config.default_format());
             }
             GetCmd::Host => {
                 println!("{}", config.host().unwrap_or("None"));
@@ -123,7 +117,7 @@ impl GetCmd {
 impl SetCmd {
     pub async fn run<T>(&self, config: &mut T) -> Result<()>
     where
-        T: CliConfig,
+        T: VCliConfig,
     {
         match &self {
             SetCmd::Format { format } => {

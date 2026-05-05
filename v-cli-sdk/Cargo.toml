@@ -13,7 +13,11 @@ hyper = { workspace = true, features = ["server", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 oauth2 = { workspace = true }
 oauth2-reqwest = { workspace = true }
+owo-colors = { workspace = true }
 progenitor-client = { workspace = true }
 reqwest = { workspace = true }
+schemars = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+tabwriter = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "net", "sync"] }

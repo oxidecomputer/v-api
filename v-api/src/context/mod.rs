@@ -1246,7 +1246,9 @@ pub(crate) mod test_mocks {
 
     use crate::{
         config::JwtConfig,
-        endpoints::login::oauth::{google::GoogleOAuthProvider, OAuthProviderName},
+        endpoints::login::oauth::{
+            google::GoogleOAuthProvider, zendesk::ZendeskOAuthProvider, OAuthProviderName,
+        },
         mapper::DefaultMappingEngine,
         permissions::VPermission,
         util::tests::{mock_key, MockKey},
@@ -1279,6 +1281,21 @@ pub(crate) mod test_mocks {
             Box::new(move || {
                 Box::new(GoogleOAuthProvider::new(
                     "https://test_public_url".to_string(),
+                    "google_device_client_id".to_string(),
+                    "google_device_client_secret".to_string().into(),
+                    "google_web_client_id".to_string(),
+                    "google_web_client_secret".to_string().into(),
+                    None,
+                ))
+            }),
+        );
+
+        ctx.auth.insert_oauth_provider(
+            OAuthProviderName::Zendesk,
+            Box::new(move || {
+                Box::new(ZendeskOAuthProvider::new(
+                    "https://test_public_url".to_string(),
+                    "subdomain".to_string(),
                     "google_device_client_id".to_string(),
                     "google_device_client_secret".to_string().into(),
                     "google_web_client_id".to_string(),
