@@ -181,6 +181,7 @@ pub struct OAuthProviderAuthorizationCodeInfo {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct OAuthProviderAuthorizationCodeRemoteInfo {
     client_id: String,
+    #[serde(skip_serializing)]
     client_secret: OpenApiSecretString,
     auth_url_endpoint: String,
     token_endpoint_content_type: String,
@@ -200,6 +201,7 @@ pub struct OAuthProviderAuthorizationCodePkceInfo {
 pub struct OAuthProviderDeviceInfo {
     client_id: TypedUuid<OAuthClientId>,
     remote_client_id: String,
+    #[serde(skip_serializing)]
     remote_client_secret: OpenApiSecretString,
     device_code_endpoint: String,
     token_endpoint_content_type: String,
