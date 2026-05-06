@@ -10,6 +10,7 @@ use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use thiserror::Error;
+use url::Url;
 
 use crate::{
     permissions::VPermission,
@@ -211,4 +212,34 @@ pub enum UserInfoError {
 #[async_trait]
 pub trait UserInfoProvider {
     async fn get_user_info(&self, token: &str) -> Result<UserInfo, UserInfoError>;
+}
+
+/// Structurally compare a candidate redirect URI against a list of registered redirect URIs.
+/// Comparison is performed on scheme, host, port, and path. URIs that fail to parse or contain
+/// fragments are rejected (per RFC 6749 §3.1.2).
+pub fn is_redirect_uri_valid<'a>(
+    redirect_uri: &str,
+    registered_uris: impl Iterator<Item = &'a str>,
+) -> bool {
+    let candidate = match Url::parse(redirect_uri) {
+        Ok(url) => url,
+        Err(_) => return false,
+    };
+
+    // Reject redirect URIs that contain fragments (per RFC 6749 §3.1.2)
+    if candidate.fragment().is_some() {
+        return false;
+    }
+
+    registered_uris.into_iter().any(|registered| {
+        match Url::parse(registered) {
+            Ok(registered) => {
+                registered.scheme() == candidate.scheme()
+                    && registered.host() == candidate.host()
+                    && registered.port() == candidate.port()
+                    && registered.path() == candidate.path()
+            }
+            Err(_) => false,
+        }
+    })
 }

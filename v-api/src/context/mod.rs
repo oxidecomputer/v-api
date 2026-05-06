@@ -1317,10 +1317,13 @@ pub(crate) mod test_mocks {
                 Box::new(ZendeskOAuthProvider::new(
                     ResolvedOAuthConfig {
                         device: None,
-                        web: None,
+                        web: Some(ResolvedOAuthWebConfig {
+                            remote_client_id: "zendesk_web_client_id".to_string(),
+                            remote_client_secret: "zendesk_web_client_secret".to_string().into(),
+                        }),
                         proxy_web: Some(ResolvedOAuthWebProxyConfig {
                             client_id: TypedUuid::new_v4(),
-                            redirect_uri: "test".to_string(),
+                            redirect_uri: "https://test_public_url/pkce-callback".to_string(),
                             proxy_port: 1234,
                         }),
                     },

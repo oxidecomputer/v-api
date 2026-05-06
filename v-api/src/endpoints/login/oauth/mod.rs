@@ -24,7 +24,7 @@ use crate::{
     secrets::OpenApiSecretString,
 };
 
-use super::{UserInfo, UserInfoError, UserInfoProvider};
+use super::{is_redirect_uri_valid, UserInfo, UserInfoError, UserInfoProvider};
 
 pub mod client;
 pub mod flow;
@@ -246,8 +246,9 @@ impl CheckOAuthClient for OAuthClient {
 
     fn is_redirect_uri_valid(&self, redirect_uri: &str) -> bool {
         tracing::trace!(?redirect_uri, valid_uris = ?self.redirect_uris, "Checking redirect uri against list of valid uris");
-        self.redirect_uris
-            .iter()
-            .any(|r| r.redirect_uri == redirect_uri)
+        is_redirect_uri_valid(
+            redirect_uri,
+            self.redirect_uris.iter().map(|r| r.redirect_uri.as_str()),
+        )
     }
 }

@@ -912,7 +912,7 @@ mod tests {
             .unwrap();
         let secret_signature = key.signature().to_string();
         let client_secret = key.key();
-        let redirect_uri = "callback-destination";
+        let redirect_uri = "https://example.com/callback";
 
         (
             ctx,
