@@ -223,9 +223,15 @@ where
 
     // Check that the passed in scopes are valid. The scopes are not currently restricted by client
     let scope = query.scope.unwrap_or_else(|| DEFAULT_SCOPE.to_string());
-    let scope_error = VPermission::from_scope_arg(&scope)
-        .err()
-        .map(|_| "invalid_scope".to_string());
+    if let Err(err) = VPermission::from_scope_arg(&scope) {
+        tracing::warn!(?err, ?scope, "Client submitted an invalid scope");
+        return Err(OAuthError {
+            error: OAuthErrorCode::InvalidScope,
+            error_description: Some(format!("Invalid scope: {}", scope)),
+            error_uri: None,
+            state: None,
+        }.into());
+    }
 
     // Construct a new login attempt with the minimum required values
     let mut attempt = NewLoginAttempt::new(
@@ -242,9 +248,6 @@ where
     // Set a default expiration for the login attempt
     // TODO: Make this configurable
     attempt.expires_at = Some(Utc::now().add(TimeDelta::try_minutes(5).unwrap()));
-
-    // Assign any scope errors that arose
-    attempt.error = scope_error;
 
     // Add in the user defined state and redirect uri. State is an arbitrary value and may be
     // malicious. It must be url-encoded before being presented back to the client. Therefore we
