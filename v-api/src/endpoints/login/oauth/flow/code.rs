@@ -286,7 +286,7 @@ fn oauth_redirect_response(
         .add_scopes(
             provider
                 .default_scopes()
-                .into_iter()
+                .iter()
                 .map(|s| Scope::new(s.to_string()))
                 .collect::<Vec<_>>(),
         );

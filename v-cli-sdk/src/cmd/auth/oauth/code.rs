@@ -129,7 +129,7 @@ impl CodeOAuth {
         tokio::spawn({
             let callback_token_tx = Arc::clone(&token_tx);
             let error_token_tx = Arc::clone(&token_tx);
-            let client_id = self.client_id.clone();
+            let client_id = self.client_id;
             let redirect_uri = self.redirect_uri.clone();
 
             async move {
@@ -158,7 +158,7 @@ impl CodeOAuth {
                             let token = adapter
                                 .exchange_authorization_code(
                                     crate::cmd::auth::login::LoginProvider::Zendesk,
-                                    client_id.clone(),
+                                    client_id,
                                     redirect_uri.clone(),
                                     "authorization_code".to_string(),
                                     code,

@@ -54,7 +54,7 @@ where
                 with the following token."
             );
             println!("IdP token: {}", idp_token);
-            println!("");
+            println!();
             println!(
                 "Please note that this should be kept secure as calls made with this token are \
                 made on behalf of your user acount"

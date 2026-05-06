@@ -145,7 +145,7 @@ where
 
     let device_info = device_info.unwrap();
     let exchange_request = body.into_inner();
-    let exchange = AccessTokenExchange::new(exchange_request, &device_info);
+    let exchange = AccessTokenExchange::new(exchange_request, device_info);
 
     let client = reqwest::Client::new();
 

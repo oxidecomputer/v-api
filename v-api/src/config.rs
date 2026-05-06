@@ -218,7 +218,7 @@ impl OAuthDeviceConfig {
     ) -> Result<ResolvedOAuthDeviceConfig, ParamResolutionError> {
         let remote_client_secret = self.remote_client_secret.resolve(base)?;
         Ok(ResolvedOAuthDeviceConfig {
-            client_id: self.client_id.clone(),
+            client_id: self.client_id,
             remote_client_id: self.remote_client_id.clone(),
             remote_client_secret,
         })
@@ -242,7 +242,7 @@ impl OAuthWebProxyConfig {
         _base: Option<PathBuf>,
     ) -> Result<ResolvedOAuthWebProxyConfig, ParamResolutionError> {
         Ok(ResolvedOAuthWebProxyConfig {
-            client_id: self.client_id.clone(),
+            client_id: self.client_id,
             redirect_uri: self.redirect_uri.clone(),
             proxy_port: self.proxy_port,
         })
