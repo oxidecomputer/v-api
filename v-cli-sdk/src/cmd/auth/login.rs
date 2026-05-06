@@ -266,11 +266,13 @@ pub trait CliMagicLinkAdapter {
     type Token: CliAdapterToken;
     type Error: StdError + Send + Sync + 'static;
 
+    #[allow(clippy::type_complexity)]
     fn create_attempt(
         &self,
         email: &str,
         scope: Option<&str>,
     ) -> Pin<Box<dyn Future<Output = Result<Self::Attempt, Self::Error>> + Send>>;
+    #[allow(clippy::type_complexity)]
     fn exchange(
         &self,
         attempt: Self::Attempt,

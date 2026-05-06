@@ -117,6 +117,7 @@ impl CodeOAuth {
 
         // Channel to receive the token extracted from the server response.
         let (token_tx, token_rx) = oneshot::channel::<Result<T::ShortToken>>();
+        #[allow(clippy::type_complexity)]
         let token_tx: Arc<Mutex<Option<oneshot::Sender<Result<T::ShortToken>>>>> =
             Arc::new(Mutex::new(Some(token_tx)));
 
@@ -157,13 +158,15 @@ impl CodeOAuth {
                             // Forward the redirect request to the API server.
                             let token = adapter
                                 .exchange_authorization_code(
-                                    crate::cmd::auth::login::LoginProvider::Zendesk,
-                                    client_id,
-                                    redirect_uri.clone(),
-                                    "authorization_code".to_string(),
-                                    code,
-                                    pkce_verifier,
-                                    request_idp_token,
+                                    super::AuthorizationCodeExchange {
+                                        provider: crate::cmd::auth::login::LoginProvider::Zendesk,
+                                        client_id,
+                                        redirect_uri: redirect_uri.clone(),
+                                        grant_type: "authorization_code".to_string(),
+                                        code,
+                                        pkce_verifier,
+                                        request_idp_token,
+                                    },
                                 )
                                 .await
                                 .map_err(|e| anyhow::anyhow!(e))?;

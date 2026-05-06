@@ -12,25 +12,33 @@ pub mod device;
 
 use crate::cmd::auth::login::CliAdapterToken;
 
+/// Parameters for exchanging an authorization code for an access token.
+pub struct AuthorizationCodeExchange {
+    pub provider: super::login::LoginProvider,
+    pub client_id: Uuid,
+    pub redirect_uri: String,
+    pub grant_type: String,
+    pub code: String,
+    pub pkce_verifier: PkceCodeVerifier,
+    pub request_idp_token: bool,
+}
+
 pub trait CliOAuthAdapter {
     type ShortToken: CliAdapterToken + Send + 'static;
     type LongToken: CliAdapterToken + Send + 'static;
     type Error: StdError + Send + Sync + 'static;
 
+    #[allow(clippy::type_complexity)]
     fn provider(
         &self,
         provider: super::login::LoginProvider,
     ) -> Pin<Box<dyn Future<Output = Result<impl CliOAuthProviderInfo, Self::Error>> + Send>>;
+    #[allow(clippy::type_complexity)]
     fn exchange_authorization_code(
         &self,
-        provider: super::login::LoginProvider,
-        client_id: Uuid,
-        redirect_uri: String,
-        grant_type: String,
-        code: String,
-        pkce_verifier: PkceCodeVerifier,
-        request_idp_token: bool,
+        exchange: AuthorizationCodeExchange,
     ) -> Pin<Box<dyn Future<Output = Result<Self::ShortToken, Self::Error>> + Send>>;
+    #[allow(clippy::type_complexity)]
     fn get_long_lived_token(
         &self,
         access_token: &str,
