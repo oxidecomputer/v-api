@@ -8,6 +8,7 @@ use newtype_uuid::{GenericUuid, TypedUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
+use url::Url;
 use v_model::{
     permissions::{Caller, PermissionStorage},
     MagicLink, MagicLinkId, MagicLinkRedirectUri, MagicLinkRedirectUriId, MagicLinkSecret,
@@ -19,7 +20,7 @@ use crate::{
     context::{ApiContext, VContextWithCaller},
     permissions::{VAppPermission, VPermission},
     secrets::OpenApiSecretString,
-    util::response::to_internal_error,
+    util::response::{bad_request, to_internal_error},
     VContext,
 };
 
@@ -192,6 +193,16 @@ where
     let (ctx, caller) = rqctx.as_ctx().await?;
     let path = path.into_inner();
     let body = body.into_inner();
+
+    // Validate that the redirect URI is a well-formed URL before storing it.
+    // Per RFC 6749 §3.1.2, redirect URIs must be absolute URIs and must not
+    // include a fragment component.
+    let parsed = Url::parse(&body.redirect_uri)
+        .map_err(|_| bad_request("Invalid redirect URI: not a valid URL"))?;
+    if parsed.fragment().is_some() {
+        return Err(bad_request("Invalid redirect URI: must not contain a fragment"));
+    }
+
     Ok(HttpResponseOk(
         ctx.magic_link
             .add_magic_link_redirect_uri(&caller, &path.client_id, &body.redirect_uri)

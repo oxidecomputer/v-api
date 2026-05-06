@@ -485,7 +485,10 @@ where
     };
 
     // Redirect back to the original authenticator
-    Ok(attempt.callback_url())
+    attempt.callback_url().map_err(|err| {
+        tracing::error!(?err, redirect_uri = ?attempt.redirect_uri, "Login attempt contains an invalid redirect URI");
+        to_internal_error(err)
+    })
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1250,7 +1253,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            format!("https://test.oxeng.dev/callback?error=server_error&state=ox_state",),
+            format!("https://test.oxeng.dev/callback?state=ox_state&error=server_error",),
             location
         );
     }
@@ -1310,7 +1313,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            format!("https://test.oxeng.dev/callback?error=access_denied&state=ox_state",),
+            format!("https://test.oxeng.dev/callback?state=ox_state&error=access_denied",),
             location
         );
     }
@@ -1370,7 +1373,7 @@ mod tests {
         let lock = extracted_code.lock();
         assert_eq!(
             format!(
-                "https://test.oxeng.dev/callback?code={}&state=ox_state",
+                "https://test.oxeng.dev/callback?state=ox_state&code={}",
                 lock.unwrap().as_ref().unwrap()
             ),
             location

@@ -16,10 +16,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     fmt::Display,
 };
 use thiserror::Error;
+use url::Url;
 
 pub mod db;
 pub mod permissions;
@@ -282,26 +283,22 @@ pub struct LoginAttempt {
 }
 
 impl LoginAttempt {
-    pub fn callback_url(&self) -> String {
-        let mut params = BTreeMap::new();
+    pub fn callback_url(&self) -> Result<String, url::ParseError> {
+        let mut url = Url::parse(&self.redirect_uri)?;
 
-        if let Some(state) = &self.state {
-            params.insert("state", state);
+        {
+            let mut pairs = url.query_pairs_mut();
+            if let Some(state) = &self.state {
+                pairs.append_pair("state", state);
+            }
+            if let Some(error) = &self.error {
+                pairs.append_pair("error", error);
+            } else if let Some(authz_code) = &self.authz_code {
+                pairs.append_pair("code", authz_code);
+            }
         }
 
-        if let Some(error) = &self.error {
-            params.insert("error", error);
-        } else if let Some(authz_code) = &self.authz_code {
-            params.insert("code", authz_code);
-        }
-
-        let query_string = params
-            .into_iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join("&");
-
-        [self.redirect_uri.as_str(), query_string.as_str()].join("?")
+        Ok(url.to_string())
     }
 }
 
@@ -324,6 +321,13 @@ impl NewLoginAttempt {
         redirect_uri: String,
         scope: String,
     ) -> Result<Self, InvalidValueError> {
+        // Validate that the redirect URI is a well-formed URL. This ensures
+        // callback_url() can always parse it later.
+        Url::parse(&redirect_uri).map_err(|err| InvalidValueError {
+            field: "redirect_uri".to_string(),
+            error: format!("Invalid URL: {}", err),
+        })?;
+
         Ok(Self {
             id: TypedUuid::new_v4(),
             attempt_state: LoginAttemptState::New,
