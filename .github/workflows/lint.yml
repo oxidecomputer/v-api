@@ -36,10 +36,18 @@ jobs:
           cargo install cargo-machete
       - run: |
           cargo machete
-      - run: |
+      - name: Ensure Cargo.lock is current
+        run: |
           cargo check
           if ! git diff --quiet -- Cargo.lock; then
-            echo "::error file=Cargo.lock,title=Cargo.lock is out of date::Run cargo check locally and commit the updated Cargo.lock."
+            echo "::error file=Cargo.lock,line=1,title=Cargo.lock is out of date::Run cargo check locally and commit the updated Cargo.lock."
+            {
+              echo "## Cargo.lock is out of date"
+              echo
+              echo "Running \`cargo check\` changed \`Cargo.lock\`."
+              echo
+              echo "Run \`cargo check\` locally and commit the updated \`Cargo.lock\`."
+            } >> "$GITHUB_STEP_SUMMARY"
             echo "::group::Cargo.lock diff"
             git diff -- Cargo.lock
             echo "::endgroup::"
