@@ -1647,6 +1647,18 @@ pub(crate) mod test_mocks {
                 .upsert(attempt)
                 .await
         }
+
+        async fn update_if_state(
+            &self,
+            attempt: NewLoginAttempt,
+            expected_state: v_model::LoginAttemptState,
+        ) -> Result<v_model::LoginAttempt, v_model::storage::StoreError> {
+            self.login_attempt_store
+                .as_ref()
+                .unwrap()
+                .update_if_state(attempt, expected_state)
+                .await
+        }
     }
 
     #[async_trait]

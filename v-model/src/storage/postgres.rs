@@ -29,7 +29,7 @@ use crate::{
         magic_link_client_redirect_uri, magic_link_client_secret, mapper, oauth_client,
         oauth_client_redirect_uri, oauth_client_secret,
     },
-    schema_ext::MagicLinkAttemptState,
+    schema_ext::{LoginAttemptState, MagicLinkAttemptState},
     storage::{LinkRequestFilter, LinkRequestStore, StoreError},
     AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUser,
     ApiUserContactEmail, ApiUserInfo, ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt,
@@ -774,6 +774,38 @@ impl LoginAttemptStore for PostgresStore {
             .await?;
 
         Ok(attempt_m.into())
+    }
+
+    async fn update_if_state(
+        &self,
+        attempt: NewLoginAttempt,
+        expected_state: LoginAttemptState,
+    ) -> Result<LoginAttempt, StoreError> {
+        let conn = self.pool.get().await?;
+        let result: Option<LoginAttemptModel> = update(
+            login_attempt::dsl::login_attempt
+                .filter(login_attempt::id.eq(attempt.id.into_untyped_uuid()))
+                .filter(login_attempt::attempt_state.eq(expected_state)),
+        )
+        .set((
+            login_attempt::attempt_state.eq(attempt.attempt_state.clone()),
+            login_attempt::authz_code.eq(attempt.authz_code),
+            login_attempt::expires_at.eq(attempt.expires_at),
+            login_attempt::error.eq(attempt.error),
+            login_attempt::provider_authz_code.eq(attempt.provider_authz_code),
+            login_attempt::provider_error.eq(attempt.provider_error),
+        ))
+        .get_result_async::<LoginAttemptModel>(&*conn)
+        .await
+        .optional()?;
+
+        match result {
+            Some(attempt) => Ok(LoginAttempt::from(attempt)),
+            None => Err(StoreError::InvariantFailed(format!(
+                "Login attempt {} is not in expected state for transition to {}",
+                attempt.id, attempt.attempt_state
+            ))),
+        }
     }
 }
 

@@ -498,7 +498,7 @@ where
 
             // TODO: Specialize the returned error
             ctx.login
-                .fail_login_attempt(attempt, Some(error_message), error.as_deref())
+                .fail_login_attempt(attempt, LoginAttemptState::New, Some(error_message), error.as_deref())
                 .await
                 .map_err(to_internal_error)?
         }
@@ -656,8 +656,30 @@ where
 
     tracing::debug!("Verified login attempt");
 
-    // Now that the attempt has been confirmed, use it to fetch user information form the remote
-    // provider
+    // Atomically claim this login attempt before doing any remote work. This transitions
+    // the attempt from RemoteAuthenticated -> Complete in a single conditional UPDATE,
+    // ensuring that a concurrent request using the same authorization code will fail.
+    // Per RFC 6749 §4.1.2, authorization codes MUST be single-use.
+    let attempt_id = attempt.id;
+    attempt = ctx
+        .login
+        .claim_login_attempt(attempt)
+        .await
+        .map_err(|err| {
+            tracing::warn!(?err, ?attempt_id, "Failed to claim login attempt (may have been consumed by a concurrent request)");
+            OAuthError {
+                error: OAuthErrorCode::InvalidGrant,
+                error_description: Some("Authorization code has already been used".to_string()),
+                error_uri: None,
+                state: None,
+            }
+        })?;
+
+    tracing::debug!("Claimed login attempt");
+
+    // Now that the attempt has been claimed, use it to fetch user information from the
+    // remote provider. If this fails, the attempt is already consumed and the user must
+    // re-authenticate.
     let info = fetch_user_info(
         ctx.public_url(),
         &ctx.web_client(),
@@ -669,24 +691,6 @@ where
     let idp_token = info.idp_token.clone();
 
     tracing::debug!("Retrieved user information from remote provider");
-
-    // During fetch_user_info we revoke any downstream codes if possible, therefore At this point we
-    // consider the login attempt to be consumed and can no longer be used. We state transition to
-    // complete, even though we may fail further along in the handler. If a failure occurs then the
-    // user will need to re-authenticate.
-    attempt = ctx
-        .login
-        .complete_login_attempt(attempt)
-        .await
-        .map_err(|err| {
-            tracing::error!(?err, "Failed to complete login attempt");
-            OAuthError {
-                error: OAuthErrorCode::ServerError,
-                error_description: Some("An unexpected error occurred".to_string()),
-                error_uri: None,
-                state: None,
-            }
-        })?;
 
     // Register this user as an API user if needed
     let (api_user_info, api_user_provider) = ctx
@@ -1249,9 +1253,12 @@ mod tests {
             .returning(move |_| Ok(Some(original_attempt.clone())));
 
         attempt_store
-            .expect_upsert()
-            .withf(|attempt| attempt.attempt_state == LoginAttemptState::Failed)
-            .returning(move |arg| {
+            .expect_update_if_state()
+            .withf(|attempt, expected| {
+                attempt.attempt_state == LoginAttemptState::Failed
+                    && *expected == LoginAttemptState::New
+            })
+            .returning(move |arg, _| {
                 let mut returned = attempt.clone();
                 returned.attempt_state = arg.attempt_state;
                 returned.authz_code = arg.authz_code;
@@ -1309,9 +1316,12 @@ mod tests {
             .returning(move |_| Ok(Some(original_attempt.clone())));
 
         attempt_store
-            .expect_upsert()
-            .withf(|attempt| attempt.attempt_state == LoginAttemptState::Failed)
-            .returning(move |arg| {
+            .expect_update_if_state()
+            .withf(|attempt, expected| {
+                attempt.attempt_state == LoginAttemptState::Failed
+                    && *expected == LoginAttemptState::New
+            })
+            .returning(move |arg, _| {
                 let mut returned = attempt.clone();
                 returned.attempt_state = arg.attempt_state;
                 returned.authz_code = arg.authz_code;
@@ -1371,9 +1381,12 @@ mod tests {
         let extracted_code = Arc::new(Mutex::new(None));
         let extractor = extracted_code.clone();
         attempt_store
-            .expect_upsert()
-            .withf(|attempt| attempt.attempt_state == LoginAttemptState::RemoteAuthenticated)
-            .returning(move |arg| {
+            .expect_update_if_state()
+            .withf(|attempt, expected| {
+                attempt.attempt_state == LoginAttemptState::RemoteAuthenticated
+                    && *expected == LoginAttemptState::New
+            })
+            .returning(move |arg, _| {
                 let mut returned = attempt.clone();
                 returned.attempt_state = arg.attempt_state;
                 returned.authz_code = arg.authz_code;

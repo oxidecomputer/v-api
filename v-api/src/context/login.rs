@@ -44,14 +44,12 @@ where
         attempt: LoginAttempt,
         code: String,
     ) -> Result<LoginAttempt, StoreError> {
-        let mut attempt: NewLoginAttempt = attempt.into();
-        attempt.provider_authz_code = Some(code);
+        let mut update: NewLoginAttempt = attempt.into();
+        update.provider_authz_code = Some(code);
+        update.attempt_state = LoginAttemptState::RemoteAuthenticated;
+        update.authz_code = Some(CsrfToken::new_random().secret().to_string());
 
-        // TODO: Internal state changes to the struct
-        attempt.attempt_state = LoginAttemptState::RemoteAuthenticated;
-        attempt.authz_code = Some(CsrfToken::new_random().secret().to_string());
-
-        LoginAttemptStore::upsert(&*self.storage, attempt).await
+        LoginAttemptStore::update_if_state(&*self.storage, update, LoginAttemptState::New).await
     }
 
     pub async fn get_login_attempt(
@@ -84,25 +82,38 @@ where
         Ok(attempts.pop())
     }
 
-    pub async fn complete_login_attempt(
+    /// Atomically claim a login attempt by transitioning it from `RemoteAuthenticated`
+    /// to `Complete`. Returns an error if the attempt has already been claimed by a
+    /// concurrent request (i.e., the state is no longer `RemoteAuthenticated`).
+    /// This must be called before exchanging the authorization code with the remote
+    /// provider to prevent the same code from being used twice (RFC 6749 §4.1.2).
+    pub async fn claim_login_attempt(
         &self,
         attempt: LoginAttempt,
     ) -> Result<LoginAttempt, StoreError> {
-        let mut attempt: NewLoginAttempt = attempt.into();
-        attempt.attempt_state = LoginAttemptState::Complete;
-        LoginAttemptStore::upsert(&*self.storage, attempt).await
+        let mut update: NewLoginAttempt = attempt.into();
+        update.attempt_state = LoginAttemptState::Complete;
+
+        LoginAttemptStore::update_if_state(
+            &*self.storage,
+            update,
+            LoginAttemptState::RemoteAuthenticated,
+        )
+        .await
     }
 
     pub async fn fail_login_attempt(
         &self,
         attempt: LoginAttempt,
+        expected_state: LoginAttemptState,
         error: Option<&str>,
         provider_error: Option<&str>,
     ) -> Result<LoginAttempt, StoreError> {
-        let mut attempt: NewLoginAttempt = attempt.into();
-        attempt.attempt_state = LoginAttemptState::Failed;
-        attempt.error = error.map(|s| s.to_string());
-        attempt.provider_error = provider_error.map(|s| s.to_string());
-        LoginAttemptStore::upsert(&*self.storage, attempt).await
+        let mut update: NewLoginAttempt = attempt.into();
+        update.attempt_state = LoginAttemptState::Failed;
+        update.error = error.map(|s| s.to_string());
+        update.provider_error = provider_error.map(|s| s.to_string());
+
+        LoginAttemptStore::update_if_state(&*self.storage, update, expected_state).await
     }
 }

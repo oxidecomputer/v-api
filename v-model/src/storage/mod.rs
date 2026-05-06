@@ -270,6 +270,15 @@ pub trait LoginAttemptStore {
         pagination: &ListPagination,
     ) -> Result<Vec<LoginAttempt>, StoreError>;
     async fn upsert(&self, attempt: NewLoginAttempt) -> Result<LoginAttempt, StoreError>;
+    /// Atomically update a login attempt, but only if it is currently in the `expected_state`.
+    /// The `attempt` must have the desired target state and any other field updates already set.
+    /// Returns `StoreError::InvariantFailed` if the attempt is not in the expected state,
+    /// which prevents TOCTOU races on state transitions.
+    async fn update_if_state(
+        &self,
+        attempt: NewLoginAttempt,
+        expected_state: LoginAttemptState,
+    ) -> Result<LoginAttempt, StoreError>;
 }
 
 #[derive(Debug, Default)]
