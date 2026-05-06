@@ -138,8 +138,17 @@ where
             );
 
             let response = self.client().execute(request).await?;
+            let status = response.status();
 
-            tracing::trace!(status = ?response.status(), "Received response from OAuth provider");
+            tracing::trace!(?status, "Received response from OAuth provider");
+
+            if !status.is_success() {
+                tracing::error!(?status, endpoint, "User info endpoint returned non-success status");
+                return Err(UserInfoError::UnexpectedStatus {
+                    endpoint: endpoint.to_string(),
+                    status,
+                });
+            }
 
             let bytes = response.bytes().await?;
             responses.push(bytes);

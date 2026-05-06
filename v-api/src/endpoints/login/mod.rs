@@ -207,6 +207,11 @@ pub enum UserInfoError {
     Locked,
     #[error("User information is missing")]
     MissingUserInfoData(String),
+    #[error("User info endpoint returned HTTP {status} for {endpoint}")]
+    UnexpectedStatus {
+        endpoint: String,
+        status: http::StatusCode,
+    },
 }
 
 #[async_trait]
