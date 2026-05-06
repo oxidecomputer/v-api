@@ -8,4 +8,3 @@ publish.workspace = true
 clap = { workspace = true }
 regex = { workspace = true }
 semver = { workspace = true }
-serde = { workspace = true }
