@@ -143,7 +143,11 @@ where
             tracing::trace!(?status, "Received response from OAuth provider");
 
             if !status.is_success() {
-                tracing::error!(?status, endpoint, "User info endpoint returned non-success status");
+                tracing::error!(
+                    ?status,
+                    endpoint,
+                    "User info endpoint returned non-success status"
+                );
                 return Err(UserInfoError::UnexpectedStatus {
                     endpoint: endpoint.to_string(),
                     status,

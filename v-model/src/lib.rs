@@ -15,10 +15,7 @@ use schema_ext::MagicLinkAttemptState;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{
-    collections::BTreeSet,
-    fmt::Display,
-};
+use std::{collections::BTreeSet, fmt::Display};
 use thiserror::Error;
 use url::Url;
 

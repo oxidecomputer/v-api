@@ -236,8 +236,9 @@ pub fn is_redirect_uri_valid<'a>(
         return false;
     }
 
-    registered_uris.into_iter().any(|registered| {
-        match Url::parse(registered) {
+    registered_uris
+        .into_iter()
+        .any(|registered| match Url::parse(registered) {
             Ok(registered) => {
                 registered.scheme() == candidate.scheme()
                     && registered.host() == candidate.host()
@@ -245,6 +246,5 @@ pub fn is_redirect_uri_valid<'a>(
                     && registered.path() == candidate.path()
             }
             Err(_) => false,
-        }
-    })
+        })
 }

@@ -200,7 +200,9 @@ where
     let parsed = Url::parse(&body.redirect_uri)
         .map_err(|_| bad_request("Invalid redirect URI: not a valid URL"))?;
     if parsed.fragment().is_some() {
-        return Err(bad_request("Invalid redirect URI: must not contain a fragment"));
+        return Err(bad_request(
+            "Invalid redirect URI: must not contain a fragment",
+        ));
     }
 
     Ok(HttpResponseOk(

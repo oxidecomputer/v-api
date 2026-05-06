@@ -57,7 +57,11 @@ static DEFAULT_SCOPE: &str = "user:info:r";
 /// Build the login attempt cookie with consistent attributes.
 /// The `Path` is scoped to the OAuth login endpoints so the cookie is not
 /// sent to unrelated paths on the same domain.
-fn build_login_attempt_cookie<'a>(value: &'a str, public_url: &str, max_age_secs: i64) -> Cookie<'a> {
+fn build_login_attempt_cookie<'a>(
+    value: &'a str,
+    public_url: &str,
+    max_age_secs: i64,
+) -> Cookie<'a> {
     let mut cookie = Cookie::new(LOGIN_ATTEMPT_COOKIE, value.to_string());
     cookie.set_path(LOGIN_ATTEMPT_COOKIE_PATH);
     cookie.set_http_only(true);
@@ -220,24 +224,34 @@ where
     if query.code_challenge_method != "S256" {
         return Err(OAuthError {
             error: OAuthErrorCode::InvalidRequest,
-            error_description: Some("Unsupported code_challenge_method. Only S256 is supported.".to_string()),
+            error_description: Some(
+                "Unsupported code_challenge_method. Only S256 is supported.".to_string(),
+            ),
             error_uri: None,
             state: None,
-        }.into());
+        }
+        .into());
     }
 
     // Validate the PKCE code challenge. For S256, this must be a base64url-no-pad
     // encoding of a SHA256 hash, which is always exactly 43 characters of [A-Za-z0-9_-]
     // (RFC 7636 §4.2).
     if query.code_challenge.len() != 43
-        || !query.code_challenge.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        || !query
+            .code_challenge
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
     {
         return Err(OAuthError {
             error: OAuthErrorCode::InvalidRequest,
-            error_description: Some("Invalid code_challenge. Must be a base64url-encoded SHA256 hash (43 characters).".to_string()),
+            error_description: Some(
+                "Invalid code_challenge. Must be a base64url-encoded SHA256 hash (43 characters)."
+                    .to_string(),
+            ),
             error_uri: None,
             state: None,
-        }.into());
+        }
+        .into());
     }
 
     // Find the configured provider for the requested remote backend. We should always have a valid
@@ -258,7 +272,8 @@ where
             error_description: Some(format!("Invalid scope: {}", scope)),
             error_uri: None,
             state: None,
-        }.into());
+        }
+        .into());
     }
 
     // Construct a new login attempt with the minimum required values
@@ -306,7 +321,12 @@ where
 
     tracing::info!(?attempt.id, "Created login attempt");
 
-    oauth_redirect_response(ctx.public_url(), &*provider, &attempt, remote_pkce_challenge)
+    oauth_redirect_response(
+        ctx.public_url(),
+        &*provider,
+        &attempt,
+        remote_pkce_challenge,
+    )
 }
 
 fn oauth_redirect_response(
@@ -498,7 +518,12 @@ where
 
             // TODO: Specialize the returned error
             ctx.login
-                .fail_login_attempt(attempt, LoginAttemptState::New, Some(error_message), error.as_deref())
+                .fail_login_attempt(
+                    attempt,
+                    LoginAttemptState::New,
+                    Some(error_message),
+                    error.as_deref(),
+                )
                 .await
                 .map_err(to_internal_error)?
         }
@@ -666,7 +691,11 @@ where
         .claim_login_attempt(attempt)
         .await
         .map_err(|err| {
-            tracing::warn!(?err, ?attempt_id, "Failed to claim login attempt (may have been consumed by a concurrent request)");
+            tracing::warn!(
+                ?err,
+                ?attempt_id,
+                "Failed to claim login attempt (may have been consumed by a concurrent request)"
+            );
             OAuthError {
                 error: OAuthErrorCode::InvalidGrant,
                 error_description: Some("Authorization code has already been used".to_string()),
@@ -1948,51 +1977,36 @@ mod tests {
 
     #[test]
     fn test_login_attempt_cookie_has_path() {
-        let cookie = super::build_login_attempt_cookie(
-            "test-attempt-id",
-            "https://example.com",
-            600,
-        );
+        let cookie =
+            super::build_login_attempt_cookie("test-attempt-id", "https://example.com", 600);
 
         assert_eq!(cookie.path(), Some(super::LOGIN_ATTEMPT_COOKIE_PATH));
     }
 
     #[test]
     fn test_login_attempt_cookie_is_http_only() {
-        let cookie = super::build_login_attempt_cookie(
-            "test-attempt-id",
-            "https://example.com",
-            600,
-        );
+        let cookie =
+            super::build_login_attempt_cookie("test-attempt-id", "https://example.com", 600);
 
         assert_eq!(cookie.http_only(), Some(true));
     }
 
     #[test]
     fn test_login_attempt_cookie_is_same_site_lax() {
-        let cookie = super::build_login_attempt_cookie(
-            "test-attempt-id",
-            "https://example.com",
-            600,
-        );
+        let cookie =
+            super::build_login_attempt_cookie("test-attempt-id", "https://example.com", 600);
 
         assert_eq!(cookie.same_site(), Some(cookie::SameSite::Lax));
     }
 
     #[test]
     fn test_login_attempt_cookie_is_secure_for_https() {
-        let https_cookie = super::build_login_attempt_cookie(
-            "test-attempt-id",
-            "https://example.com",
-            600,
-        );
+        let https_cookie =
+            super::build_login_attempt_cookie("test-attempt-id", "https://example.com", 600);
         assert_eq!(https_cookie.secure(), Some(true));
 
-        let http_cookie = super::build_login_attempt_cookie(
-            "test-attempt-id",
-            "http://localhost",
-            600,
-        );
+        let http_cookie =
+            super::build_login_attempt_cookie("test-attempt-id", "http://localhost", 600);
         assert_eq!(http_cookie.secure(), Some(false));
     }
 
@@ -2000,18 +2014,14 @@ mod tests {
     fn test_login_attempt_clear_cookie_has_same_path() {
         // The clear cookie must use the same Path as the set cookie,
         // otherwise browsers won't clear it.
-        let set_cookie = super::build_login_attempt_cookie(
-            "test-attempt-id",
-            "https://example.com",
-            600,
-        );
-        let clear_cookie = super::build_login_attempt_cookie(
-            "",
-            "https://example.com",
-            0,
-        );
+        let set_cookie =
+            super::build_login_attempt_cookie("test-attempt-id", "https://example.com", 600);
+        let clear_cookie = super::build_login_attempt_cookie("", "https://example.com", 0);
 
         assert_eq!(set_cookie.path(), clear_cookie.path());
-        assert_eq!(clear_cookie.max_age(), Some(cookie::time::Duration::seconds(0)));
+        assert_eq!(
+            clear_cookie.max_age(),
+            Some(cookie::time::Duration::seconds(0))
+        );
     }
 }

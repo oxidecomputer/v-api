@@ -257,9 +257,7 @@ where
 /// Only `Content-Type` is needed so the client can parse the body. Polling backoff
 /// is handled via the JSON body per RFC 8628 (`interval` field / `slow_down` error),
 /// not via HTTP headers.
-const FORWARDED_HEADERS: &[header::HeaderName] = &[
-    header::CONTENT_TYPE,
-];
+const FORWARDED_HEADERS: &[header::HeaderName] = &[header::CONTENT_TYPE];
 
 /// Copy only allowlisted headers from an upstream response to avoid forwarding
 /// dangerous headers such as `Set-Cookie`, `Location`, or CORS headers.
@@ -296,7 +294,11 @@ fn handle_token_parse_failure(
         Ok(error) => {
             // We found an error in the message body. This is not ideal, but we at
             // least can understand what the server was trying to tell us
-            tracing::debug!(?error, provider_name, "Parsed error response from OAuth provider");
+            tracing::debug!(
+                ?error,
+                provider_name,
+                "Parsed error response from OAuth provider"
+            );
 
             let mut client_response = Response::new(Body::from(bytes));
             *client_response.headers_mut() = filter_upstream_headers(&headers);
@@ -395,11 +397,17 @@ mod tests {
 
         // CORS headers must NOT be forwarded from upstream
         assert!(
-            response.headers().get(header::ACCESS_CONTROL_ALLOW_ORIGIN).is_none(),
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .is_none(),
             "Upstream CORS header must not be forwarded to the client"
         );
         assert!(
-            response.headers().get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS).is_none(),
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+                .is_none(),
             "Upstream CORS credentials header must not be forwarded to the client"
         );
     }
@@ -426,7 +434,8 @@ mod tests {
         let body = Bytes::from_static(
             b"{\"error\": \"slow_down\", \"error_description\": null, \"error_uri\": null}",
         );
-        let response = handle_token_parse_failure("test-provider", body, upstream_headers, StatusCode::OK);
+        let response =
+            handle_token_parse_failure("test-provider", body, upstream_headers, StatusCode::OK);
 
         // Dangerous headers must NOT be forwarded
         assert!(
@@ -461,7 +470,8 @@ mod tests {
         let body = Bytes::from_static(
             b"{\"error\": \"authorization_pending\", \"error_description\": null, \"error_uri\": null}",
         );
-        let response = handle_token_parse_failure("test-provider", body, upstream_headers, StatusCode::OK);
+        let response =
+            handle_token_parse_failure("test-provider", body, upstream_headers, StatusCode::OK);
 
         // The Set-Cookie header must NOT be forwarded
         assert!(
