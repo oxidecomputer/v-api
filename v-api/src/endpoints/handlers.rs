@@ -69,16 +69,16 @@ mod macros {
                             DeleteOAuthClientSecretPath, GetOAuthClientPath,
                             InitialOAuthClientSecretResponse,
                         },
-                        code::{
+                        flow::code::{
                             authz_code_callback_op, authz_code_exchange_op, authz_code_redirect_op,
-                            get_web_pkce_provider_op,
-                            OAuthAuthzCodeExchangeBody, OAuthAuthzCodeExchangeResponse,
-                            OAuthAuthzCodeQuery, OAuthAuthzCodeReturnQuery, OAuthAuthzCodeExchangeQuery
+                            get_public_pkce_provider_op,
+                            OAuthAuthzCodeExchangeBody, OAuthAuthzCodeExchangeResponse, OAuthAuthzCodeExchangeQuery,
+                            OAuthAuthzCodeQuery, OAuthAuthzCodeReturnQuery,
                         },
-                        device_token::{
+                        flow::device_token::{
                             exchange_device_token_op, get_device_provider_op, AccessTokenExchangeRequest,
                         },
-                        OAuthProviderInfo, OAuthProviderNameParam,
+                        OAuthProviderNameParam, OAuthProviderDeviceInfo, OAuthProviderAuthorizationCodePkceInfo
                     }
                 },
                 mappers::{
@@ -260,7 +260,7 @@ mod macros {
 
             // LOGIN ENDPOINTS
 
-            // AUTHZ CODE
+            // AUTHORIZATION CODE FLOW
 
             /// Generate the remote provider login url and redirect the user
             #[endpoint {
@@ -296,26 +296,28 @@ mod macros {
             }]
             pub async fn authz_code_exchange(
                 rqctx: RequestContext<$context_type>,
-                path: Path<OAuthProviderNameParam>,
                 query: Query<OAuthAuthzCodeExchangeQuery>,
+                path: Path<OAuthProviderNameParam>,
                 body: TypedBody<OAuthAuthzCodeExchangeBody>,
             ) -> Result<HttpResponseOk<OAuthAuthzCodeExchangeResponse>, HttpError> {
-                authz_code_exchange_op(&rqctx, path, query, body).await
+                authz_code_exchange_op(&rqctx, query, path, body).await
             }
 
-            // DEVICE CODE
+            // AUTHORIZATION CODE PKCE ONLY FLOW
 
-            /// Retrieve the metadata about an OAuth provider for public authorization code flow
+            /// Retrieve the metadata about an OAuth provider for public PKCE authorization code flow
             #[endpoint {
                 method = GET,
-                path = "/login/oauth/{provider}/web-pkce"
+                path = "/login/oauth/{provider}/public-pkce"
             }]
             pub async fn get_web_pkce_provider(
                 rqctx: RequestContext<$context_type>,
                 path: Path<OAuthProviderNameParam>,
-            ) -> Result<HttpResponseOk<OAuthProviderInfo>, HttpError> {
-                get_web_pkce_provider_op(&rqctx, path).await
+            ) -> Result<HttpResponseOk<OAuthProviderAuthorizationCodePkceInfo>, HttpError> {
+                get_public_pkce_provider_op(&rqctx, path).await
             }
+
+            // DEVICE CODE FLOW
 
             /// Retrieve the metadata about an OAuth provider for limited input flow
             #[endpoint {
@@ -325,7 +327,7 @@ mod macros {
             pub async fn get_device_provider(
                 rqctx: RequestContext<$context_type>,
                 path: Path<OAuthProviderNameParam>,
-            ) -> Result<HttpResponseOk<OAuthProviderInfo>, HttpError> {
+            ) -> Result<HttpResponseOk<OAuthProviderDeviceInfo>, HttpError> {
                 get_device_provider_op(&rqctx, path).await
             }
 
@@ -771,7 +773,7 @@ mod macros {
                 .expect("Failed to register endpoint");
 
             // OAuth Login
-            $api.register(get_web_provider)
+            $api.register(get_web_pkce_provider)
                 .expect("Failed to register endpoint");
             $api.register(get_device_provider)
                 .expect("Failed to register endpoint");

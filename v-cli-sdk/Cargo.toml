@@ -21,3 +21,4 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tabwriter = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "net", "sync"] }
+uuid = { workspace = true }

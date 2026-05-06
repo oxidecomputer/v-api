@@ -11,15 +11,13 @@ use std::fmt;
 use crate::{
     config::ResolvedOAuthConfig,
     endpoints::login::{
-        oauth::{
-            OAuthProviderAuthorizationCodeInfo, OAuthProviderAuthorizationCodePkceInfo,
-            OAuthProviderDeviceInfo,
-        },
-        ExternalUserId, UserInfo, UserInfoError,
+        ExternalUserId, UserInfo, UserInfoError, oauth::{
+            OAuthProviderAuthorizationCodeInfo, OAuthProviderAuthorizationCodePkceInfo, OAuthProviderAuthorizationCodeRemoteInfo, OAuthProviderDeviceInfo
+        }
     },
 };
 
-use super::{ExtractUserInfo, OAuthProvider, OAuthProviderName};
+use super::super::{ExtractUserInfo, OAuthProvider, OAuthProviderName};
 
 pub struct GitHubOAuthProvider {
     authz_code_flow_info: Option<OAuthProviderAuthorizationCodeInfo>,
@@ -48,17 +46,23 @@ impl GitHubOAuthProvider {
         default_scopes.extend(additional_scopes.unwrap_or_default());
 
         let authz_code_flow_info = config.web.map(|web| OAuthProviderAuthorizationCodeInfo {
-            client_id: web.client_id,
-            client_secret: web.client_secret.into(),
-            auth_url_endpoint: "https://github.com/login/oauth/authorize".to_string(),
-            redirect_endpoint: format!("{}/login/oauth/github/code/callback", public_url,),
+            auth_url_endpoint: format!("{}/login/oauth/github/code/authorize", public_url),
+            redirect_endpoint: format!("{}/login/oauth/github/code/callback", public_url),
             token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
-            token_endpoint: "https://github.com/login/oauth/access_token".to_string(),
-            revocation_endpoint: None,
+            token_endpoint: format!("{}/login/oauth/github/device/exchange", public_url),
+            remote: OAuthProviderAuthorizationCodeRemoteInfo {
+                client_id: web.remote_client_id,
+                client_secret: web.remote_client_secret.into(),
+                auth_url_endpoint: "https://github.com/login/oauth/authorize".to_string(),
+                token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
+                token_endpoint: "https://github.com/login/oauth/access_token".to_string(),
+                revocation_endpoint: None,
+            },
         });
         let device_code_flow_info = config.device.map(|device| OAuthProviderDeviceInfo {
             client_id: device.client_id,
-            client_secret: device.client_secret.into(),
+            remote_client_id: device.remote_client_id,
+            remote_client_secret: device.remote_client_secret.into(),
             device_code_endpoint: "https://github.com/login/device/code".to_string(),
             token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
             token_endpoint: "https://github.com/login/oauth/access_token".to_string(),
@@ -114,6 +118,7 @@ impl ExtractUserInfo for GitHubOAuthProvider {
             external_id: ExternalUserId::GitHub(user.id.to_string()),
             verified_emails,
             display_name: Some(user.login),
+            idp_token: None,
         })
     }
 }

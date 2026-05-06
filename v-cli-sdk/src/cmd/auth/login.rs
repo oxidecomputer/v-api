@@ -14,6 +14,7 @@ use crate::{
 
 pub trait CliAdapterToken {
     fn access_token(&self) -> &str;
+    fn idp_token(&self) -> Option<&str>;
 }
 
 pub trait CliConsumerLoginProvider: Into<LoginProvider> + Subcommand + Debug + Clone {}
@@ -41,10 +42,20 @@ where
         T: VCliContext<C, R>,
         <T as VCliContext<C, R>>::Error: StdError + Send + Sync + 'static,
     {
-        let access_token = self.method.run(ctx, &self.mode).await?;
+        let (access_token, idp_token) = self.method.run(ctx, self.mode).await?;
 
         ctx.config_mut().set_token(access_token);
         ctx.config_mut().save()?;
+
+        // If we are acquiring an IdP token, present it to the user.
+        if let Some(idp_token) = idp_token {
+            println!("\nYou can now additionally authenticate against the requested remote service API \
+                with the following token.");
+            println!("IdP token: {}", idp_token);
+            println!("");
+            println!("Please note that this should be kept secure as calls made with this token are \
+                made on behalf of your user acount");
+        }
 
         Ok(())
     }
@@ -60,6 +71,10 @@ where
     OAuth {
         #[command(subcommand)]
         provider: SupportedProviders,
+        /// Additionally retrieve a the underlying IdP token. This token is not stored. Remote mode
+        /// should be used when you need to authenticate to the underlying system frontend by the API
+        #[arg(long, default_value = "false")]
+        request_idp_token: bool,
     },
     /// Login via Magic Link
     #[command(name = "mlink")]
@@ -77,7 +92,7 @@ pub enum LoginProvider {
     Zendesk,
 }
 
-#[derive(ValueEnum, Debug, Clone, PartialEq)]
+#[derive(Copy, ValueEnum, Debug, Clone, PartialEq)]
 pub enum AuthenticationMode {
     /// Retrieve and store an identity token. Identity mode is the default and should be used to
     /// when you do not require extended (multi-day) access
@@ -87,23 +102,19 @@ pub enum AuthenticationMode {
     /// a machine for continued access. This requires the permission to create api tokens
     #[value(name = "token")]
     Token,
-    /// Retrieve and store a remote token. Remote mode should be used when you want to authenticate
-    /// and retrieve a token for use against the underlying authentication provider
-    #[value(name = "remote")]
-    Remote,
 }
 
 impl<SupportedProviders> LoginMethod<SupportedProviders>
 where
     SupportedProviders: CliConsumerLoginProvider,
 {
-    pub async fn run<T, C, R>(&self, ctx: &T, mode: &AuthenticationMode) -> Result<String>
+    pub async fn run<T, C, R>(&self, ctx: &T, mode: AuthenticationMode) -> Result<(String, Option<String>)>
     where
         T: VCliContext<C, R>,
         <T as VCliContext<C, R>>::Error: StdError + Send + Sync + 'static,
     {
         match self {
-            Self::OAuth { provider } => {
+            Self::OAuth { provider, request_idp_token } => {
                 let adapter = ctx.oauth_adapter();
                 let provider = provider.clone().into();
                 let provider = adapter.provider(provider).await?;
@@ -113,18 +124,21 @@ where
                 // To handle those cases we need to use a proxy path that emulates an authorization
                 // code flow.
                 if provider.device_code_endpoint().is_some() {
-                    self.run_oauth_device_provider(provider, mode, ctx.oauth_adapter())
-                        .await
+                    if *request_idp_token {
+                        anyhow::bail!("Remote token access is not supported via device authentication flow");
+                    }
+                    Ok((self.run_oauth_device_provider(provider, mode, ctx.oauth_adapter())
+                        .await?, None))
                 } else if provider.supports_pkce_only() {
-                    self.run_oauth_code_provider(provider, mode, ctx.oauth_adapter())
+                    self.run_oauth_code_provider(provider, mode, *request_idp_token, ctx.oauth_adapter())
                         .await
                 } else {
                     anyhow::bail!("OAuth provider does not support any CLI authentication methods")
                 }
             }
             Self::MagicLink { email, scope } => {
-                self.run_magic_link(email, scope.as_deref(), ctx.mlink_adapter())
-                    .await
+                Ok((self.run_magic_link(email, scope.as_deref(), ctx.mlink_adapter())
+                    .await?, None))
             }
         }
     }
@@ -132,14 +146,14 @@ where
     async fn run_oauth_device_provider<T, V>(
         &self,
         provider: V,
-        mode: &AuthenticationMode,
+        mode: AuthenticationMode,
         adapter: T,
     ) -> Result<String>
     where
         T: CliOAuthAdapter,
         V: CliOAuthProviderInfo,
     {
-        let oauth_client = oauth::DeviceOAuth::new(provider)?;
+        let oauth_client = oauth::device::DeviceOAuth::new(provider)?;
         let details = oauth_client.get_device_authorization().await?;
 
         println!(
@@ -155,37 +169,52 @@ where
             Err(err) => Err(anyhow::anyhow!("Authentication failed: {}", err)),
         }?;
 
-        if mode == &AuthenticationMode::Token {
-            let token = adapter
-                .get_long_lived_token(identity_token.secret())
-                .await?;
-            Ok(token.access_token().to_string())
-        } else {
-            Ok(identity_token.secret().to_string())
+        match mode {
+            AuthenticationMode::Identity => {
+                Ok(identity_token.secret().to_string())
+            }
+            AuthenticationMode::Token => {
+                let token = adapter
+                    .get_long_lived_token(identity_token.secret())
+                    .await?;
+                Ok(token.access_token().to_string())
+            }
         }
     }
 
     async fn run_oauth_code_provider<T, V>(
         &self,
         provider: T,
-        mode: &AuthenticationMode,
+        mode: AuthenticationMode,
+        request_idp_token: bool,
         adapter: V,
-    ) -> Result<String>
+    ) -> Result<(String, Option<String>)>
     where
         T: CliOAuthProviderInfo,
         V: CliOAuthAdapter + Send + Sync + 'static,
     {
-        let oauth_client = oauth::CodeOAuth::new(provider)?;
+        let oauth_client = oauth::code::CodeOAuth::new(provider)?;
         let adapter = Arc::new(adapter);
 
-        let identity_token = oauth_client.login(Arc::clone(&adapter)).await?;
+        let identity_token = oauth_client.login(Arc::clone(&adapter), request_idp_token).await?;
 
-        if mode == &AuthenticationMode::Token {
-            let token = adapter.get_long_lived_token(&identity_token).await?;
-            Ok(token.access_token().to_string())
+        let access_token = match mode {
+            AuthenticationMode::Identity => identity_token.access_token().to_string(),
+            AuthenticationMode::Token => {
+                let token = adapter
+                    .get_long_lived_token(identity_token.access_token())
+                    .await?;
+                token.access_token().to_string()
+            }
+        };
+
+        let idp_token = if request_idp_token {
+            identity_token.idp_token().map(|s| s.to_string())
         } else {
-            Ok(identity_token)
-        }
+            None
+        };
+
+        Ok((access_token, idp_token))
     }
 
     async fn run_magic_link<T>(

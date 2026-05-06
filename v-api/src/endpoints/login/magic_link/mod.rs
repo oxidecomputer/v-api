@@ -218,6 +218,7 @@ where
                     external_id: ExternalUserId::MagicLink(body.recipient.clone()),
                     verified_emails: vec![body.recipient],
                     display_name: None,
+                    idp_token: None,
                 },
             )
             .await?;

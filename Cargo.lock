@@ -3916,6 +3916,7 @@ dependencies = [
  "serde_json",
  "tabwriter",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

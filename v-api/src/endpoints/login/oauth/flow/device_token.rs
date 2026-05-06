@@ -14,7 +14,8 @@ use tap::TapFallible;
 use tracing::instrument;
 use v_model::permissions::PermissionStorage;
 
-use super::{OAuthProviderNameParam, UserInfoProvider};
+use super::super::OAuthProviderNameParam;
+use crate::endpoints::login::UserInfoProvider;
 use crate::{
     context::ApiContext,
     endpoints::login::{oauth::OAuthProviderDeviceInfo, LoginError},
@@ -75,10 +76,10 @@ impl AccessTokenExchange {
     pub fn new(req: AccessTokenExchangeRequest, provider: &OAuthProviderDeviceInfo) -> Self {
         Self {
             provider: ProviderTokenExchange {
-                client_id: provider.client_id.clone(),
+                client_id: provider.remote_client_id.clone(),
                 device_code: req.device_code,
                 grant_type: req.grant_type,
-                client_secret: provider.client_secret.0.expose_secret().to_string(),
+                client_secret: provider.remote_client_secret.0.expose_secret().to_string(),
             },
             expires_at: req.expires_at,
         }

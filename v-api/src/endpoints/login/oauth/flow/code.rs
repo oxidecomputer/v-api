@@ -31,7 +31,8 @@ use v_model::{
     LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient, OAuthClientId,
 };
 
-use super::{OAuthProvider, OAuthProviderNameParam, UserInfoProvider};
+use super::super::{OAuthProvider, OAuthProviderNameParam};
+use crate::endpoints::login::UserInfoProvider;
 use crate::{
     authn::key::RawKey,
     context::{ApiContext, VContext},
@@ -155,7 +156,7 @@ where
 }
 
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn get_web_pkce_provider_op<T>(
+pub async fn get_public_pkce_provider_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<OAuthProviderNameParam>,
 ) -> Result<HttpResponseOk<OAuthProviderAuthorizationCodePkceInfo>, HttpError>
@@ -466,8 +467,7 @@ where
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct OAuthAuthzCodeExchangeQuery {
-    #[serde(default)]
-    pub include_idp_token: bool,
+    pub request_idp_token: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -485,7 +485,7 @@ pub struct OAuthAuthzCodeExchangeResponse {
     pub access_token: String,
     pub token_type: String,
     pub expires_in: i64,
-    pub idp_token: Option<OAuthAuthzCodeIdpToken>,
+    pub idp_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
@@ -496,16 +496,16 @@ pub struct OAuthAuthzCodeIdpToken {
 #[instrument(skip(rqctx), err(Debug))]
 pub async fn authz_code_exchange_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
-    path: Path<OAuthProviderNameParam>,
     query: Query<OAuthAuthzCodeExchangeQuery>,
+    path: Path<OAuthProviderNameParam>,
     body: TypedBody<OAuthAuthzCodeExchangeBody>,
 ) -> Result<HttpResponseOk<OAuthAuthzCodeExchangeResponse>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
 {
     let ctx = rqctx.v_ctx();
-    let path = path.into_inner();
     let query = query.into_inner();
+    let path = path.into_inner();
     let body = body.into_inner();
 
     let provider = ctx
@@ -527,13 +527,17 @@ where
             ),
             auth.password().unwrap().to_string(),
         ))),
+        Ok(auth) if auth.username().is_none() && auth.password().is_none() => {
+            tracing::info!("Credentials for code exchange not defined via basic auth");
+            Ok(None)
+        }
         Ok(_) => Err(bad_request(
             "Malformed credentials presented to code exchange",
         )),
         Err(err) => {
             tracing::info!(
                 ?err,
-                "Credentials for code exchange not defined via basic auth"
+                "Failed to extract basic authentication credentials"
             );
             Ok(None)
         }
@@ -546,6 +550,7 @@ where
     // We of course deny underspecifying credentials, but we also want to disallow over specifying
     // them. For example, if the client provides both basic auth and a client id/secret in the
     // request body, we should reject the request.
+    tracing::debug!(?basic_credentials, ?body_credentials, "Extracted credentials from request");
     let (client_id, client_secret) = match (basic_credentials, body_credentials) {
         (Some(_), (Some(_), _)) => Err(bad_request(
             "Cannot provide both basic auth and client credentials",
@@ -604,14 +609,15 @@ where
 
     // Now that the attempt has been confirmed, use it to fetch user information form the remote
     // provider
-    let (info, raw_token) = fetch_user_info(
+    let info = fetch_user_info(
         ctx.public_url(),
         &ctx.web_client(),
         &*provider,
         &attempt,
-        query.include_idp_token,
+        !query.request_idp_token,
     )
     .await?;
+    let idp_token = info.idp_token.clone();
 
     tracing::debug!("Retrieved user information from remote provider");
 
@@ -659,9 +665,7 @@ where
         token_type: "Bearer".to_string(),
         access_token: token.signed_token,
         expires_in: token.expires_in,
-        idp_token: query.include_idp_token.then(|| OAuthAuthzCodeIdpToken {
-            token: raw_token.unwrap(),
-        }),
+        idp_token,
     }))
 }
 
@@ -801,8 +805,8 @@ async fn fetch_user_info(
     client_type: &ClientType,
     provider: &dyn OAuthProvider,
     attempt: &LoginAttempt,
-    return_raw: bool,
-) -> Result<(UserInfo, Option<String>), HttpError> {
+    revoke_idp_token: bool,
+) -> Result<UserInfo, HttpError> {
     let provider_info = provider
         .authz_code_flow_info()
         .ok_or_else(|| internal_error("Authorization code flow not supported"))?;
@@ -842,7 +846,7 @@ async fn fetch_user_info(
 
     // Now that we are done with fetching user information from the remote API, we can revoke it if
     // the provider supports it
-    if !return_raw && provider_info.revocation_endpoint.is_some() {
+    if revoke_idp_token && provider_info.remote.revocation_endpoint.is_some() {
         client
             .revoke_token(response.access_token().into())
             .map_err(internal_error)?
@@ -851,11 +855,7 @@ async fn fetch_user_info(
             .map_err(internal_error)?;
     }
 
-    if return_raw {
-        Ok((info, Some(response.access_token().secret().to_string())))
-    } else {
-        Ok((info, None))
-    }
+    Ok(info)
 }
 
 #[cfg(test)]
@@ -891,7 +891,7 @@ mod tests {
             VContext,
         },
         endpoints::login::oauth::{
-            code::{
+            flow::code::{
                 authz_code_callback_op_inner, verify_csrf, verify_login_attempt,
                 OAuthAuthzCodeReturnQuery, OAuthError, OAuthErrorCode, LOGIN_ATTEMPT_COOKIE,
             },

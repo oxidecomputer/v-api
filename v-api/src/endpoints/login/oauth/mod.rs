@@ -5,18 +5,19 @@
 use async_trait::async_trait;
 use http::Method;
 use hyper::{body::Bytes, header::HeaderValue, header::AUTHORIZATION};
+use newtype_uuid::TypedUuid;
 use oauth2::{
     basic::BasicClient, url::ParseError, AuthUrl, ClientId, ClientSecret, EndpointMaybeSet,
     EndpointNotSet, EndpointSet, RedirectUrl, RevocationUrl, TokenUrl,
 };
 use reqwest::Request;
 use schemars::JsonSchema;
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
 use thiserror::Error;
 use tracing::instrument;
-use v_model::OAuthClient;
+use v_model::{OAuthClient, OAuthClientId};
 
 use crate::{
     authn::{key::RawKey, Verify},
@@ -26,11 +27,8 @@ use crate::{
 use super::{UserInfo, UserInfoError, UserInfoProvider};
 
 pub mod client;
-pub mod code;
-pub mod device_token;
-pub mod github;
-pub mod google;
-pub mod zendesk;
+pub mod flow;
+pub mod remote;
 
 #[derive(Debug, Error)]
 pub enum OAuthProviderError {
@@ -64,14 +62,6 @@ pub type WebClient = BasicClient<
     EndpointSet,
 >;
 
-pub struct OAuthPublicCredentials {
-    client_id: String,
-}
-
-pub struct OAuthPrivateCredentials {
-    client_secret: SecretString,
-}
-
 pub trait OAuthProvider: ExtractUserInfo + Debug + Send + Sync {
     fn name(&self) -> OAuthProviderName;
     fn initialize_headers(&self, request: &mut Request);
@@ -85,62 +75,24 @@ pub trait OAuthProvider: ExtractUserInfo + Debug + Send + Sync {
     fn default_scopes(&self) -> &[String];
 
     fn supports_pkce(&self) -> bool {
-        false
+        true
     }
-
-    // TODO: How can user info be change to something statically checked instead of a runtime check
-    // fn auth_ur_endpoint(&self) -> Option<&str>;
-    // fn redirect_endpoint(&self) -> Option<&str>;
-
-    // fn token_exchange_content_type(&self) -> &str;
-    // fn token_exchange_endpoint(&self) -> &str;
-    // fn token_revocation_endpoint(&self) -> Option<&str>;
-
-    // fn supports_pkce_only(&self) -> bool { false }
-
-    // fn device_code_endpoint(&self) -> Option<&str>;
-    // fn token_endpoint(&self) -> Option<&str>;
-
-    // fn provider_info(&self, client_type: &ClientType) -> Option<OAuthProviderInfo> {
-    //     let default_scopes = self
-    //         .scopes()
-    //         .into_iter()
-    //         .map(|s| s.to_string())
-    //         .collect::<Vec<_>>();
-    //     self.client_id(client_type).map(|client_id| OAuthProviderInfo {
-    //         provider: self.name(),
-    //         client_id: client_id.to_string(),
-    //         code: self.authz_code_flow_info(),
-    //         pkce: self.authz_code_pkce_flow_info(),
-    //         device: self.device_code_flow_info(),
-    //         // auth_url_endpoint: self.auth_url_endpoint().to_string(),
-    //         // device_code_endpoint: self.device_code_endpoint().map(|s| s.to_string()),
-    //         // token_endpoint: self.token_endpoint().map(|s| s.to_string()),
-    //         // redirect_endpoint: self.redirect_endpoint().map(|s| s.to_string()),
-    //         // supports_pkce_only: self.supports_pkce_only(),
-    //         // scopes: self
-    //         //     .scopes()
-    //         //     .into_iter()
-    //         //     .map(|s| s.to_string())
-    //         //     .collect::<Vec<_>>(),
-    //     })
-    // }
 
     fn as_web_client(&self) -> Result<WebClient, OAuthProviderError> {
         match self.authz_code_flow_info() {
             Some(info) => {
-                let client = BasicClient::new(ClientId::new(info.client_id.clone()))
-                    .set_auth_uri(AuthUrl::new(info.auth_url_endpoint.clone())?)
-                    .set_token_uri(TokenUrl::new(info.token_endpoint.clone())?)
+                let client = BasicClient::new(ClientId::new(info.remote.client_id.clone()))
+                    .set_auth_uri(AuthUrl::new(info.remote.auth_url_endpoint.clone())?)
+                    .set_token_uri(TokenUrl::new(info.remote.token_endpoint.clone())?)
                     .set_revocation_url_option(
-                        info.revocation_endpoint
+                        info.remote.revocation_endpoint
                             .as_ref()
                             .map(|url| RevocationUrl::new(url.to_string()))
                             .transpose()?,
                     )
                     .set_redirect_uri(RedirectUrl::new(info.redirect_endpoint.to_string())?)
                     .set_client_secret(ClientSecret::new(
-                        info.client_secret.0.expose_secret().to_string(),
+                        info.remote.client_secret.0.expose_secret().to_string(),
                     ));
 
                 Ok(client)
@@ -190,7 +142,9 @@ where
             responses.push(bytes);
         }
 
-        self.extract_user_info(&responses)
+        let mut info = self.extract_user_info(&responses)?;
+        info.idp_token = Some(token.to_string());
+        Ok(info)
     }
 }
 
@@ -205,50 +159,36 @@ pub struct OAuthProviderInfo {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct OAuthProviderAuthorizationCodeInfo {
-    client_id: String,
-    client_secret: OpenApiSecretString,
     auth_url_endpoint: String,
     redirect_endpoint: String,
     token_endpoint_content_type: String,
     token_endpoint: String,
-    revocation_endpoint: Option<String>,
+    remote: OAuthProviderAuthorizationCodeRemoteInfo,
 }
 
-impl OAuthProviderAuthorizationCodeInfo {
-    fn as_web_client(&self) -> Result<WebClient, OAuthProviderError> {
-        let client = BasicClient::new(ClientId::new(self.client_id.clone()))
-            .set_auth_uri(AuthUrl::new(self.auth_url_endpoint.clone())?)
-            .set_token_uri(TokenUrl::new(self.token_endpoint.clone())?)
-            .set_revocation_url_option(
-                self.revocation_endpoint
-                    .as_ref()
-                    .map(|url| RevocationUrl::new(url.to_string()))
-                    .transpose()?,
-            )
-            .set_redirect_uri(RedirectUrl::new(self.redirect_endpoint.to_string())?)
-            .set_client_secret(ClientSecret::new(
-                self.client_secret.0.expose_secret().to_string(),
-            ));
-
-        Ok(client)
-    }
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct OAuthProviderAuthorizationCodeRemoteInfo {
+    client_id: String,
+    client_secret: OpenApiSecretString,
+    auth_url_endpoint: String,
+    token_endpoint_content_type: String,
+    token_endpoint: String,
+    revocation_endpoint: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct OAuthProviderAuthorizationCodePkceInfo {
-    client_id: String,
-    auth_url_endpoint: String,
+    client_id: TypedUuid<OAuthClientId>,
     redirect_endpoint: String,
-    token_endpoint_content_type: String,
-    token_endpoint: String,
-    revocation_endpoint: Option<String>,
     proxy_port: u16,
+    web: OAuthProviderAuthorizationCodeInfo,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct OAuthProviderDeviceInfo {
-    client_id: String,
-    client_secret: OpenApiSecretString,
+    client_id: TypedUuid<OAuthClientId>,
+    remote_client_id: String,
+    remote_client_secret: OpenApiSecretString,
     device_code_endpoint: String,
     token_endpoint_content_type: String,
     token_endpoint: String,

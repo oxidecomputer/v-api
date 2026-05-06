@@ -54,7 +54,10 @@ where
     T: VAppPermission + From<VPermission> + PermissionStorage,
 {
     // Create the new client
-    let client = ctx.oauth.create_oauth_client(&caller).await?;
+    let client = ctx
+        .oauth
+        .create_oauth_client(&caller, TypedUuid::new_v4())
+        .await?;
 
     // Give the caller permission to perform actions on the client
     ctx.user

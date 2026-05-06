@@ -10,15 +10,13 @@ use std::fmt;
 use crate::{
     config::ResolvedOAuthConfig,
     endpoints::login::{
-        oauth::{
-            OAuthProviderAuthorizationCodeInfo, OAuthProviderAuthorizationCodePkceInfo,
-            OAuthProviderDeviceInfo,
-        },
-        ExternalUserId, UserInfo, UserInfoError,
+        ExternalUserId, UserInfo, UserInfoError, oauth::{
+            OAuthProviderAuthorizationCodeInfo, OAuthProviderAuthorizationCodePkceInfo, OAuthProviderAuthorizationCodeRemoteInfo, OAuthProviderDeviceInfo
+        }
     },
 };
 
-use super::{ExtractUserInfo, OAuthProvider, OAuthProviderName};
+use super::super::{ExtractUserInfo, OAuthProvider, OAuthProviderName};
 
 pub struct ZendeskOAuthProvider {
     authz_code_flow_info: Option<OAuthProviderAuthorizationCodeInfo>,
@@ -41,65 +39,34 @@ impl ZendeskOAuthProvider {
         subdomain: String,
         additional_scopes: Option<Vec<String>>,
     ) -> Self {
-        // let base_url = format!("https://{}.zendesk.com", subdomain);
-
-        // Self {
-        //     device_public: OAuthPublicCredentials {
-        //         client_id: device_client_id,
-        //     },
-        //     device_private: Some(OAuthPrivateCredentials {
-        //         client_secret: device_client_secret,
-        //     }),
-        //     web_public: OAuthPublicCredentials {
-        //         client_id: web_client_id,
-        //     },
-        //     web_private: Some(OAuthPrivateCredentials {
-        //         client_secret: web_client_secret,
-        //     }),
-        //     web_pkce: web_pkce_client_id.map(|client_id| OAuthPublicCredentials {
-        //         client_id,
-        //     }),
-        //     web_pkce_port: web_pkce_port,
-        //     additional_scopes: additional_scopes.unwrap_or_default(),
-        //     client: reqwest::ClientBuilder::new()
-        //         .redirect(reqwest::redirect::Policy::none())
-        //         .build()
-        //         .expect("Static client must build"),
-        //     user_info_endpoint: format!("{}/api/v2/users/me.json", base_url),
-        //     auth_url_endpoint: format!("{}/oauth/authorizations/new", base_url),
-        //     token_exchange_endpoint: format!("{}/oauth/tokens", base_url),
-        //     token_endpoint: Some(format!(
-        //         "{}/login/oauth/zendesk/device/exchange",
-        //         public_url
-        //     )),
-        //     redirect_endpoint: Some(format!("{}/login/oauth/zendesk/code/callback", public_url,)),
-        // }
-
         let base_url = format!("https://{}.zendesk.com", subdomain);
 
-        let mut default_scopes = vec!["users:read".to_string()];
+        let mut default_scopes = vec!["read".to_string(), "write".to_string()];
         default_scopes.extend(additional_scopes.unwrap_or_default());
 
         let authz_code_flow_info = config.web.map(|web| OAuthProviderAuthorizationCodeInfo {
-            client_id: web.client_id,
-            client_secret: web.client_secret.into(),
-            auth_url_endpoint: format!("{}/oauth/authorizations/new", base_url),
+            auth_url_endpoint: format!("{}/login/oauth/zendesk/code/authorize", public_url),
             redirect_endpoint: format!("{}/login/oauth/zendesk/code/callback", public_url),
             token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
-            token_endpoint: format!("{}/oauth/tokens", base_url),
-            revocation_endpoint: None,
+            token_endpoint: format!("{}/login/oauth/zendesk/device/exchange", public_url),
+            remote: OAuthProviderAuthorizationCodeRemoteInfo {
+                client_id: web.remote_client_id,
+                client_secret: web.remote_client_secret.into(),
+                auth_url_endpoint: format!("{}/oauth/authorizations/new", base_url),
+                token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
+                token_endpoint: format!("{}/oauth/tokens", base_url),
+                revocation_endpoint: None
+            },
         });
         let authz_code_pkce_flow_info =
             config
                 .proxy_web
-                .map(|proxy| OAuthProviderAuthorizationCodePkceInfo {
+                .and_then(|proxy| authz_code_flow_info.as_ref().map(|web| (web, proxy)))
+                .map(|(web, proxy)| OAuthProviderAuthorizationCodePkceInfo {
                     client_id: proxy.client_id,
-                    auth_url_endpoint: format!("{}/oauth/authorizations/new", base_url),
-                    redirect_endpoint: format!("{}/login/oauth/zendesk/code/callback", public_url),
-                    token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
-                    token_endpoint: format!("{}/oauth/tokens", base_url),
+                    redirect_endpoint: proxy.redirect_uri,
                     proxy_port: proxy.proxy_port,
-                    revocation_endpoint: None,
+                    web: web.clone()
                 });
 
         Self {
@@ -153,6 +120,7 @@ impl ExtractUserInfo for ZendeskOAuthProvider {
             external_id: ExternalUserId::Zendesk(user.id.to_string()),
             verified_emails,
             display_name: Some(user.name),
+            idp_token: None,
         })
     }
 }

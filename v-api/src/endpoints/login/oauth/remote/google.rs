@@ -10,15 +10,13 @@ use std::fmt;
 use crate::{
     config::ResolvedOAuthConfig,
     endpoints::login::{
-        oauth::{
-            OAuthProviderAuthorizationCodeInfo, OAuthProviderAuthorizationCodePkceInfo,
-            OAuthProviderDeviceInfo,
-        },
-        ExternalUserId, UserInfo, UserInfoError,
+        ExternalUserId, UserInfo, UserInfoError, oauth::{
+            OAuthProviderAuthorizationCodeInfo, OAuthProviderAuthorizationCodePkceInfo, OAuthProviderAuthorizationCodeRemoteInfo, OAuthProviderDeviceInfo
+        }
     },
 };
 
-use super::{ExtractUserInfo, OAuthProvider, OAuthProviderName};
+use super::super::{ExtractUserInfo, OAuthProvider, OAuthProviderName};
 
 pub struct GoogleOAuthProvider {
     authz_code_flow_info: Option<OAuthProviderAuthorizationCodeInfo>,
@@ -48,33 +46,37 @@ impl GoogleOAuthProvider {
         default_scopes.extend(additional_scopes.unwrap_or_default());
 
         let authz_code_flow_info = config.web.map(|web| OAuthProviderAuthorizationCodeInfo {
-            client_id: web.client_id,
-            client_secret: web.client_secret.into(),
-            auth_url_endpoint: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
-            redirect_endpoint: format!("{}/login/oauth/github/code/callback", public_url,),
+            auth_url_endpoint: format!("{}/login/oauth/google/code/authorize", public_url),
+            redirect_endpoint: format!("{}/login/oauth/google/code/callback", public_url),
             token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
-            token_endpoint: "https://oauth2.googleapis.com/token".to_string(),
-            revocation_endpoint: None,
+            token_endpoint: format!("{}/login/oauth/google/device/exchange", public_url),
+            remote: OAuthProviderAuthorizationCodeRemoteInfo {
+                client_id: web.remote_client_id,
+                client_secret: web.remote_client_secret.into(),
+                auth_url_endpoint: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
+                token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
+                token_endpoint: "https://oauth2.googleapis.com/token".to_string(),
+                revocation_endpoint: Some("https://oauth2.googleapis.com/revoke".to_string()),
+            },
         });
         let authz_code_pkce_flow_info =
             config
                 .proxy_web
-                .map(|proxy| OAuthProviderAuthorizationCodePkceInfo {
+                .and_then(|proxy| authz_code_flow_info.as_ref().map(|web| (web, proxy)))
+                .map(|(web, proxy)| OAuthProviderAuthorizationCodePkceInfo {
                     client_id: proxy.client_id,
-                    auth_url_endpoint: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
-                    redirect_endpoint: format!("{}/login/oauth/github/code/callback", public_url,),
-                    token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
-                    token_endpoint: "https://oauth2.googleapis.com/token".to_string(),
+                    redirect_endpoint: proxy.redirect_uri,
                     proxy_port: proxy.proxy_port,
-                    revocation_endpoint: None,
+                    web: web.clone()
                 });
         let device_code_flow_info = config.device.map(|device| OAuthProviderDeviceInfo {
             client_id: device.client_id,
-            client_secret: device.client_secret.into(),
-            device_code_endpoint: "https://github.com/login/device/code".to_string(),
+            remote_client_id: device.remote_client_id,
+            remote_client_secret: device.remote_client_secret.into(),
+            device_code_endpoint: "https://oauth2.googleapis.com/device/code".to_string(),
             token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
-            token_endpoint: "https://github.com/login/oauth/access_token".to_string(),
-            revocation_endpoint: None,
+            token_endpoint: "https://oauth2.googleapis.com/token".to_string(),
+            revocation_endpoint: Some("https://oauth2.googleapis.com/revoke".to_string()),
         });
 
         Self {
@@ -144,6 +146,7 @@ impl ExtractUserInfo for GoogleOAuthProvider {
             external_id: ExternalUserId::Google(remote_info.sub),
             verified_emails,
             display_name,
+            idp_token: None,
         })
     }
 }
@@ -170,7 +173,7 @@ impl OAuthProvider for GoogleOAuthProvider {
         self.authz_code_flow_info.as_ref()
     }
     fn authz_code_pkce_flow_info(&self) -> Option<&OAuthProviderAuthorizationCodePkceInfo> {
-        None
+        self.authz_code_pkce_flow_info.as_ref()
     }
     fn device_code_flow_info(&self) -> Option<&OAuthProviderDeviceInfo> {
         self.device_code_flow_info.as_ref()

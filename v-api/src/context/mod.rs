@@ -764,6 +764,7 @@ pub struct VContextBuilder<T> {
     keys: Option<Vec<AsymmetricKey>>,
     #[cfg(feature = "sagas")]
     saga: Option<(TypedUuid<SagaExecNodeId>, Option<Logger>)>,
+    additional_builtin_permissions: Vec<T>,
 }
 
 impl<T> Default for VContextBuilder<T>
@@ -790,6 +791,7 @@ where
             keys: None,
             #[cfg(feature = "sagas")]
             saga: None,
+            additional_builtin_permissions: Vec::new(),
         }
     }
 
@@ -835,6 +837,11 @@ where
         logger: Option<Logger>,
     ) -> Self {
         self.saga = Some((node_id, logger));
+        self
+    }
+
+    pub fn with_additional_builtin_permissions(mut self, permissions: Vec<T>) -> Self {
+        self.additional_builtin_permissions = permissions;
         self
     }
 
@@ -900,7 +907,14 @@ where
         .into_iter()
         .filter_map(|key| key.ok())
         .collect::<Vec<_>>();
-        let auth_ctx = AuthContext::new(jwt, jwks, signers, verifiers).map_err(|err| {
+        let auth_ctx = AuthContext::new(
+            jwt,
+            jwks,
+            signers,
+            verifiers,
+            self.additional_builtin_permissions,
+        )
+        .map_err(|err| {
             tracing::error!(?err, "Auth context construction failed");
             VContextError::InternalAuthContext
         })?;
@@ -1245,9 +1259,12 @@ pub(crate) mod test_mocks {
     };
 
     use crate::{
-        config::JwtConfig,
+        config::{
+            JwtConfig, ResolvedOAuthConfig, ResolvedOAuthWebConfig, ResolvedOAuthWebProxyConfig,
+        },
         endpoints::login::oauth::{
-            google::GoogleOAuthProvider, zendesk::ZendeskOAuthProvider, OAuthProviderName,
+            remote::google::GoogleOAuthProvider, remote::zendesk::ZendeskOAuthProvider,
+            OAuthProviderName,
         },
         mapper::DefaultMappingEngine,
         permissions::VPermission,
@@ -1280,11 +1297,15 @@ pub(crate) mod test_mocks {
             OAuthProviderName::Google,
             Box::new(move || {
                 Box::new(GoogleOAuthProvider::new(
+                    ResolvedOAuthConfig {
+                        device: None,
+                        web: Some(ResolvedOAuthWebConfig {
+                            remote_client_id: "google_web_client_id".to_string(),
+                            remote_client_secret: "google_web_client_secret".to_string().into(),
+                        }),
+                        proxy_web: None,
+                    },
                     "https://test_public_url".to_string(),
-                    "google_device_client_id".to_string(),
-                    "google_device_client_secret".to_string().into(),
-                    "google_web_client_id".to_string(),
-                    "google_web_client_secret".to_string().into(),
                     None,
                 ))
             }),
@@ -1294,12 +1315,17 @@ pub(crate) mod test_mocks {
             OAuthProviderName::Zendesk,
             Box::new(move || {
                 Box::new(ZendeskOAuthProvider::new(
+                    ResolvedOAuthConfig {
+                        device: None,
+                        web: None,
+                        proxy_web: Some(ResolvedOAuthWebProxyConfig {
+                            client_id: TypedUuid::new_v4(),
+                            redirect_uri: "test".to_string(),
+                            proxy_port: 1234,
+                        }),
+                    },
                     "https://test_public_url".to_string(),
                     "subdomain".to_string(),
-                    "google_device_client_id".to_string(),
-                    "google_device_client_secret".to_string().into(),
-                    "google_web_client_id".to_string(),
-                    "google_web_client_secret".to_string().into(),
                     None,
                 ))
             }),

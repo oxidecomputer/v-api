@@ -439,6 +439,7 @@ fn from_system_permission_tokens(
                         VPermission::ManageMagicLinkClientsAll => Self::ManageMagicLinkClientsAll,
 
                         VPermission::CreateAccessToken => Self::CreateAccessToken,
+                        VPermission::RetrieveRemoteAccessToken => Self::RetrieveRemoteAccessToken,
 
                         VPermission::GetSagasAll => Self::GetSagasAll,
                         VPermission::ManageSagasAll => Self::ManageSagasAll,
@@ -722,6 +723,7 @@ fn system_permission_tokens() -> TokenStream {
             ManageMagicLinkClientsAll,
 
             CreateAccessToken,
+            RetrieveRemoteAccessToken,
 
             #[v_api(scope(to = "saga:r", from = "saga:r"))]
             GetSagasAll,

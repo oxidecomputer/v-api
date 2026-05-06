@@ -191,6 +191,7 @@ pub struct UserInfo {
     pub external_id: ExternalUserId,
     pub verified_emails: Vec<String>,
     pub display_name: Option<String>,
+    pub idp_token: Option<String>,
 }
 
 #[derive(Debug, Error)]
