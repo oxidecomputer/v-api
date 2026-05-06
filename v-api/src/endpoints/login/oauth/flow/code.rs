@@ -625,6 +625,7 @@ where
     // Verify that the login attempt is valid and matches the submitted client credentials
     verify_login_attempt(
         &attempt,
+        &provider.name().to_string(),
         client_id,
         &body.redirect_uri,
         &body.pkce_verifier,
@@ -762,11 +763,19 @@ where
 
 fn verify_login_attempt(
     attempt: &LoginAttempt,
+    provider: &str,
     client_id: TypedUuid<OAuthClientId>,
     redirect_uri: &str,
     pkce_verifier: &str,
 ) -> Result<(), OAuthError> {
-    if attempt.client_id != client_id {
+    if attempt.provider != provider {
+        Err(OAuthError {
+            error: OAuthErrorCode::InvalidGrant,
+            error_description: Some("Provider mismatch".to_string()),
+            error_uri: None,
+            state: None,
+        })
+    } else if attempt.client_id != client_id {
         Err(OAuthError {
             error: OAuthErrorCode::InvalidGrant,
             error_description: Some("Invalid client id".to_string()),
@@ -1666,6 +1675,7 @@ mod tests {
             },
             verify_login_attempt(
                 &bad_client_id,
+                &attempt.provider,
                 attempt.client_id,
                 &attempt.redirect_uri,
                 verifier.secret().as_str(),
@@ -1687,6 +1697,7 @@ mod tests {
             },
             verify_login_attempt(
                 &bad_redirect_uri,
+                &attempt.provider,
                 attempt.client_id,
                 &attempt.redirect_uri,
                 verifier.secret().as_str(),
@@ -1708,6 +1719,7 @@ mod tests {
             },
             verify_login_attempt(
                 &unconfirmed_state,
+                &attempt.provider,
                 attempt.client_id,
                 &attempt.redirect_uri,
                 verifier.secret().as_str(),
@@ -1729,6 +1741,7 @@ mod tests {
             },
             verify_login_attempt(
                 &already_used_state,
+                &attempt.provider,
                 attempt.client_id,
                 &attempt.redirect_uri,
                 verifier.secret().as_str(),
@@ -1750,6 +1763,7 @@ mod tests {
             },
             verify_login_attempt(
                 &failed_state,
+                &attempt.provider,
                 attempt.client_id,
                 &attempt.redirect_uri,
                 verifier.secret().as_str(),
@@ -1771,6 +1785,7 @@ mod tests {
             },
             verify_login_attempt(
                 &expired,
+                &attempt.provider,
                 attempt.client_id,
                 &attempt.redirect_uri,
                 verifier.secret().as_str(),
@@ -1795,6 +1810,7 @@ mod tests {
             },
             verify_login_attempt(
                 &missing_challenge,
+                &attempt.provider,
                 attempt.client_id,
                 &attempt.redirect_uri,
                 verifier.secret().as_str(),
@@ -1816,6 +1832,7 @@ mod tests {
             },
             verify_login_attempt(
                 &invalid_pkce,
+                &attempt.provider,
                 attempt.client_id,
                 &attempt.redirect_uri,
                 verifier.secret().as_str(),
@@ -1827,6 +1844,64 @@ mod tests {
             (),
             verify_login_attempt(
                 &attempt,
+                &attempt.provider,
+                attempt.client_id,
+                &attempt.redirect_uri,
+                verifier.secret().as_str(),
+            )
+            .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_provider_mismatch_is_rejected() {
+        let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
+
+        // Login attempt was created via Google
+        let attempt = LoginAttempt {
+            id: TypedUuid::new_v4(),
+            attempt_state: LoginAttemptState::RemoteAuthenticated,
+            client_id: TypedUuid::new_v4(),
+            redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+            state: Some("ox_state".to_string()),
+            pkce_challenge: Some(challenge.as_str().to_string()),
+            pkce_challenge_method: Some("S256".to_string()),
+            authz_code: None,
+            expires_at: Some(Utc::now().add(TimeDelta::try_seconds(60).unwrap())),
+            error: None,
+            provider: "google".to_string(),
+            provider_pkce_verifier: Some("v_verifier".to_string()),
+            provider_authz_code: None,
+            provider_error: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            scope: String::new(),
+        };
+
+        // Exchanging against a different provider must fail
+        assert_eq!(
+            OAuthError {
+                error: OAuthErrorCode::InvalidGrant,
+                error_description: Some("Provider mismatch".to_string()),
+                error_uri: None,
+                state: None,
+            },
+            verify_login_attempt(
+                &attempt,
+                "github",
+                attempt.client_id,
+                &attempt.redirect_uri,
+                verifier.secret().as_str(),
+            )
+            .unwrap_err()
+        );
+
+        // Exchanging against the correct provider must succeed
+        assert_eq!(
+            (),
+            verify_login_attempt(
+                &attempt,
+                "google",
                 attempt.client_id,
                 &attempt.redirect_uri,
                 verifier.secret().as_str(),
