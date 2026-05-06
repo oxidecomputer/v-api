@@ -21,10 +21,10 @@ use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer,
 };
-use v_model::OAuthClientId;
 use std::path::PathBuf;
 use thiserror::Error;
 use v_api_param::{ParamResolutionError, StringParam};
+use v_model::OAuthClientId;
 
 use crate::{
     authn::{

@@ -10,9 +10,11 @@ use std::fmt;
 use crate::{
     config::ResolvedOAuthConfig,
     endpoints::login::{
-        ExternalUserId, UserInfo, UserInfoError, oauth::{
-            OAuthProviderAuthorizationCodeInfo, OAuthProviderAuthorizationCodePkceInfo, OAuthProviderAuthorizationCodeRemoteInfo, OAuthProviderDeviceInfo
-        }
+        oauth::{
+            OAuthProviderAuthorizationCodeInfo, OAuthProviderAuthorizationCodePkceInfo,
+            OAuthProviderAuthorizationCodeRemoteInfo, OAuthProviderDeviceInfo,
+        },
+        ExternalUserId, UserInfo, UserInfoError,
     },
 };
 
@@ -55,19 +57,18 @@ impl ZendeskOAuthProvider {
                 auth_url_endpoint: format!("{}/oauth/authorizations/new", base_url),
                 token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
                 token_endpoint: format!("{}/oauth/tokens", base_url),
-                revocation_endpoint: None
+                revocation_endpoint: None,
             },
         });
-        let authz_code_pkce_flow_info =
-            config
-                .proxy_web
-                .and_then(|proxy| authz_code_flow_info.as_ref().map(|web| (web, proxy)))
-                .map(|(web, proxy)| OAuthProviderAuthorizationCodePkceInfo {
-                    client_id: proxy.client_id,
-                    redirect_endpoint: proxy.redirect_uri,
-                    proxy_port: proxy.proxy_port,
-                    web: web.clone()
-                });
+        let authz_code_pkce_flow_info = config
+            .proxy_web
+            .and_then(|proxy| authz_code_flow_info.as_ref().map(|web| (web, proxy)))
+            .map(|(web, proxy)| OAuthProviderAuthorizationCodePkceInfo {
+                client_id: proxy.client_id,
+                redirect_endpoint: proxy.redirect_uri,
+                proxy_port: proxy.proxy_port,
+                web: web.clone(),
+            });
 
         Self {
             authz_code_flow_info,

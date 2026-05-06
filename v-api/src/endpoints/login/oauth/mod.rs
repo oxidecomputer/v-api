@@ -85,7 +85,8 @@ pub trait OAuthProvider: ExtractUserInfo + Debug + Send + Sync {
                     .set_auth_uri(AuthUrl::new(info.remote.auth_url_endpoint.clone())?)
                     .set_token_uri(TokenUrl::new(info.remote.token_endpoint.clone())?)
                     .set_revocation_url_option(
-                        info.remote.revocation_endpoint
+                        info.remote
+                            .revocation_endpoint
                             .as_ref()
                             .map(|url| RevocationUrl::new(url.to_string()))
                             .transpose()?,

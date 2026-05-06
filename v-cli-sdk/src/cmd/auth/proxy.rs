@@ -19,9 +19,9 @@ use tokio::sync::oneshot;
 pub type CallbackFn = Box<
     dyn FnOnce(
             Request<Incoming>,
-        )
-            -> std::pin::Pin<Box<dyn Future<Output = anyhow::Result<Response<Full<Bytes>>>> + Send>>
-        + Send,
+        ) -> std::pin::Pin<
+            Box<dyn Future<Output = anyhow::Result<Response<Full<Bytes>>>> + Send>,
+        > + Send,
 >;
 
 /// A shareable, single-use callback. The first request to arrive `.take()`s

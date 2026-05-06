@@ -52,7 +52,13 @@ pub trait VCliContext<C, P> {
 
     fn oauth_adapter(
         &self,
-    ) -> impl CliOAuthAdapter<ShortToken = Self::ShortToken, LongToken = Self::LongToken, Error = Self::Error> + Send + Sync + 'static;
+    ) -> impl CliOAuthAdapter<
+        ShortToken = Self::ShortToken,
+        LongToken = Self::LongToken,
+        Error = Self::Error,
+    > + Send
+           + Sync
+           + 'static;
     fn mlink_adapter(
         &self,
     ) -> impl CliMagicLinkAdapter<Token = Self::LongToken, Error = Self::Error> + Send + Sync + 'static;

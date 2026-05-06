@@ -10,9 +10,11 @@ use std::fmt;
 use crate::{
     config::ResolvedOAuthConfig,
     endpoints::login::{
-        ExternalUserId, UserInfo, UserInfoError, oauth::{
-            OAuthProviderAuthorizationCodeInfo, OAuthProviderAuthorizationCodePkceInfo, OAuthProviderAuthorizationCodeRemoteInfo, OAuthProviderDeviceInfo
-        }
+        oauth::{
+            OAuthProviderAuthorizationCodeInfo, OAuthProviderAuthorizationCodePkceInfo,
+            OAuthProviderAuthorizationCodeRemoteInfo, OAuthProviderDeviceInfo,
+        },
+        ExternalUserId, UserInfo, UserInfoError,
     },
 };
 
@@ -59,16 +61,15 @@ impl GoogleOAuthProvider {
                 revocation_endpoint: Some("https://oauth2.googleapis.com/revoke".to_string()),
             },
         });
-        let authz_code_pkce_flow_info =
-            config
-                .proxy_web
-                .and_then(|proxy| authz_code_flow_info.as_ref().map(|web| (web, proxy)))
-                .map(|(web, proxy)| OAuthProviderAuthorizationCodePkceInfo {
-                    client_id: proxy.client_id,
-                    redirect_endpoint: proxy.redirect_uri,
-                    proxy_port: proxy.proxy_port,
-                    web: web.clone()
-                });
+        let authz_code_pkce_flow_info = config
+            .proxy_web
+            .and_then(|proxy| authz_code_flow_info.as_ref().map(|web| (web, proxy)))
+            .map(|(web, proxy)| OAuthProviderAuthorizationCodePkceInfo {
+                client_id: proxy.client_id,
+                redirect_endpoint: proxy.redirect_uri,
+                proxy_port: proxy.proxy_port,
+                web: web.clone(),
+            });
         let device_code_flow_info = config.device.map(|device| OAuthProviderDeviceInfo {
             client_id: device.client_id,
             remote_client_id: device.remote_client_id,

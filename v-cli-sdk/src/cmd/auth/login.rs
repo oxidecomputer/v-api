@@ -49,12 +49,16 @@ where
 
         // If we are acquiring an IdP token, present it to the user.
         if let Some(idp_token) = idp_token {
-            println!("\nYou can now additionally authenticate against the requested remote service API \
-                with the following token.");
+            println!(
+                "\nYou can now additionally authenticate against the requested remote service API \
+                with the following token."
+            );
             println!("IdP token: {}", idp_token);
             println!("");
-            println!("Please note that this should be kept secure as calls made with this token are \
-                made on behalf of your user acount");
+            println!(
+                "Please note that this should be kept secure as calls made with this token are \
+                made on behalf of your user acount"
+            );
         }
 
         Ok(())
@@ -108,13 +112,20 @@ impl<SupportedProviders> LoginMethod<SupportedProviders>
 where
     SupportedProviders: CliConsumerLoginProvider,
 {
-    pub async fn run<T, C, R>(&self, ctx: &T, mode: AuthenticationMode) -> Result<(String, Option<String>)>
+    pub async fn run<T, C, R>(
+        &self,
+        ctx: &T,
+        mode: AuthenticationMode,
+    ) -> Result<(String, Option<String>)>
     where
         T: VCliContext<C, R>,
         <T as VCliContext<C, R>>::Error: StdError + Send + Sync + 'static,
     {
         match self {
-            Self::OAuth { provider, request_idp_token } => {
+            Self::OAuth {
+                provider,
+                request_idp_token,
+            } => {
                 let adapter = ctx.oauth_adapter();
                 let provider = provider.clone().into();
                 let provider = adapter.provider(provider).await?;
@@ -125,21 +136,32 @@ where
                 // code flow.
                 if provider.device_code_endpoint().is_some() {
                     if *request_idp_token {
-                        anyhow::bail!("Remote token access is not supported via device authentication flow");
+                        anyhow::bail!(
+                            "Remote token access is not supported via device authentication flow"
+                        );
                     }
-                    Ok((self.run_oauth_device_provider(provider, mode, ctx.oauth_adapter())
-                        .await?, None))
+                    Ok((
+                        self.run_oauth_device_provider(provider, mode, ctx.oauth_adapter())
+                            .await?,
+                        None,
+                    ))
                 } else if provider.supports_pkce_only() {
-                    self.run_oauth_code_provider(provider, mode, *request_idp_token, ctx.oauth_adapter())
-                        .await
+                    self.run_oauth_code_provider(
+                        provider,
+                        mode,
+                        *request_idp_token,
+                        ctx.oauth_adapter(),
+                    )
+                    .await
                 } else {
                     anyhow::bail!("OAuth provider does not support any CLI authentication methods")
                 }
             }
-            Self::MagicLink { email, scope } => {
-                Ok((self.run_magic_link(email, scope.as_deref(), ctx.mlink_adapter())
-                    .await?, None))
-            }
+            Self::MagicLink { email, scope } => Ok((
+                self.run_magic_link(email, scope.as_deref(), ctx.mlink_adapter())
+                    .await?,
+                None,
+            )),
         }
     }
 
@@ -170,9 +192,7 @@ where
         }?;
 
         match mode {
-            AuthenticationMode::Identity => {
-                Ok(identity_token.secret().to_string())
-            }
+            AuthenticationMode::Identity => Ok(identity_token.secret().to_string()),
             AuthenticationMode::Token => {
                 let token = adapter
                     .get_long_lived_token(identity_token.secret())
@@ -196,7 +216,9 @@ where
         let oauth_client = oauth::code::CodeOAuth::new(provider)?;
         let adapter = Arc::new(adapter);
 
-        let identity_token = oauth_client.login(Arc::clone(&adapter), request_idp_token).await?;
+        let identity_token = oauth_client
+            .login(Arc::clone(&adapter), request_idp_token)
+            .await?;
 
         let access_token = match mode {
             AuthenticationMode::Identity => identity_token.access_token().to_string(),

@@ -11,9 +11,11 @@ use std::fmt;
 use crate::{
     config::ResolvedOAuthConfig,
     endpoints::login::{
-        ExternalUserId, UserInfo, UserInfoError, oauth::{
-            OAuthProviderAuthorizationCodeInfo, OAuthProviderAuthorizationCodePkceInfo, OAuthProviderAuthorizationCodeRemoteInfo, OAuthProviderDeviceInfo
-        }
+        oauth::{
+            OAuthProviderAuthorizationCodeInfo, OAuthProviderAuthorizationCodePkceInfo,
+            OAuthProviderAuthorizationCodeRemoteInfo, OAuthProviderDeviceInfo,
+        },
+        ExternalUserId, UserInfo, UserInfoError,
     },
 };
 

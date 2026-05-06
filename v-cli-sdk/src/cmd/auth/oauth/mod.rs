@@ -4,8 +4,8 @@
 
 use anyhow::Result;
 use oauth2::PkceCodeVerifier;
-use uuid::Uuid;
 use std::{error::Error as StdError, future::Future, pin::Pin};
+use uuid::Uuid;
 
 pub mod code;
 pub mod device;

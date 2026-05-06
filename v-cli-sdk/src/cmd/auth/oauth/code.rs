@@ -17,7 +17,8 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::cmd::auth::{
-    oauth::{CliOAuthAdapter, CliOAuthProviderInfo}, proxy::run_proxy_server
+    oauth::{CliOAuthAdapter, CliOAuthProviderInfo},
+    proxy::run_proxy_server,
 };
 
 type CodeClient = BasicClient<
@@ -132,50 +133,51 @@ impl CodeOAuth {
             let redirect_uri = self.redirect_uri.clone();
 
             async move {
-                let callback: crate::cmd::auth::proxy::Callback = Arc::new(Mutex::new(Some(Box::new(move |request: Request<Incoming>| {
-                    let adapter = Arc::clone(&adapter);
-                    let token_tx = Arc::clone(&callback_token_tx);
+                let callback: crate::cmd::auth::proxy::Callback = Arc::new(Mutex::new(Some(
+                    Box::new(move |request: Request<Incoming>| {
+                        let adapter = Arc::clone(&adapter);
+                        let token_tx = Arc::clone(&callback_token_tx);
 
-                    Box::pin(async move {
-                        let code = request
-                            .uri()
-                            .query()
-                            .and_then(|q: &str| {
-                                q.split('&')
-                                    .filter_map(|pair: &str| pair.split_once('='))
-                                    .find(|(key, _): &(&str, &str)| *key == "code")
-                                    .map(|(_, value): (&str, &str)| value.to_string())
-                            })
-                            .ok_or_else(|| {
-                                anyhow::anyhow!("Missing 'code' query parameter in callback request")
-                            })?;
+                        Box::pin(async move {
+                            let code = request
+                                .uri()
+                                .query()
+                                .and_then(|q: &str| {
+                                    q.split('&')
+                                        .filter_map(|pair: &str| pair.split_once('='))
+                                        .find(|(key, _): &(&str, &str)| *key == "code")
+                                        .map(|(_, value): (&str, &str)| value.to_string())
+                                })
+                                .ok_or_else(|| {
+                                    anyhow::anyhow!(
+                                        "Missing 'code' query parameter in callback request"
+                                    )
+                                })?;
 
-                        // Forward the redirect request to the API server.
-                        let token = adapter
-                            .exchange_authorization_code(
-                                crate::cmd::auth::login::LoginProvider::Zendesk,
-                                client_id.clone(),
-                                redirect_uri.clone(),
-                                "authorization_code".to_string(),
-                                code,
-                                pkce_verifier,
-                                request_idp_token,
-                            )
-                            .await
-                            .map_err(|e| {
-                                anyhow::anyhow!(e)
-                            })?;
+                            // Forward the redirect request to the API server.
+                            let token = adapter
+                                .exchange_authorization_code(
+                                    crate::cmd::auth::login::LoginProvider::Zendesk,
+                                    client_id.clone(),
+                                    redirect_uri.clone(),
+                                    "authorization_code".to_string(),
+                                    code,
+                                    pkce_verifier,
+                                    request_idp_token,
+                                )
+                                .await
+                                .map_err(|e| anyhow::anyhow!(e))?;
 
-                        // Send the token back to the main task.
-                        if let Ok(mut guard) = token_tx.lock() {
-                            if let Some(tx) = guard.take() {
-                                let _ = tx.send(Ok(token));
+                            // Send the token back to the main task.
+                            if let Ok(mut guard) = token_tx.lock() {
+                                if let Some(tx) = guard.take() {
+                                    let _ = tx.send(Ok(token));
+                                }
                             }
-                        }
 
-                        // Return a friendly page to the browser so the user
-                        // knows they can close the tab.
-                        Ok(Response::builder()
+                            // Return a friendly page to the browser so the user
+                            // knows they can close the tab.
+                            Ok(Response::builder()
                             .status(StatusCode::OK)
                             .header("content-type", "text/html; charset=utf-8")
                             .body(Full::new(Bytes::from(concat!(
@@ -184,11 +186,15 @@ impl CodeOAuth {
                                 "<p>Authentication successful. This window should close automatically.</p>",
                                 "</body></html>"
                             ))))?)
-                    })
-                        as Pin<
-                            Box<dyn Future<Output = anyhow::Result<Response<Full<Bytes>>>> + Send>,
-                        >
-                }))));
+                        })
+                            as Pin<
+                                Box<
+                                    dyn Future<Output = anyhow::Result<Response<Full<Bytes>>>>
+                                        + Send,
+                                >,
+                            >
+                    }),
+                )));
 
                 if let Err(e) = run_proxy_server(port, callback, shutdown_rx).await {
                     eprintln!("Proxy server error: {e}");
