@@ -65,7 +65,7 @@ struct OAuthError {
 }
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq)]
-#[serde(untagged)]
+#[serde(rename_all = "snake_case")]
 enum OAuthErrorCode {
     AccessDenied,
     InvalidClient,
