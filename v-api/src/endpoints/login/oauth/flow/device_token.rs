@@ -146,6 +146,26 @@ where
 
     let device_info = device_info.unwrap();
     let exchange_request = body.into_inner();
+
+    // Validate grant_type per RFC 8628 §3.4
+    if !validate_device_grant_type(&exchange_request.grant_type) {
+        return Ok(Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(
+                serde_json::to_vec(&ProxyTokenError {
+                    error: "unsupported_grant_type".to_string(),
+                    error_description: Some(
+                        "grant_type must be urn:ietf:params:oauth:grant-type:device_code"
+                            .to_string(),
+                    ),
+                    error_uri: None,
+                })
+                .unwrap()
+                .into(),
+            )?);
+    }
+
     let exchange = AccessTokenExchange::new(exchange_request, device_info);
 
     let client = reqwest::Client::new();
@@ -253,6 +273,11 @@ where
     }
 }
 
+/// Validate the grant_type for device code exchange per RFC 8628 §3.4.
+fn validate_device_grant_type(grant_type: &str) -> bool {
+    grant_type == "urn:ietf:params:oauth:grant-type:device_code"
+}
+
 /// Headers that are safe to forward from an upstream OAuth provider response.
 /// Only `Content-Type` is needed so the client can parse the body. Polling backoff
 /// is handled via the JSON body per RFC 8628 (`interval` field / `slow_down` error),
@@ -343,7 +368,7 @@ mod tests {
     };
     use hyper::body::Bytes;
 
-    use super::{handle_token_parse_failure, proxy_upstream_response};
+    use super::{handle_token_parse_failure, proxy_upstream_response, validate_device_grant_type};
 
     #[test]
     fn test_upstream_set_cookie_is_stripped_from_error_response() {
@@ -478,5 +503,33 @@ mod tests {
             response.headers().get(SET_COOKIE).is_none(),
             "Upstream Set-Cookie header must not be forwarded via token parse failure path"
         );
+    }
+
+    #[test]
+    fn test_valid_device_grant_type_is_accepted() {
+        assert!(validate_device_grant_type(
+            "urn:ietf:params:oauth:grant-type:device_code"
+        ));
+    }
+
+    #[test]
+    fn test_invalid_device_grant_type_is_rejected() {
+        assert!(!validate_device_grant_type("authorization_code"));
+    }
+
+    #[test]
+    fn test_empty_device_grant_type_is_rejected() {
+        assert!(!validate_device_grant_type(""));
+    }
+
+    #[test]
+    fn test_device_grant_type_rejects_similar_values() {
+        assert!(!validate_device_grant_type("device_code"));
+        assert!(!validate_device_grant_type(
+            "urn:ietf:params:oauth:grant-type:device_Code"
+        ));
+        assert!(!validate_device_grant_type(
+            "urn:ietf:params:oauth:grant-type:authorization_code"
+        ));
     }
 }

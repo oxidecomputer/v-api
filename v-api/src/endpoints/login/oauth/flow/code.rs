@@ -130,6 +130,20 @@ pub struct OAuthAuthzCodeRedirectHeaders {
     location: String,
 }
 
+/// Validate that response_type is "code" per RFC 6749 §4.1.1.
+fn validate_response_type(response_type: &str) -> Result<(), OAuthError> {
+    if response_type == "code" {
+        Ok(())
+    } else {
+        Err(OAuthError {
+            error: OAuthErrorCode::UnsupportedResponseType,
+            error_description: Some("Only response_type=code is supported".to_string()),
+            error_uri: None,
+            state: None,
+        })
+    }
+}
+
 // Lookup the client specified by the provided client id and verify that the redirect uri
 // is a valid for this client. If either of these fail we return an unauthorized response
 async fn get_oauth_client<T>(
@@ -219,6 +233,9 @@ where
     get_oauth_client(ctx, &query.client_id, &query.redirect_uri).await?;
 
     tracing::debug!(?query.client_id, ?query.redirect_uri, "Verified client id and redirect uri");
+
+    // Validate response_type. Only "code" is supported (RFC 6749 §4.1.1).
+    validate_response_type(&query.response_type)?;
 
     // Validate the client's PKCE challenge method. Only S256 is supported.
     if query.code_challenge_method != "S256" {
@@ -2023,5 +2040,30 @@ mod tests {
             clear_cookie.max_age(),
             Some(cookie::time::Duration::seconds(0))
         );
+    }
+
+    #[test]
+    fn test_valid_response_type_is_accepted() {
+        assert!(super::validate_response_type("code").is_ok());
+    }
+
+    #[test]
+    fn test_invalid_response_type_is_rejected() {
+        let err = super::validate_response_type("token").unwrap_err();
+        assert_eq!(err.error, OAuthErrorCode::UnsupportedResponseType);
+    }
+
+    #[test]
+    fn test_empty_response_type_is_rejected() {
+        assert!(super::validate_response_type("").is_err());
+    }
+
+    #[test]
+    fn test_response_type_rejects_similar_values() {
+        assert!(super::validate_response_type("Code").is_err());
+        assert!(super::validate_response_type("CODE").is_err());
+        assert!(super::validate_response_type("code ").is_err());
+        assert!(super::validate_response_type("token").is_err());
+        assert!(super::validate_response_type("code token").is_err());
     }
 }

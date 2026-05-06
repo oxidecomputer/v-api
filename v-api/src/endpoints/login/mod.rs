@@ -244,7 +244,93 @@ pub fn is_redirect_uri_valid<'a>(
                     && registered.host() == candidate.host()
                     && registered.port() == candidate.port()
                     && registered.path() == candidate.path()
+                    && registered.query() == candidate.query()
             }
             Err(_) => false,
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_redirect_uri_valid;
+
+    #[test]
+    fn test_redirect_uri_exact_match() {
+        assert!(is_redirect_uri_valid(
+            "https://example.com/callback",
+            ["https://example.com/callback"].iter().copied(),
+        ));
+    }
+
+    #[test]
+    fn test_redirect_uri_rejects_different_host() {
+        assert!(!is_redirect_uri_valid(
+            "https://evil.com/callback",
+            ["https://example.com/callback"].iter().copied(),
+        ));
+    }
+
+    #[test]
+    fn test_redirect_uri_rejects_different_path() {
+        assert!(!is_redirect_uri_valid(
+            "https://example.com/other",
+            ["https://example.com/callback"].iter().copied(),
+        ));
+    }
+
+    #[test]
+    fn test_redirect_uri_rejects_fragment() {
+        assert!(!is_redirect_uri_valid(
+            "https://example.com/callback#fragment",
+            ["https://example.com/callback"].iter().copied(),
+        ));
+    }
+
+    #[test]
+    fn test_redirect_uri_rejects_unparseable() {
+        assert!(!is_redirect_uri_valid(
+            "not-a-url",
+            ["https://example.com/callback"].iter().copied(),
+        ));
+    }
+
+    #[test]
+    fn test_redirect_uri_query_params_must_match() {
+        // Registered with query params — candidate must have the same query
+        assert!(is_redirect_uri_valid(
+            "https://example.com/callback?key=value",
+            ["https://example.com/callback?key=value"].iter().copied(),
+        ));
+
+        // Different query param value must be rejected
+        assert!(!is_redirect_uri_valid(
+            "https://example.com/callback?key=evil",
+            ["https://example.com/callback?key=value"].iter().copied(),
+        ));
+
+        // Missing query params when registered URI has them must be rejected
+        assert!(!is_redirect_uri_valid(
+            "https://example.com/callback",
+            ["https://example.com/callback?key=value"].iter().copied(),
+        ));
+
+        // Extra query params when registered URI has none must be rejected
+        assert!(!is_redirect_uri_valid(
+            "https://example.com/callback?extra=param",
+            ["https://example.com/callback"].iter().copied(),
+        ));
+    }
+
+    #[test]
+    fn test_redirect_uri_matches_with_port() {
+        assert!(is_redirect_uri_valid(
+            "https://example.com:8443/callback",
+            ["https://example.com:8443/callback"].iter().copied(),
+        ));
+
+        assert!(!is_redirect_uri_valid(
+            "https://example.com:9999/callback",
+            ["https://example.com:8443/callback"].iter().copied(),
+        ));
+    }
 }
