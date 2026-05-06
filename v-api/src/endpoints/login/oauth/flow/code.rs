@@ -212,6 +212,20 @@ where
         }.into());
     }
 
+    // Validate the PKCE code challenge. For S256, this must be a base64url-no-pad
+    // encoding of a SHA256 hash, which is always exactly 43 characters of [A-Za-z0-9_-]
+    // (RFC 7636 §4.2).
+    if query.code_challenge.len() != 43
+        || !query.code_challenge.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Err(OAuthError {
+            error: OAuthErrorCode::InvalidRequest,
+            error_description: Some("Invalid code_challenge. Must be a base64url-encoded SHA256 hash (43 characters).".to_string()),
+            error_uri: None,
+            state: None,
+        }.into());
+    }
+
     // Find the configured provider for the requested remote backend. We should always have a valid
     // provider value, so if this fails then a 500 is returned
     let provider = ctx
