@@ -4,7 +4,8 @@
 
 use chrono::{DateTime, Utc};
 use dropshot::{Body, HttpError, HttpResponseOk, Method, Path, RequestContext, TypedBody};
-use http::{header, HeaderValue, Response, StatusCode};
+use http::{header, HeaderMap, HeaderValue, Response, StatusCode};
+use hyper::body::Bytes;
 use oauth2::{basic::BasicTokenType, EmptyExtraTokenFields, StandardTokenResponse, TokenResponse};
 use schemars::JsonSchema;
 use secrecy::ExposeSecret;
@@ -177,11 +178,7 @@ where
         // report their error back to the client
         tracing::debug!(provider = ?path.provider, ?headers, ?status, "Received error response from OAuth provider");
 
-        let mut client_response = Response::new(Body::from(bytes));
-        *client_response.headers_mut() = headers;
-        *client_response.status_mut() = status;
-
-        Ok(client_response)
+        Ok(proxy_upstream_response(bytes, headers, status))
     } else {
         // The server gave us back a non-error response but it still may not be a success.
         // GitHub for instance does not use a status code for indicating the success or failure
@@ -245,49 +242,231 @@ where
                     "Failed to parse a success response from the remote token endpoint"
                 );
 
-                // Try to deserialize the body again, but this time as an error
-                let mut error_response = match serde_json::from_slice::<ProxyTokenError>(&bytes) {
-                    Ok(error) => {
-                        // We found an error in the message body. This is not ideal, but we at
-                        // least can understand what the server was trying to tell us
-                        tracing::debug!(?error, provider = ?path.provider, "Parsed error response from OAuth provider");
-
-                        let mut client_response = Response::new(Body::from(bytes));
-                        *client_response.headers_mut() = headers;
-                        *client_response.status_mut() = status;
-
-                        client_response
-                    }
-                    Err(_) => {
-                        // We still do not know what the remote server is doing... and need to
-                        // cancel the request ourselves
-                        tracing::warn!(
-                            "Remote OAuth provide returned a response that we do not undestand"
-                        );
-
-                        Response::new(
-                            serde_json::to_vec(&ProxyTokenError {
-                                error: "access_denied".to_string(),
-                                error_description: Some(format!(
-                                    "{} returned a malformed response",
-                                    path.provider
-                                )),
-                                error_uri: None,
-                            })
-                            .unwrap()
-                            .into(),
-                        )
-                    }
-                };
-
-                *error_response.status_mut() = StatusCode::BAD_REQUEST;
-                error_response.headers_mut().insert(
-                    header::CONTENT_TYPE,
-                    HeaderValue::from_static("application/json"),
-                );
-
-                Ok(error_response)
+                Ok(handle_token_parse_failure(
+                    &path.provider.to_string(),
+                    bytes,
+                    headers,
+                    status,
+                ))
             }
         }
+    }
+}
+
+/// Headers that are safe to forward from an upstream OAuth provider response.
+/// Only `Content-Type` is needed so the client can parse the body. Polling backoff
+/// is handled via the JSON body per RFC 8628 (`interval` field / `slow_down` error),
+/// not via HTTP headers.
+const FORWARDED_HEADERS: &[header::HeaderName] = &[
+    header::CONTENT_TYPE,
+];
+
+/// Copy only allowlisted headers from an upstream response to avoid forwarding
+/// dangerous headers such as `Set-Cookie`, `Location`, or CORS headers.
+fn filter_upstream_headers(upstream: &HeaderMap) -> HeaderMap {
+    let mut filtered = HeaderMap::new();
+    for name in FORWARDED_HEADERS {
+        if let Some(value) = upstream.get(name) {
+            filtered.insert(name.clone(), value.clone());
+        }
+    }
+    filtered
+}
+
+/// Build a response to the client by proxying an upstream provider's response. This is used
+/// when the upstream provider returns a non-success status code.
+fn proxy_upstream_response(bytes: Bytes, headers: HeaderMap, status: StatusCode) -> Response<Body> {
+    let mut client_response = Response::new(Body::from(bytes));
+    *client_response.headers_mut() = filter_upstream_headers(&headers);
+    *client_response.status_mut() = status;
+    client_response
+}
+
+/// Handle the case where the upstream provider returned a 200 status but the body could not be
+/// parsed as a valid token response. We try to interpret the body as an error response and proxy
+/// it back. If the body is not a recognizable error either, we return our own error.
+fn handle_token_parse_failure(
+    provider_name: &str,
+    bytes: Bytes,
+    headers: HeaderMap,
+    status: StatusCode,
+) -> Response<Body> {
+    // Try to deserialize the body as an error
+    let mut error_response = match serde_json::from_slice::<ProxyTokenError>(&bytes) {
+        Ok(error) => {
+            // We found an error in the message body. This is not ideal, but we at
+            // least can understand what the server was trying to tell us
+            tracing::debug!(?error, provider_name, "Parsed error response from OAuth provider");
+
+            let mut client_response = Response::new(Body::from(bytes));
+            *client_response.headers_mut() = filter_upstream_headers(&headers);
+            *client_response.status_mut() = status;
+
+            client_response
+        }
+        Err(_) => {
+            // We still do not know what the remote server is doing... and need to
+            // cancel the request ourselves
+            tracing::warn!("Remote OAuth provider returned a response that we do not understand");
+
+            Response::new(
+                serde_json::to_vec(&ProxyTokenError {
+                    error: "access_denied".to_string(),
+                    error_description: Some(format!(
+                        "{} returned a malformed response",
+                        provider_name
+                    )),
+                    error_uri: None,
+                })
+                .unwrap()
+                .into(),
+            )
+        }
+    };
+
+    *error_response.status_mut() = StatusCode::BAD_REQUEST;
+    error_response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+
+    error_response
+}
+
+#[cfg(test)]
+mod tests {
+    use http::{
+        header::{self, HeaderName, SET_COOKIE},
+        HeaderMap, HeaderValue, StatusCode,
+    };
+    use hyper::body::Bytes;
+
+    use super::{handle_token_parse_failure, proxy_upstream_response};
+
+    #[test]
+    fn test_upstream_set_cookie_is_stripped_from_error_response() {
+        // A malicious or compromised upstream provider includes a Set-Cookie header
+        // that would set a cookie on our API's domain in the user's browser
+        let mut upstream_headers = HeaderMap::new();
+        upstream_headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        upstream_headers.insert(
+            SET_COOKIE,
+            HeaderValue::from_static("session=malicious-value; Path=/; HttpOnly"),
+        );
+
+        let body = Bytes::from_static(b"{\"error\": \"authorization_pending\"}");
+        let response = proxy_upstream_response(body, upstream_headers, StatusCode::FORBIDDEN);
+
+        // The Set-Cookie header must NOT be forwarded to our client
+        assert!(
+            response.headers().get(SET_COOKIE).is_none(),
+            "Upstream Set-Cookie header must not be forwarded to the client"
+        );
+        // But Content-Type should still be forwarded
+        assert!(
+            response.headers().get(header::CONTENT_TYPE).is_some(),
+            "Content-Type should be forwarded from upstream"
+        );
+    }
+
+    #[test]
+    fn test_upstream_cors_headers_are_stripped_from_error_response() {
+        // A malicious upstream provider injects permissive CORS headers that would
+        // weaken our API's cross-origin protections
+        let mut upstream_headers = HeaderMap::new();
+        upstream_headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        upstream_headers.insert(
+            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            HeaderValue::from_static("*"),
+        );
+        upstream_headers.insert(
+            header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
+            HeaderValue::from_static("true"),
+        );
+
+        let body = Bytes::from_static(b"{\"error\": \"authorization_pending\"}");
+        let response = proxy_upstream_response(body, upstream_headers, StatusCode::BAD_REQUEST);
+
+        // CORS headers must NOT be forwarded from upstream
+        assert!(
+            response.headers().get(header::ACCESS_CONTROL_ALLOW_ORIGIN).is_none(),
+            "Upstream CORS header must not be forwarded to the client"
+        );
+        assert!(
+            response.headers().get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS).is_none(),
+            "Upstream CORS credentials header must not be forwarded to the client"
+        );
+    }
+
+    #[test]
+    fn test_upstream_location_and_framing_headers_are_stripped_from_token_parse_failure() {
+        // When the upstream returns a 200 status but the body is an error (not a valid
+        // token), handle_token_parse_failure must not forward dangerous headers.
+        let mut upstream_headers = HeaderMap::new();
+        upstream_headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        upstream_headers.insert(
+            header::LOCATION,
+            HeaderValue::from_static("https://evil.example.com/phishing"),
+        );
+        upstream_headers.insert(
+            HeaderName::from_static("x-frame-options"),
+            HeaderValue::from_static("ALLOW-FROM https://evil.example.com"),
+        );
+
+        // Body that parses as a ProxyTokenError but NOT as a valid token
+        let body = Bytes::from_static(
+            b"{\"error\": \"slow_down\", \"error_description\": null, \"error_uri\": null}",
+        );
+        let response = handle_token_parse_failure("test-provider", body, upstream_headers, StatusCode::OK);
+
+        // Dangerous headers must NOT be forwarded
+        assert!(
+            response.headers().get(header::LOCATION).is_none(),
+            "Upstream Location header must not be forwarded to the client"
+        );
+        assert!(
+            response.headers().get("x-frame-options").is_none(),
+            "Upstream X-Frame-Options header must not be forwarded to the client"
+        );
+        // But Content-Type should still be present (set by the function itself)
+        assert!(
+            response.headers().get(header::CONTENT_TYPE).is_some(),
+            "Content-Type should be present on the response"
+        );
+    }
+
+    #[test]
+    fn test_upstream_set_cookie_is_stripped_from_token_parse_failure() {
+        // Even when the upstream returns 200 and the body is a parseable error,
+        // a Set-Cookie header must not be forwarded to our client
+        let mut upstream_headers = HeaderMap::new();
+        upstream_headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        upstream_headers.insert(
+            SET_COOKIE,
+            HeaderValue::from_static("tracking=evil-tracker; Domain=.our-api.com; Path=/"),
+        );
+
+        let body = Bytes::from_static(
+            b"{\"error\": \"authorization_pending\", \"error_description\": null, \"error_uri\": null}",
+        );
+        let response = handle_token_parse_failure("test-provider", body, upstream_headers, StatusCode::OK);
+
+        // The Set-Cookie header must NOT be forwarded
+        assert!(
+            response.headers().get(SET_COOKIE).is_none(),
+            "Upstream Set-Cookie header must not be forwarded via token parse failure path"
+        );
     }
 }
