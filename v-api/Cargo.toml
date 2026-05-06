@@ -16,7 +16,6 @@ base64 = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 cookie = { workspace = true }
 crc32c = { workspace = true }
-diesel = { workspace = true }
 dropshot = { workspace = true }
 dropshot-authorization-header = { path = "../dropshot-authorization-header" }
 futures = { workspace = true }
@@ -32,7 +31,6 @@ newtype-uuid = { workspace = true }
 partial-struct = { workspace = true }
 percent-encoding = { workspace = true }
 rand = { workspace = true, features = ["std"] }
-rand_core = { workspace = true }
 reqwest = { workspace = true }
 rsa = { workspace = true, features = ["sha2"] }
 schemars = { workspace = true, features = ["chrono"] }
@@ -46,7 +44,6 @@ steno = { workspace = true, optional = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
-toml = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"]  }

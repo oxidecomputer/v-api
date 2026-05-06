@@ -3532,7 +3532,6 @@ dependencies = [
  "chrono",
  "cookie",
  "crc32c",
- "diesel",
  "dropshot",
  "dropshot-authorization-header",
  "futures",
@@ -3549,7 +3548,6 @@ dependencies = [
  "partial-struct",
  "percent-encoding",
  "rand 0.10.1",
- "rand_core 0.10.1",
  "reqwest",
  "rsa",
  "schemars 0.8.22",
@@ -3563,7 +3561,6 @@ dependencies = [
  "tap",
  "thiserror 2.0.18",
  "tokio",
- "toml 1.1.2+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -4275,7 +4272,6 @@ dependencies = [
  "clap",
  "regex",
  "semver 1.0.28",
- "serde",
 ]
 
 [[package]]

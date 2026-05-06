@@ -26,3 +26,29 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - run: |
           cargo clippy --all-features --workspace --all-targets -- -Dwarnings
+
+  lock_machete:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - run: |
+          rustup toolchain install
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - run: |
+          cargo install cargo-machete
+      - run: |
+          cargo machete
+      - name: Ensure Cargo.lock is current
+        run: |
+          cargo check
+          if ! git diff --quiet -- Cargo.lock; then
+            echo "Cargo.lock is out of date"
+            {
+              echo "## Cargo.lock is out of date"
+              echo 'Run `cargo check` locally and commit the updated `Cargo.lock`.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::group::Cargo.lock diff"
+            git diff -- Cargo.lock
+            echo "::endgroup::"
+            exit 1
+          fi
