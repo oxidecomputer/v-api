@@ -731,7 +731,7 @@ mod tests {
             .expect_transition()
             .returning(move |id, signature, from, _to| {
                 if &attempt_transition.id == id
-                    && &attempt_transition.nonce_signature == signature
+                    && attempt_transition.nonce_signature == signature
                     && attempt_transition.attempt_state == from
                 {
                     Ok(Some(MagicLinkAttempt {
@@ -758,10 +758,7 @@ mod tests {
             .complete_login_attempt(TypedUuid::new_v4(), &attempt.nonce_signature)
             .await
             .unwrap_err();
-        assert!(match error {
-            ResourceError::DoesNotExist => true,
-            _ => false,
-        });
+        assert!(matches!(error, ResourceError::DoesNotExist));
 
         let transitioned_attempt = mlink_ctx
             .complete_login_attempt(attempt.id, &attempt.nonce_signature)

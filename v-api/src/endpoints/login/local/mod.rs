@@ -55,7 +55,7 @@ where
             ctx.v_ctx().jwt_signer(),
             &api_user.user.id,
             &Claims::new(
-                &ctx.v_ctx(),
+                ctx.v_ctx(),
                 None,
                 &api_user.user.id,
                 &api_user_provider.id,
