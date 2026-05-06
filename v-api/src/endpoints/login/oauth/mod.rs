@@ -74,9 +74,11 @@ pub trait OAuthProvider: ExtractUserInfo + Debug + Send + Sync {
 
     fn default_scopes(&self) -> &[String];
 
-    fn supports_pkce(&self) -> bool {
-        true
-    }
+    /// Whether the remote OAuth provider supports PKCE (RFC 7636). Providers must
+    /// explicitly declare this. This controls whether v-api sends a PKCE challenge
+    /// to the remote provider during the authorization code exchange. Note: clients
+    /// calling v-api are always required to use PKCE regardless of this setting.
+    fn supports_pkce(&self) -> bool;
 
     fn as_web_client(&self) -> Result<WebClient, OAuthProviderError> {
         match self.authz_code_flow_info() {

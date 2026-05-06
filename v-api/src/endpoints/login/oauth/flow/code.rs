@@ -99,6 +99,10 @@ pub struct OAuthAuthzCodeQuery {
     pub response_type: String,
     pub state: String,
     pub scope: Option<String>,
+    /// PKCE code challenge (RFC 7636). Required for all authorization code flows.
+    pub code_challenge: String,
+    /// PKCE code challenge method. Must be "S256".
+    pub code_challenge_method: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
@@ -198,6 +202,16 @@ where
 
     tracing::debug!(?query.client_id, ?query.redirect_uri, "Verified client id and redirect uri");
 
+    // Validate the client's PKCE challenge method. Only S256 is supported.
+    if query.code_challenge_method != "S256" {
+        return Err(OAuthError {
+            error: OAuthErrorCode::InvalidRequest,
+            error_description: Some("Unsupported code_challenge_method. Only S256 is supported.".to_string()),
+            error_uri: None,
+            state: None,
+        }.into());
+    }
+
     // Find the configured provider for the requested remote backend. We should always have a valid
     // provider value, so if this fails then a 500 is returned
     let provider = ctx
@@ -237,8 +251,14 @@ where
     // process once before storing so all downstream consumers see the encoded value.
     attempt.state = Some(percent_encode(query.state.as_bytes(), NON_ALPHANUMERIC).to_string());
 
-    // If the remote provider supports pkce, set up a challenge
-    let pkce_challenge = if provider.supports_pkce() {
+    // Always store the client's PKCE challenge so we can verify it during the token exchange.
+    // This is the client-to-v-api PKCE leg and is mandatory for all flows.
+    attempt.pkce_challenge = Some(query.code_challenge);
+    attempt.pkce_challenge_method = Some(query.code_challenge_method);
+
+    // If the remote provider supports PKCE, also set up a challenge for the v-api-to-remote leg.
+    // This is independent of the client-to-v-api PKCE above.
+    let remote_pkce_challenge = if provider.supports_pkce() {
         let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
         attempt.provider_pkce_verifier = Some(pkce_verifier.secret().to_string());
         Some(pkce_challenge)
@@ -255,7 +275,7 @@ where
 
     tracing::info!(?attempt.id, "Created login attempt");
 
-    oauth_redirect_response(ctx.public_url(), &*provider, &attempt, pkce_challenge)
+    oauth_redirect_response(ctx.public_url(), &*provider, &attempt, remote_pkce_challenge)
 }
 
 fn oauth_redirect_response(
@@ -477,7 +497,8 @@ pub struct OAuthAuthzCodeExchangeBody {
     pub redirect_uri: String,
     pub grant_type: String,
     pub code: String,
-    pub pkce_verifier: Option<String>,
+    /// PKCE code verifier (RFC 7636). Required for all authorization code exchanges.
+    pub pkce_verifier: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
@@ -603,7 +624,7 @@ where
         &attempt,
         client_id,
         &body.redirect_uri,
-        body.pkce_verifier.as_deref(),
+        &body.pkce_verifier,
     )?;
 
     tracing::debug!("Verified login attempt");
@@ -740,7 +761,7 @@ fn verify_login_attempt(
     attempt: &LoginAttempt,
     client_id: TypedUuid<OAuthClientId>,
     redirect_uri: &str,
-    pkce_verifier: Option<&str>,
+    pkce_verifier: &str,
 ) -> Result<(), OAuthError> {
     if attempt.client_id != client_id {
         Err(OAuthError {
@@ -771,16 +792,10 @@ fn verify_login_attempt(
             state: None,
         })
     } else {
-        match (attempt.pkce_challenge.as_deref(), pkce_verifier) {
-            (Some(_), None) => Err(OAuthError {
-                error: OAuthErrorCode::InvalidRequest,
-                error_description: Some("Missing pkce verifier".to_string()),
-                error_uri: None,
-                state: None,
-            }),
-            (Some(challenge), Some(verifier)) => {
+        match attempt.pkce_challenge.as_deref() {
+            Some(challenge) => {
                 let mut hasher = Sha256::new();
-                hasher.update(verifier);
+                hasher.update(pkce_verifier);
                 let hash = hasher.finalize();
                 let computed_challenge = BASE64_URL_SAFE_NO_PAD.encode(hash);
 
@@ -795,7 +810,14 @@ fn verify_login_attempt(
                     })
                 }
             }
-            (None, _) => Ok(()),
+            // PKCE is mandatory for all authorization code flows. A missing challenge
+            // means the login attempt was not properly initialized.
+            None => Err(OAuthError {
+                error: OAuthErrorCode::InvalidGrant,
+                error_description: Some("Login attempt is missing a PKCE challenge".to_string()),
+                error_uri: None,
+                state: None,
+            }),
         }
     }
 }
@@ -1643,7 +1665,7 @@ mod tests {
                 &bad_client_id,
                 attempt.client_id,
                 &attempt.redirect_uri,
-                Some(verifier.secret().as_str()),
+                verifier.secret().as_str(),
             )
             .unwrap_err()
         );
@@ -1664,7 +1686,7 @@ mod tests {
                 &bad_redirect_uri,
                 attempt.client_id,
                 &attempt.redirect_uri,
-                Some(verifier.secret().as_str()),
+                verifier.secret().as_str(),
             )
             .unwrap_err()
         );
@@ -1685,7 +1707,7 @@ mod tests {
                 &unconfirmed_state,
                 attempt.client_id,
                 &attempt.redirect_uri,
-                Some(verifier.secret().as_str()),
+                verifier.secret().as_str(),
             )
             .unwrap_err()
         );
@@ -1706,7 +1728,7 @@ mod tests {
                 &already_used_state,
                 attempt.client_id,
                 &attempt.redirect_uri,
-                Some(verifier.secret().as_str()),
+                verifier.secret().as_str(),
             )
             .unwrap_err()
         );
@@ -1727,7 +1749,7 @@ mod tests {
                 &failed_state,
                 attempt.client_id,
                 &attempt.redirect_uri,
-                Some(verifier.secret().as_str()),
+                verifier.secret().as_str(),
             )
             .unwrap_err()
         );
@@ -1748,25 +1770,31 @@ mod tests {
                 &expired,
                 attempt.client_id,
                 &attempt.redirect_uri,
-                Some(verifier.secret().as_str()),
+                verifier.secret().as_str(),
             )
             .unwrap_err()
         );
 
-        let missing_pkce = LoginAttempt { ..attempt.clone() };
+        // Verify that a login attempt with no stored PKCE challenge is rejected.
+        // PKCE is mandatory, so a missing challenge means the attempt is invalid.
+        let missing_challenge = LoginAttempt {
+            pkce_challenge: None,
+            pkce_challenge_method: None,
+            ..attempt.clone()
+        };
 
         assert_eq!(
             OAuthError {
-                error: OAuthErrorCode::InvalidRequest,
-                error_description: Some("Missing pkce verifier".to_string()),
+                error: OAuthErrorCode::InvalidGrant,
+                error_description: Some("Login attempt is missing a PKCE challenge".to_string()),
                 error_uri: None,
                 state: None,
             },
             verify_login_attempt(
-                &missing_pkce,
+                &missing_challenge,
                 attempt.client_id,
                 &attempt.redirect_uri,
-                None,
+                verifier.secret().as_str(),
             )
             .unwrap_err()
         );
@@ -1787,7 +1815,7 @@ mod tests {
                 &invalid_pkce,
                 attempt.client_id,
                 &attempt.redirect_uri,
-                Some(verifier.secret().as_str()),
+                verifier.secret().as_str(),
             )
             .unwrap_err()
         );
@@ -1798,7 +1826,7 @@ mod tests {
                 &attempt,
                 attempt.client_id,
                 &attempt.redirect_uri,
-                Some(verifier.secret().as_str()),
+                verifier.secret().as_str(),
             )
             .unwrap()
         );

@@ -140,6 +140,9 @@ impl OAuthProvider for ZendeskOAuthProvider {
     fn default_scopes(&self) -> &[String] {
         &self.default_scopes
     }
+    fn supports_pkce(&self) -> bool {
+        true
+    }
 
     fn authz_code_flow_info(&self) -> Option<&OAuthProviderAuthorizationCodeInfo> {
         self.authz_code_flow_info.as_ref()
