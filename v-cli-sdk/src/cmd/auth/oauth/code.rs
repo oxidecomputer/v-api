@@ -157,17 +157,15 @@ impl CodeOAuth {
 
                             // Forward the redirect request to the API server.
                             let token = adapter
-                                .exchange_authorization_code(
-                                    super::AuthorizationCodeExchange {
-                                        provider: crate::cmd::auth::login::LoginProvider::Zendesk,
-                                        client_id,
-                                        redirect_uri: redirect_uri.clone(),
-                                        grant_type: "authorization_code".to_string(),
-                                        code,
-                                        pkce_verifier,
-                                        request_idp_token,
-                                    },
-                                )
+                                .exchange_authorization_code(super::AuthorizationCodeExchange {
+                                    provider: crate::cmd::auth::login::LoginProvider::Zendesk,
+                                    client_id,
+                                    redirect_uri: redirect_uri.clone(),
+                                    grant_type: "authorization_code".to_string(),
+                                    code,
+                                    pkce_verifier,
+                                    request_idp_token,
+                                })
                                 .await
                                 .map_err(|e| anyhow::anyhow!(e))?;
 
