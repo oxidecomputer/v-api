@@ -1211,6 +1211,15 @@ pub(crate) mod test_mocks {
     use newtype_uuid::{GenericUuid, TypedUuid};
     use std::{collections::HashMap, sync::Arc};
     use uuid::Uuid;
+    #[cfg(feature = "sagas")]
+    use v_model::saga::{
+        db::{ModelSagaCachedState, NewSagaEventModel, NewSagaModel, SagaEventModel, SagaModel},
+        storage::{
+            MockSagaEventStore, MockSagaStore, SagaEventFilter, SagaEventStore, SagaFilter,
+            SagaStore,
+        },
+        view::{SagaExecNodeId, SagaId},
+    };
     use v_model::{
         AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail,
         ApiUserProvider, LinkRequestId, LoginAttemptId, MagicLink, MagicLinkAttempt,
@@ -1220,16 +1229,6 @@ pub(crate) mod test_mocks {
         NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, OAuthClientId,
         OAuthRedirectUriId, OAuthSecretId, UserContactEmailId, UserId, UserProviderId,
         permissions::Caller,
-        saga::{
-            db::{
-                ModelSagaCachedState, NewSagaEventModel, NewSagaModel, SagaEventModel, SagaModel,
-            },
-            storage::{
-                MockSagaEventStore, MockSagaStore, SagaEventFilter, SagaEventStore, SagaFilter,
-                SagaStore,
-            },
-            view::{SagaExecNodeId, SagaId},
-        },
         schema_ext::MagicLinkAttemptState,
         storage::{
             AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore,
@@ -1260,15 +1259,14 @@ pub(crate) mod test_mocks {
     // Construct a mock context that can be used in tests
     pub async fn mock_context(storage: Arc<MockStorage>) -> VContext<VPermission> {
         let MockKey { signer, verifier } = mock_key("test");
-        let mut ctx = VContextBuilder::<VPermission>::new()
+        let ctx = VContextBuilder::<VPermission>::new()
             .with_public_url("".to_string())
             .with_storage(storage)
             .with_jwt_expiration(JwtConfig::default().default_expiration)
-            .with_keys(vec![signer, verifier])
-            .with_saga_backend(TypedUuid::new_v4(), None)
-            .build()
-            .await
-            .unwrap();
+            .with_keys(vec![signer, verifier]);
+        #[cfg(feature = "sagas")]
+        let ctx = ctx.with_saga_backend(TypedUuid::new_v4(), None);
+        let mut ctx = ctx.build().await.unwrap();
 
         let mapping_engine = Arc::new(DefaultMappingEngine::new(
             ctx.builtin_registration_user(),
@@ -1310,7 +1308,9 @@ pub(crate) mod test_mocks {
         pub magic_link_secret_store: Option<Arc<MockMagicLinkSecretStore>>,
         pub magic_link_redirect_store: Option<Arc<MockMagicLinkRedirectUriStore>>,
         pub magic_link_attempt_store: Option<Arc<MockMagicLinkAttemptStore>>,
+        #[cfg(feature = "sagas")]
         pub saga_store: Option<Arc<MockSagaStore>>,
+        #[cfg(feature = "sagas")]
         pub saga_event_store: Option<Arc<MockSagaEventStore>>,
     }
 
@@ -1333,7 +1333,9 @@ pub(crate) mod test_mocks {
                 magic_link_secret_store: None,
                 magic_link_redirect_store: None,
                 magic_link_attempt_store: None,
+                #[cfg(feature = "sagas")]
                 saga_store: None,
+                #[cfg(feature = "sagas")]
                 saga_event_store: None,
             }
         }
@@ -1955,6 +1957,7 @@ pub(crate) mod test_mocks {
         }
     }
 
+    #[cfg(feature = "sagas")]
     #[async_trait]
     impl SagaStore for MockStorage {
         async fn get(&self, saga_id: TypedUuid<SagaId>) -> Result<Option<SagaModel>, StoreError> {
@@ -2021,6 +2024,7 @@ pub(crate) mod test_mocks {
         }
     }
 
+    #[cfg(feature = "sagas")]
     #[async_trait]
     impl SagaEventStore for MockStorage {
         async fn list(

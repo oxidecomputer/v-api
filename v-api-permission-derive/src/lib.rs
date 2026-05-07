@@ -366,6 +366,15 @@ fn from_system_permission_tokens(
     source: &Ident,
     permission_type: &Ident,
 ) -> proc_macro2::TokenStream {
+    let saga_permission_from_tokens = if cfg!(feature = "sagas") {
+        quote! {
+            VPermission::GetSagasAll => Self::GetSagasAll,
+            VPermission::ManageSagasAll => Self::ManageSagasAll,
+        }
+    } else {
+        quote! {}
+    };
+
     if source != permission_type {
         quote! {
             impl From<#source> for #permission_type {
@@ -440,8 +449,7 @@ fn from_system_permission_tokens(
 
                         VPermission::CreateAccessToken => Self::CreateAccessToken,
 
-                        VPermission::GetSagasAll => Self::GetSagasAll,
-                        VPermission::ManageSagasAll => Self::ManageSagasAll,
+                        #saga_permission_from_tokens
 
                         VPermission::Unsupported(inner) => Self::Unsupported(inner),
                     }
@@ -473,6 +481,17 @@ fn inject_system_permission_variants(mut input: DeriveInput) -> Result<DeriveInp
 }
 
 fn system_permission_tokens() -> TokenStream {
+    let saga_permission_tokens = if cfg!(feature = "sagas") {
+        quote! {
+            #[v_api(scope(to = "saga:r", from = "saga:r"))]
+            GetSagasAll,
+            #[v_api(scope(to = "saga:w", from = "saga:w"))]
+            ManageSagasAll,
+        }
+    } else {
+        quote! {}
+    };
+
     quote! {
         enum VPermission {
             #[v_api(scope(to = "user:info:w", from = "user:info:w"))]
@@ -723,10 +742,7 @@ fn system_permission_tokens() -> TokenStream {
 
             CreateAccessToken,
 
-            #[v_api(scope(to = "saga:r", from = "saga:r"))]
-            GetSagasAll,
-            #[v_api(scope(to = "saga:w", from = "saga:w"))]
-            ManageSagasAll,
+            #saga_permission_tokens
 
             #[serde(untagged)]
             Unsupported(serde_json::Value),
