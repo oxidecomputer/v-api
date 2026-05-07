@@ -10,7 +10,7 @@ use uuid::Uuid;
 pub mod code;
 pub mod device;
 
-use crate::cmd::auth::login::CliAdapterToken;
+use crate::cmd::auth::login::{CliAdapterToken, LoginProvider};
 
 /// Parameters for exchanging an authorization code for an access token.
 pub struct AuthorizationCodeExchange {
@@ -46,6 +46,7 @@ pub trait CliOAuthAdapter {
 }
 
 pub trait CliOAuthProviderInfo {
+    fn provider(&self) -> LoginProvider;
     fn client_id(&self) -> Uuid;
     fn remote_client_id(&self) -> &str;
     fn public_pkce_port(&self) -> Option<u16>;

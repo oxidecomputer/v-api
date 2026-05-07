@@ -21,8 +21,7 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::cmd::auth::{
-    oauth::{CliOAuthAdapter, CliOAuthProviderInfo},
-    proxy::run_proxy_server,
+    login::LoginProvider, oauth::{CliOAuthAdapter, CliOAuthProviderInfo}, proxy::run_proxy_server
 };
 
 type CodeClient = BasicClient<
@@ -39,6 +38,7 @@ type CodeClient = BasicClient<
 >;
 
 pub struct CodeOAuth {
+    provider: LoginProvider,
     client: CodeClient,
     client_id: Uuid,
     redirect_uri: String,
@@ -72,6 +72,7 @@ impl CodeOAuth {
             )?);
 
         Ok(Self {
+            provider: provider.provider(),
             client,
             client_id: provider.client_id(),
             redirect_uri: provider.redirect_endpoint().unwrap_or_default().to_string(),
@@ -136,6 +137,7 @@ impl CodeOAuth {
             let error_token_tx = Arc::clone(&token_tx);
             let client_id = self.client_id;
             let redirect_uri = self.redirect_uri.clone();
+            let provider = self.provider;
 
             async move {
                 let callback: crate::cmd::auth::proxy::Callback = Arc::new(Mutex::new(Some(
@@ -162,7 +164,7 @@ impl CodeOAuth {
                             // Forward the redirect request to the API server.
                             let token = adapter
                                 .exchange_authorization_code(super::AuthorizationCodeExchange {
-                                    provider: crate::cmd::auth::login::LoginProvider::Zendesk,
+                                    provider,
                                     client_id,
                                     redirect_uri: redirect_uri.clone(),
                                     grant_type: "authorization_code".to_string(),

@@ -90,6 +90,7 @@ where
     },
 }
 
+#[derive(Copy, Clone)]
 pub enum LoginProvider {
     Google,
     GitHub,
