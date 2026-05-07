@@ -26,7 +26,7 @@ use tracing::instrument;
 use uuid::Uuid;
 use v_model::{
     LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient, OAuthClientId,
-    permissions::{AsScope, PermissionStorage, Permissions},
+    permissions::{AsScope, PermissionStorage},
     schema_ext::LoginAttemptState,
 };
 
@@ -755,12 +755,10 @@ where
         .register_api_user(&ctx.builtin_registration_user(), info)
         .await?;
 
-    // Only return the IdP token if the caller requested it AND the user has permission
-    let idp_token = filter_idp_token(
-        idp_token,
-        request_idp_token,
-        &api_user_info.user.permissions,
-    );
+    // Only return the IdP token if the caller requested it AND the user has permission.
+    // We must resolve the full caller (including group permissions) rather than checking
+    // only the directly assigned user permissions.
+    let idp_token = filter_idp_token(ctx, idp_token, request_idp_token, &api_user_info).await;
 
     tracing::info!(api_user_id = ?api_user_info.user.id, "Retrieved api user to generate access token for");
 
@@ -788,21 +786,42 @@ where
 }
 
 /// Filter the IdP token based on whether it was requested and whether the user has
-/// the `RetrieveRemoteAccessToken` permission. Returns `None` if either condition
-/// is not met.
-fn filter_idp_token<T>(
+/// the `RetrieveRemoteAccessToken` permission (including permissions inherited from
+/// groups). Returns `None` if either condition is not met.
+async fn filter_idp_token<T>(
+    ctx: &VContext<T>,
     idp_token: Option<String>,
     requested: bool,
-    permissions: &Permissions<T>,
+    api_user_info: &v_model::ApiUserInfo<T>,
 ) -> Option<String>
 where
-    T: VAppPermission,
+    T: VAppPermission + PermissionStorage,
 {
     if !requested {
         return None;
     }
 
-    if permissions.can(&VPermission::RetrieveRemoteAccessToken.into()) {
+    // Resolve the caller so that group-inherited permissions are included in the
+    // permission check, not just directly-assigned user permissions.
+    let caller = match ctx
+        .user
+        .resolve_caller(api_user_info, crate::context::BasePermissions::Full)
+        .await
+    {
+        Ok(caller) => caller,
+        Err(err) => {
+            tracing::warn!(
+                ?err,
+                "Failed to resolve caller permissions for IdP token check"
+            );
+            return None;
+        }
+    };
+
+    if caller
+        .permissions
+        .can(&VPermission::RetrieveRemoteAccessToken.into())
+    {
         idp_token
     } else {
         tracing::info!("User requested IdP token but lacks RetrieveRemoteAccessToken permission");
@@ -1033,7 +1052,7 @@ mod tests {
         NewApiUserProvider, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret,
         schema_ext::LoginAttemptState,
         storage::{
-            MockAccessTokenStore, MockApiUserProviderStore, MockApiUserStore,
+            MockAccessGroupStore, MockAccessTokenStore, MockApiUserProviderStore, MockApiUserStore,
             MockLoginAttemptStore, MockMapperStore, MockOAuthClientStore,
         },
     };
@@ -1063,7 +1082,7 @@ mod tests {
         let ctx = mock_context(Arc::new(MockStorage::new())).await;
         let client_id = TypedUuid::new_v4();
         let key = RawKey::generate::<8>(&Uuid::new_v4())
-            .sign(&*ctx.signer())
+            .sign(ctx.signer())
             .await
             .unwrap();
         let secret_signature = key.signature().to_string();
@@ -1162,7 +1181,7 @@ mod tests {
         };
 
         let response = oauth_redirect_response(
-            &ctx.public_url(),
+            ctx.public_url(),
             &*ctx
                 .get_oauth_provider(&OAuthProviderName::Google)
                 .await
@@ -1722,7 +1741,7 @@ mod tests {
             .unwrap();
 
         let invalid_secret = RawKey::generate::<8>(&Uuid::new_v4())
-            .sign(&*ctx.signer())
+            .sign(ctx.signer())
             .await
             .unwrap()
             .signature()
@@ -2120,55 +2139,81 @@ mod tests {
         assert!(super::validate_response_type("code token").is_err());
     }
 
-    #[test]
-    fn test_filter_idp_token_returns_token_when_requested_and_permitted() {
-        let permissions: v_model::permissions::Permissions<VPermission> =
-            vec![VPermission::RetrieveRemoteAccessToken].into();
+    /// Create a mock context and ApiUserInfo for `filter_idp_token` tests.
+    async fn mock_filter_idp_token_ctx(
+        user_permissions: Vec<VPermission>,
+    ) -> (VContext<VPermission>, ApiUserInfo<VPermission>) {
+        let mut access_group_store = MockAccessGroupStore::new();
+        access_group_store
+            .expect_list()
+            .returning(|_, _| Ok(vec![]));
+
+        let mut storage = MockStorage::new();
+        storage.access_group_store = Some(Arc::new(access_group_store));
+
+        let ctx = mock_context(Arc::new(storage)).await;
+        let info = ApiUserInfo {
+            user: ApiUser {
+                id: TypedUuid::new_v4(),
+                permissions: user_permissions.into(),
+                groups: Default::default(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                deleted_at: None,
+            },
+            email: None,
+            providers: vec![],
+        };
+        (ctx, info)
+    }
+
+    #[tokio::test]
+    async fn test_filter_idp_token_returns_token_when_requested_and_permitted() {
+        let (ctx, info) =
+            mock_filter_idp_token_ctx(vec![VPermission::RetrieveRemoteAccessToken]).await;
         let token = Some("idp-token-value".to_string());
 
-        let result = super::filter_idp_token(token, true, &permissions);
+        let result = super::filter_idp_token(&ctx, token, true, &info).await;
         assert_eq!(result, Some("idp-token-value".to_string()));
     }
 
-    #[test]
-    fn test_filter_idp_token_returns_none_when_not_requested() {
-        let permissions: v_model::permissions::Permissions<VPermission> =
-            vec![VPermission::RetrieveRemoteAccessToken].into();
+    #[tokio::test]
+    async fn test_filter_idp_token_returns_none_when_not_requested() {
+        let (ctx, info) =
+            mock_filter_idp_token_ctx(vec![VPermission::RetrieveRemoteAccessToken]).await;
         let token = Some("idp-token-value".to_string());
 
         // Even with the permission, if not requested the token is not returned
-        let result = super::filter_idp_token(token, false, &permissions);
+        let result = super::filter_idp_token(&ctx, token, false, &info).await;
         assert_eq!(result, None);
     }
 
-    #[test]
-    fn test_filter_idp_token_returns_none_when_permission_missing() {
+    #[tokio::test]
+    async fn test_filter_idp_token_returns_none_when_permission_missing() {
         // User has some permissions but not RetrieveRemoteAccessToken
-        let permissions: v_model::permissions::Permissions<VPermission> =
-            vec![VPermission::CreateApiUser].into();
+        let (ctx, info) = mock_filter_idp_token_ctx(vec![VPermission::CreateApiUser]).await;
         let token = Some("idp-token-value".to_string());
 
-        let result = super::filter_idp_token(token, true, &permissions);
+        let result = super::filter_idp_token(&ctx, token, true, &info).await;
         assert_eq!(result, None);
     }
 
-    #[test]
-    fn test_filter_idp_token_returns_none_when_no_permissions() {
-        let permissions: v_model::permissions::Permissions<VPermission> =
-            Vec::<VPermission>::new().into();
+    #[tokio::test]
+    async fn test_filter_idp_token_returns_none_when_no_permissions() {
+        let (ctx, info) = mock_filter_idp_token_ctx(vec![]).await;
         let token = Some("idp-token-value".to_string());
 
-        let result = super::filter_idp_token(token, true, &permissions);
+        let result = super::filter_idp_token(&ctx, token, true, &info).await;
         assert_eq!(result, None);
     }
 
-    #[test]
-    fn test_filter_idp_token_returns_none_when_token_is_none() {
-        let permissions: v_model::permissions::Permissions<VPermission> =
-            vec![VPermission::RetrieveRemoteAccessToken].into();
+    #[tokio::test]
+    async fn test_filter_idp_token_returns_none_when_token_is_none() {
+        let (ctx, info) =
+            mock_filter_idp_token_ctx(vec![VPermission::RetrieveRemoteAccessToken]).await;
 
         // Token was None (e.g. revoked upstream) — should stay None regardless of permission
-        let result = super::filter_idp_token(None, true, &permissions);
+        let result = super::filter_idp_token(&ctx, None, true, &info).await;
         assert_eq!(result, None);
     }
 
@@ -2231,11 +2276,18 @@ mod tests {
             })
         });
 
+        // AccessGroupStore: list returns empty (no groups configured)
+        let mut access_group_store = MockAccessGroupStore::new();
+        access_group_store
+            .expect_list()
+            .returning(|_, _| Ok(vec![]));
+
         let mut storage = MockStorage::new();
         storage.api_user_provider_store = Some(Arc::new(provider_store));
         storage.api_user_store = Some(Arc::new(user_store));
         storage.mapper_store = Some(Arc::new(mapper_store));
         storage.access_token_store = Some(Arc::new(access_token_store));
+        storage.access_group_store = Some(Arc::new(access_group_store));
         storage
     }
 

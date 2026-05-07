@@ -71,7 +71,7 @@ impl TestDb {
         };
 
         println!("Creating database {}", db.db_name);
-        let create_result = sql_query(&format!("CREATE DATABASE {}", db.db_name))
+        let create_result = sql_query(format!("CREATE DATABASE {}", db.db_name))
             .execute(&mut db.conn())
             .unwrap();
         println!("Created database {:?}", create_result);
@@ -100,7 +100,7 @@ impl TestDb {
 impl Drop for TestDb {
     fn drop(&mut self) {
         if self.should_drop {
-            sql_query(&format!("DROP DATABASE {}", self.db_name))
+            sql_query(format!("DROP DATABASE {}", self.db_name))
                 .execute(&mut self.conn())
                 .unwrap();
         }
@@ -133,7 +133,7 @@ async fn test_api_user() {
         &store,
         NewApiUser {
             id: api_user_id,
-            permissions: vec![TestPermission::CreateApiKey(api_user_id).into()].into(),
+            permissions: vec![TestPermission::CreateApiKey(api_user_id)].into(),
             groups: BTreeSet::new(),
         },
     )
@@ -153,7 +153,7 @@ async fn test_api_user() {
         &store,
         NewApiUser {
             id: api_user_id,
-            permissions: vec![TestPermission::CreateApiKey(api_user_id).into()].into(),
+            permissions: vec![TestPermission::CreateApiKey(api_user_id)].into(),
             groups: BTreeSet::new(),
         },
     )
@@ -168,9 +168,9 @@ async fn test_api_user() {
         NewApiUser {
             id: api_user_id,
             permissions: vec![
-                TestPermission::CreateApiKey(api_user_id).into(),
-                TestPermission::GetApiKey(api_user_id).into(),
-                TestPermission::DeleteApiKey(api_user_id).into(),
+                TestPermission::CreateApiKey(api_user_id),
+                TestPermission::GetApiKey(api_user_id),
+                TestPermission::DeleteApiKey(api_user_id),
             ]
             .into(),
             groups: BTreeSet::new(),
@@ -183,13 +183,13 @@ async fn test_api_user() {
         api_user
             .user
             .permissions
-            .can(&TestPermission::GetApiKey(api_user_id).into())
+            .can(&TestPermission::GetApiKey(api_user_id))
     );
     assert!(
         api_user
             .user
             .permissions
-            .can(&TestPermission::DeleteApiKey(api_user_id).into())
+            .can(&TestPermission::DeleteApiKey(api_user_id))
     );
 
     // 5. Create an API token for the user
@@ -199,7 +199,7 @@ async fn test_api_user() {
             id: TypedUuid::new_v4(),
             user_id: api_user.user.id,
             key_signature: format!("key-{}", Uuid::new_v4()),
-            permissions: Some(vec![TestPermission::GetApiKey(api_user_id).into()].into()),
+            permissions: Some(vec![TestPermission::GetApiKey(api_user_id)].into()),
             expires_at: Utc::now() + TimeDelta::try_seconds(5 * 60).unwrap(),
         },
     )
@@ -215,8 +215,8 @@ async fn test_api_user() {
             key_signature: format!("key-{}", Uuid::new_v4()),
             permissions: Some(
                 vec![
-                    TestPermission::CreateApiUser.into(),
-                    TestPermission::GetApiKey(api_user_id).into(),
+                    TestPermission::CreateApiUser,
+                    TestPermission::GetApiKey(api_user_id),
                 ]
                 .into(),
             ),
@@ -231,7 +231,7 @@ async fn test_api_user() {
             .permissions
             .as_ref()
             .unwrap()
-            .can(&TestPermission::CreateApiUser.into())
+            .can(&TestPermission::CreateApiUser)
     );
 
     // 7. Create an API token with excess permissions for the user
@@ -243,8 +243,8 @@ async fn test_api_user() {
             key_signature: format!("key-{}", Uuid::new_v4()),
             permissions: Some(
                 vec![
-                    TestPermission::CreateApiUser.into(),
-                    TestPermission::GetApiKey(api_user_id).into(),
+                    TestPermission::CreateApiUser,
+                    TestPermission::GetApiKey(api_user_id),
                 ]
                 .into(),
             ),

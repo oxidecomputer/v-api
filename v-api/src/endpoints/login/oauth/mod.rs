@@ -164,7 +164,7 @@ where
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct OAuthProviderInfo {
     provider: OAuthProviderName,
     client_id: String,
@@ -173,7 +173,7 @@ pub struct OAuthProviderInfo {
     device: Option<OAuthProviderDeviceInfo>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct OAuthProviderAuthorizationCodeInfo {
     auth_url_endpoint: String,
     redirect_endpoint: String,
@@ -182,10 +182,11 @@ pub struct OAuthProviderAuthorizationCodeInfo {
     remote: OAuthProviderAuthorizationCodeRemoteInfo,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct OAuthProviderAuthorizationCodeRemoteInfo {
     client_id: String,
-    #[serde(skip_serializing)]
+    #[schemars(skip)]
+    #[serde(skip)]
     client_secret: OpenApiSecretString,
     auth_url_endpoint: String,
     token_endpoint_content_type: String,
@@ -193,7 +194,7 @@ pub struct OAuthProviderAuthorizationCodeRemoteInfo {
     revocation_endpoint: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct OAuthProviderAuthorizationCodePkceInfo {
     client_id: TypedUuid<OAuthClientId>,
     redirect_endpoint: String,
@@ -201,11 +202,12 @@ pub struct OAuthProviderAuthorizationCodePkceInfo {
     web: OAuthProviderAuthorizationCodeInfo,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct OAuthProviderDeviceInfo {
     client_id: TypedUuid<OAuthClientId>,
     remote_client_id: String,
-    #[serde(skip_serializing)]
+    #[schemars(skip)]
+    #[serde(skip)]
     remote_client_secret: OpenApiSecretString,
     device_code_endpoint: String,
     token_endpoint_content_type: String,

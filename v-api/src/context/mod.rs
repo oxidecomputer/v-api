@@ -1005,7 +1005,7 @@ mod tests {
 
         let provider = ApiUserProvider {
             id: TypedUuid::new_v4(),
-            user_id: user_id,
+            user_id,
             provider: "test".to_string(),
             provider_id: "test_id".to_string(),
             emails: vec![],
@@ -1027,9 +1027,7 @@ mod tests {
             .await
             .unwrap();
 
-        let jwt = AuthToken::Jwt(Jwt::new(&ctx, &user_token).await.unwrap());
-
-        jwt
+        AuthToken::Jwt(Jwt::new(ctx, &user_token).await.unwrap())
     }
 
     #[tokio::test]
@@ -1091,7 +1089,7 @@ mod tests {
             .returning(move |_, _| {
                 Ok(Some(AccessToken {
                     id: valid_token_id,
-                    user_id: user_id,
+                    user_id,
                     revoked_at: None,
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
