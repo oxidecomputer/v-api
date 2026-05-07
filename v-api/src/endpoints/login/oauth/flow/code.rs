@@ -506,6 +506,23 @@ where
             }
         })?;
 
+    // Re-validate the redirect URI against the OAuth client's current registered URIs.
+    // The URI was checked when the login attempt was created, but it may have been removed
+    // since then. We must not redirect to a URI that is no longer registered (TOCTOU).
+    let client = ctx
+        .oauth
+        .get_oauth_client(&ctx.builtin_registration_user(), &attempt.client_id)
+        .await
+        .map_err(to_internal_error)?;
+    if !client.is_redirect_uri_valid(&attempt.redirect_uri) {
+        tracing::warn!(
+            redirect_uri = ?attempt.redirect_uri,
+            client_id = ?attempt.client_id,
+            "Login attempt redirect URI is no longer registered on the OAuth client"
+        );
+        return Err(unauthorized());
+    }
+
     attempt = match (code, error) {
         (Some(code), None) => {
             tracing::info!(?attempt.id, "Received valid login attempt. Storing authorization code");
@@ -1085,6 +1102,37 @@ mod tests {
 
     use super::{authorize_code_exchange, get_oauth_client, oauth_redirect_response};
 
+    /// Create a mock `OAuthClientStore` that returns a client with the given
+    /// `client_id` and a single registered `redirect_uri`. This is needed by
+    /// any test that exercises `authz_code_callback_op_inner`, which re-validates
+    /// the redirect URI against the client before redirecting.
+    fn mock_oauth_client_store_for_callback(
+        client_id: TypedUuid<v_model::OAuthClientId>,
+        redirect_uri: &str,
+    ) -> Arc<MockOAuthClientStore> {
+        let redirect_uri = redirect_uri.to_string();
+        let mut store = MockOAuthClientStore::new();
+        store
+            .expect_get()
+            .with(eq(client_id), eq(false))
+            .returning(move |_, _| {
+                Ok(Some(OAuthClient {
+                    id: client_id,
+                    secrets: vec![],
+                    redirect_uris: vec![OAuthClientRedirectUri {
+                        id: TypedUuid::new_v4(),
+                        oauth_client_id: client_id,
+                        redirect_uri: redirect_uri.clone(),
+                        created_at: Utc::now(),
+                        deleted_at: None,
+                    }],
+                    created_at: Utc::now(),
+                    deleted_at: None,
+                }))
+            });
+        Arc::new(store)
+    }
+
     async fn mock_client() -> (VContext<VPermission>, OAuthClient, SecretString) {
         let ctx = mock_context(Arc::new(MockStorage::new())).await;
         let client_id = TypedUuid::new_v4();
@@ -1350,10 +1398,11 @@ mod tests {
     #[tokio::test]
     async fn test_callback_fails_when_error_is_passed() {
         let attempt_id = TypedUuid::new_v4();
+        let client_id = TypedUuid::new_v4();
         let attempt = LoginAttempt {
             id: attempt_id,
             attempt_state: LoginAttemptState::New,
-            client_id: TypedUuid::new_v4(),
+            client_id,
             redirect_uri: "https://test.oxeng.dev/callback".to_string(),
             state: Some("ox_state".to_string()),
             pkce_challenge: Some("ox_challenge".to_string()),
@@ -1393,6 +1442,10 @@ mod tests {
 
         let mut storage = MockStorage::new();
         storage.login_attempt_store = Some(Arc::new(attempt_store));
+        storage.oauth_client_store = Some(mock_oauth_client_store_for_callback(
+            client_id,
+            "https://test.oxeng.dev/callback",
+        ));
         let ctx = mock_context(Arc::new(storage)).await;
 
         let location = authz_code_callback_op_inner(
@@ -1413,10 +1466,11 @@ mod tests {
     #[tokio::test]
     async fn test_callback_forwards_access_denied() {
         let attempt_id = TypedUuid::new_v4();
+        let client_id = TypedUuid::new_v4();
         let attempt = LoginAttempt {
             id: attempt_id,
             attempt_state: LoginAttemptState::New,
-            client_id: TypedUuid::new_v4(),
+            client_id,
             redirect_uri: "https://test.oxeng.dev/callback".to_string(),
             state: Some("ox_state".to_string()),
             pkce_challenge: Some("ox_challenge".to_string()),
@@ -1456,6 +1510,10 @@ mod tests {
 
         let mut storage = MockStorage::new();
         storage.login_attempt_store = Some(Arc::new(attempt_store));
+        storage.oauth_client_store = Some(mock_oauth_client_store_for_callback(
+            client_id,
+            "https://test.oxeng.dev/callback",
+        ));
         let ctx = mock_context(Arc::new(storage)).await;
 
         let location = authz_code_callback_op_inner(
@@ -1476,10 +1534,11 @@ mod tests {
     #[tokio::test]
     async fn test_handles_callback_with_code() {
         let attempt_id = TypedUuid::new_v4();
+        let client_id = TypedUuid::new_v4();
         let attempt = LoginAttempt {
             id: attempt_id,
             attempt_state: LoginAttemptState::New,
-            client_id: TypedUuid::new_v4(),
+            client_id,
             redirect_uri: "https://test.oxeng.dev/callback".to_string(),
             state: Some("ox_state".to_string()),
             pkce_challenge: Some("ox_challenge".to_string()),
@@ -1521,6 +1580,10 @@ mod tests {
 
         let mut storage = MockStorage::new();
         storage.login_attempt_store = Some(Arc::new(attempt_store));
+        storage.oauth_client_store = Some(mock_oauth_client_store_for_callback(
+            client_id,
+            "https://test.oxeng.dev/callback",
+        ));
         let ctx = mock_context(Arc::new(storage)).await;
 
         let location =
@@ -2382,6 +2445,7 @@ mod tests {
     #[tokio::test]
     async fn test_state_roundtrip_preserves_special_characters() {
         let attempt_id = TypedUuid::new_v4();
+        let client_id = TypedUuid::new_v4();
         let original_state = "random+state/with spaces&special=chars";
 
         // State is now stored as-is (no pre-encoding). callback_url() handles
@@ -2389,7 +2453,7 @@ mod tests {
         let attempt = LoginAttempt {
             id: attempt_id,
             attempt_state: LoginAttemptState::New,
-            client_id: TypedUuid::new_v4(),
+            client_id,
             redirect_uri: "https://test.oxeng.dev/callback".to_string(),
             state: Some(original_state.to_string()),
             pkce_challenge: Some("ox_challenge".to_string()),
@@ -2428,6 +2492,10 @@ mod tests {
 
         let mut storage = MockStorage::new();
         storage.login_attempt_store = Some(Arc::new(attempt_store));
+        storage.oauth_client_store = Some(mock_oauth_client_store_for_callback(
+            client_id,
+            "https://test.oxeng.dev/callback",
+        ));
         let ctx = mock_context(Arc::new(storage)).await;
 
         let location =
@@ -2506,6 +2574,104 @@ mod tests {
         assert_eq!(
             response.idp_token, None,
             "IdP token must NOT be returned when not requested, even with permission"
+        );
+    }
+
+    /// The OAuth callback (`authz_code_callback_op_inner`) redirects the user to
+    /// the `redirect_uri` stored in the login attempt without re-validating it
+    /// against the OAuth client's currently registered redirect URIs. This means
+    /// that if a redirect URI is removed from the client between the authorization
+    /// request and the callback, the redirect still proceeds to the now-deregistered
+    /// URI (a TOCTOU gap). The callback should re-validate the redirect URI before
+    /// using it.
+    #[tokio::test]
+    async fn test_callback_revalidates_redirect_uri() {
+        let client_id = TypedUuid::new_v4();
+        // The login attempt was created with a redirect_uri that was valid at the
+        // time, but has since been removed from the client's allowed list.
+        let deregistered_uri = "https://formerly-valid.example.com/callback";
+
+        let attempt_id = TypedUuid::new_v4();
+        let attempt = LoginAttempt {
+            id: attempt_id,
+            attempt_state: LoginAttemptState::New,
+            client_id,
+            redirect_uri: deregistered_uri.to_string(),
+            state: Some("test-state".to_string()),
+            pkce_challenge: Some("test-challenge".to_string()),
+            pkce_challenge_method: Some("S256".to_string()),
+            authz_code: None,
+            expires_at: None,
+            error: None,
+            provider: "google".to_string(),
+            provider_pkce_verifier: None,
+            provider_authz_code: None,
+            provider_error: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            scope: "user:info:r".to_string(),
+        };
+
+        let mut attempt_store = MockLoginAttemptStore::new();
+        let original_attempt = attempt.clone();
+        attempt_store
+            .expect_get()
+            .with(eq(attempt_id))
+            .returning(move |_| Ok(Some(original_attempt.clone())));
+
+        attempt_store
+            .expect_update_if_state()
+            .withf(|attempt, expected| {
+                attempt.attempt_state == LoginAttemptState::RemoteAuthenticated
+                    && *expected == LoginAttemptState::New
+            })
+            .returning(move |arg, _| {
+                let mut returned = attempt.clone();
+                returned.attempt_state = arg.attempt_state;
+                returned.authz_code = arg.authz_code;
+                Ok(returned)
+            });
+
+        // Configure the OAuth client with NO registered redirect URIs,
+        // simulating that the URI was removed after the login attempt
+        // was created.
+        let mut client_store = MockOAuthClientStore::new();
+        client_store
+            .expect_get()
+            .with(eq(client_id), eq(false))
+            .returning(move |_, _| {
+                Ok(Some(OAuthClient {
+                    id: client_id,
+                    secrets: vec![],
+                    redirect_uris: vec![], // No registered URIs
+                    created_at: Utc::now(),
+                    deleted_at: None,
+                }))
+            });
+
+        let mut storage = MockStorage::new();
+        storage.login_attempt_store = Some(Arc::new(attempt_store));
+        storage.oauth_client_store = Some(Arc::new(client_store));
+        let ctx = mock_context(Arc::new(storage)).await;
+
+        // The callback should reject the request because the redirect URI is no
+        // longer registered on the OAuth client.
+        let err = authz_code_callback_op_inner(
+            &ctx,
+            &attempt_id,
+            Some("remote-code".to_string()),
+            None,
+        )
+        .await
+        .expect_err(
+            "Callback should fail when the redirect URI is no longer registered on the client",
+        );
+
+        assert_eq!(
+            err.status_code,
+            StatusCode::UNAUTHORIZED,
+            "Expected 401 when redirect URI is deregistered, got {}",
+            err.status_code,
         );
     }
 
