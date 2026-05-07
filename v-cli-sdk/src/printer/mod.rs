@@ -59,7 +59,7 @@ impl Printer {
         // Check for 401 Unauthorized up-front, regardless of output format.
         if let Some(status) = value.status() {
             if status == reqwest::StatusCode::UNAUTHORIZED {
-                eprintln!("Authentication required. Please run `sprue auth login` first.");
+                eprintln!("Authentication required. Please run `auth login` first.");
                 return;
             }
         }

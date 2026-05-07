@@ -149,7 +149,7 @@ impl OAuthProvider for GitHubOAuthProvider {
         &self.default_scopes
     }
     fn supports_pkce(&self) -> bool {
-        false
+        true
     }
 
     fn authz_code_flow_info(&self) -> Option<&OAuthProviderAuthorizationCodeInfo> {

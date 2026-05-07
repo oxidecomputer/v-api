@@ -139,6 +139,8 @@ impl OAuthProvider for ZendeskOAuthProvider {
     }
 
     fn expires_in(&self) -> Option<u64> {
+        // This is the maximum token duration that Zendesk supports. In the future we should make
+        // this configurable
         Some(172800)
     }
     fn default_scopes(&self) -> &[String] {

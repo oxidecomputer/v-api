@@ -51,7 +51,16 @@ macro_rules! sql_conversion {
 }
 
 #[derive(
-    Copy, Debug, PartialEq, Clone, FromSqlRow, AsExpression, Serialize, Deserialize, JsonSchema, Default,
+    Copy,
+    Debug,
+    PartialEq,
+    Clone,
+    FromSqlRow,
+    AsExpression,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Default,
 )]
 #[diesel(sql_type = AttemptState)]
 #[serde(rename_all = "lowercase")]
