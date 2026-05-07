@@ -72,6 +72,7 @@ pub trait OAuthProvider: ExtractUserInfo + Debug + Send + Sync {
     fn authz_code_pkce_flow_info(&self) -> Option<&OAuthProviderAuthorizationCodePkceInfo>;
     fn device_code_flow_info(&self) -> Option<&OAuthProviderDeviceInfo>;
 
+    fn expires_in(&self) -> Option<u64>;
     fn default_scopes(&self) -> &[String];
 
     /// Whether the remote OAuth provider supports PKCE (RFC 7636). Providers must

@@ -166,6 +166,10 @@ impl OAuthProvider for GoogleOAuthProvider {
             "https://people.googleapis.com/v1/people/me?personFields=names",
         ]
     }
+
+    fn expires_in(&self) -> Option<u64> {
+        None
+    }
     fn default_scopes(&self) -> &[String] {
         &self.default_scopes
     }

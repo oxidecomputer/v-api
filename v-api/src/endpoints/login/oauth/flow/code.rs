@@ -996,6 +996,10 @@ async fn fetch_user_info(
         request = request.set_pkce_verifier(PkceCodeVerifier::new(pkce_verifier.to_string()))
     }
 
+    if let Some(expires_in) = provider.expires_in() {
+        request = request.add_extra_param("expires_in", expires_in.to_string());
+    }
+
     let oauth_client: oauth2_reqwest::ReqwestClient = provider.client().clone().into();
     let response = request
         .request_async(&oauth_client)

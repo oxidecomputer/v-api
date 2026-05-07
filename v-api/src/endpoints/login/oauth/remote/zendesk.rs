@@ -137,6 +137,10 @@ impl OAuthProvider for ZendeskOAuthProvider {
     fn user_info_endpoints(&self) -> Vec<&str> {
         vec![&self.user_info_endpoint]
     }
+
+    fn expires_in(&self) -> Option<u64> {
+        Some(172800)
+    }
     fn default_scopes(&self) -> &[String] {
         &self.default_scopes
     }

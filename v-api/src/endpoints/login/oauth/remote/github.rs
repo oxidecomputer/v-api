@@ -141,6 +141,10 @@ impl OAuthProvider for GitHubOAuthProvider {
             "https://api.github.com/user/emails",
         ]
     }
+
+    fn expires_in(&self) -> Option<u64> {
+        None
+    }
     fn default_scopes(&self) -> &[String] {
         &self.default_scopes
     }
