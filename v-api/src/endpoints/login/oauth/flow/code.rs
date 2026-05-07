@@ -512,8 +512,7 @@ where
     let client = ctx
         .oauth
         .get_oauth_client(&ctx.builtin_registration_user(), &attempt.client_id)
-        .await
-        .map_err(to_internal_error)?;
+        .await?;
     if !client.is_redirect_uri_valid(&attempt.redirect_uri) {
         tracing::warn!(
             redirect_uri = ?attempt.redirect_uri,
