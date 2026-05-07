@@ -1263,14 +1263,14 @@ pub(crate) mod test_mocks {
     };
 
     use crate::{
+        VContextBuilder,
         config::{
             JwtConfig, ResolvedOAuthConfig, ResolvedOAuthWebConfig, ResolvedOAuthWebProxyConfig,
         },
         endpoints::login::oauth::{
-            remote::google::GoogleOAuthProvider, remote::zendesk::ZendeskOAuthProvider,
-            OAuthProviderName,
+            OAuthProviderName, remote::google::GoogleOAuthProvider,
+            remote::zendesk::ZendeskOAuthProvider,
         },
-        VContextBuilder,
         mapper::DefaultMappingEngine,
         permissions::VPermission,
         util::tests::{MockKey, mock_key},

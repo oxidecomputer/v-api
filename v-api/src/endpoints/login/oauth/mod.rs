@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 use http::Method;
-use hyper::{body::Bytes, header::HeaderValue, header::AUTHORIZATION};
+use hyper::{body::Bytes, header::AUTHORIZATION, header::HeaderValue};
 use newtype_uuid::TypedUuid;
 use oauth2::{
     AuthUrl, ClientId, ClientSecret, EndpointMaybeSet, EndpointNotSet, EndpointSet, RedirectUrl,
@@ -20,11 +20,11 @@ use tracing::instrument;
 use v_model::{OAuthClient, OAuthClientId};
 
 use crate::{
-    authn::{key::RawKey, Verify},
+    authn::{Verify, key::RawKey},
     secrets::OpenApiSecretString,
 };
 
-use super::{is_redirect_uri_valid, UserInfo, UserInfoError, UserInfoProvider};
+use super::{UserInfo, UserInfoError, UserInfoProvider, is_redirect_uri_valid};
 
 pub mod client;
 pub mod flow;

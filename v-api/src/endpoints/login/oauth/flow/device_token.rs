@@ -4,9 +4,9 @@
 
 use chrono::{DateTime, Utc};
 use dropshot::{Body, HttpError, HttpResponseOk, Method, Path, RequestContext, TypedBody};
-use http::{header, HeaderMap, HeaderValue, Response, StatusCode};
+use http::{HeaderMap, HeaderValue, Response, StatusCode, header};
 use hyper::body::Bytes;
-use oauth2::{basic::BasicTokenType, EmptyExtraTokenFields, StandardTokenResponse, TokenResponse};
+use oauth2::{EmptyExtraTokenFields, StandardTokenResponse, TokenResponse, basic::BasicTokenType};
 use schemars::JsonSchema;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ use super::super::OAuthProviderNameParam;
 use crate::endpoints::login::UserInfoProvider;
 use crate::{
     context::ApiContext,
-    endpoints::login::{oauth::OAuthProviderDeviceInfo, LoginError},
+    endpoints::login::{LoginError, oauth::OAuthProviderDeviceInfo},
     error::ApiError,
     permissions::VAppPermission,
     response::internal_error,
@@ -363,8 +363,8 @@ fn handle_token_parse_failure(
 #[cfg(test)]
 mod tests {
     use http::{
-        header::{self, HeaderName, SET_COOKIE},
         HeaderMap, HeaderValue, StatusCode,
+        header::{self, HeaderName, SET_COOKIE},
     };
     use hyper::body::Bytes;
 

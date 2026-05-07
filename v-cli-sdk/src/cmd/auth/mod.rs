@@ -6,7 +6,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::error::Error as StdError;
 
-use crate::{cmd::auth::login::CliConsumerLoginProvider, VCliContext};
+use crate::{VCliContext, cmd::auth::login::CliConsumerLoginProvider};
 
 pub mod login;
 pub mod oauth;

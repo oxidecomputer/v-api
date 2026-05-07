@@ -10,8 +10,8 @@ use http_body_util::Full;
 use hyper::body::{Bytes, Incoming};
 
 use oauth2::{
-    basic::BasicClient, AuthType, AuthUrl, ClientId, CsrfToken, EndpointNotSet, EndpointSet,
-    PkceCodeChallenge, RedirectUrl, Scope, TokenUrl,
+    AuthType, AuthUrl, ClientId, CsrfToken, EndpointNotSet, EndpointSet, PkceCodeChallenge,
+    RedirectUrl, Scope, TokenUrl, basic::BasicClient,
 };
 use tokio::sync::oneshot;
 use uuid::Uuid;

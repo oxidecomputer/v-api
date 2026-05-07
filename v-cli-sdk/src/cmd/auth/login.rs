@@ -8,8 +8,8 @@ use oauth2::TokenResponse;
 use std::{error::Error as StdError, fmt::Debug, future::Future, io::Write, pin::Pin, sync::Arc};
 
 use crate::{
-    cmd::auth::oauth::{self, CliOAuthAdapter, CliOAuthProviderInfo},
     VCliConfig, VCliContext,
+    cmd::auth::oauth::{self, CliOAuthAdapter, CliOAuthProviderInfo},
 };
 
 pub trait CliAdapterToken {

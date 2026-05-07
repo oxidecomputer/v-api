@@ -57,8 +57,8 @@ pub trait VCliContext<C, P> {
         LongToken = Self::LongToken,
         Error = Self::Error,
     > + Send
-           + Sync
-           + 'static;
+    + Sync
+    + 'static;
     fn mlink_adapter(
         &self,
     ) -> impl CliMagicLinkAdapter<Token = Self::LongToken, Error = Self::Error> + Send + Sync + 'static;

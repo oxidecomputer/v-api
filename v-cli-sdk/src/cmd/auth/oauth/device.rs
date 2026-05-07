@@ -1,8 +1,8 @@
 use anyhow::Result;
 use oauth2::{
-    basic::{BasicClient, BasicTokenType},
     AuthType, AuthUrl, ClientId, DeviceAuthorizationUrl, EmptyExtraTokenFields, EndpointNotSet,
     EndpointSet, Scope, StandardDeviceAuthorizationResponse, StandardTokenResponse, TokenUrl,
+    basic::{BasicClient, BasicTokenType},
 };
 
 use crate::cmd::auth::oauth::CliOAuthProviderInfo;

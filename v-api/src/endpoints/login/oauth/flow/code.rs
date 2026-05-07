@@ -10,7 +10,7 @@ use dropshot::{
     RequestContext, RequestInfo, SharedExtractor, TypedBody, http_response_temporary_redirect,
 };
 use dropshot_authorization_header::basic::BasicAuth;
-use http::{header::SET_COOKIE, HeaderValue};
+use http::{HeaderValue, header::SET_COOKIE};
 use newtype_uuid::{GenericUuid, TypedUuid};
 use oauth2::{
     AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope, TokenResponse,
@@ -25,7 +25,9 @@ use tap::TapFallible;
 use tracing::instrument;
 use uuid::Uuid;
 use v_model::{
-    LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient, OAuthClientId, permissions::{AsScope, PermissionStorage, Permissions}, schema_ext::LoginAttemptState
+    LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient, OAuthClientId,
+    permissions::{AsScope, PermissionStorage, Permissions},
+    schema_ext::LoginAttemptState,
 };
 
 use super::super::{OAuthProvider, OAuthProviderNameParam};
@@ -34,8 +36,8 @@ use crate::{
     authn::key::RawKey,
     context::{ApiContext, VContext},
     endpoints::login::{
-        oauth::{CheckOAuthClient, ClientType, OAuthProviderAuthorizationCodePkceInfo},
         LoginError, UserInfo,
+        oauth::{CheckOAuthClient, ClientType, OAuthProviderAuthorizationCodePkceInfo},
     },
     error::ApiError,
     permissions::{VAppPermission, VPermission},
@@ -1027,14 +1029,13 @@ mod tests {
     use secrecy::SecretString;
     use uuid::Uuid;
     use v_model::{
-        LoginAttempt, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret,
+        AccessToken, ApiUser, ApiUserInfo, ApiUserProvider, LoginAttempt, NewApiUser,
+        NewApiUserProvider, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret,
         schema_ext::LoginAttemptState,
         storage::{
             MockAccessTokenStore, MockApiUserProviderStore, MockApiUserStore,
             MockLoginAttemptStore, MockMapperStore, MockOAuthClientStore,
         },
-        AccessToken, ApiUser, ApiUserInfo, ApiUserProvider, NewApiUser,
-        NewApiUserProvider,
     };
 
     use crate::{
@@ -1044,14 +1045,14 @@ mod tests {
             test_mocks::{MockStorage, mock_context},
         },
         endpoints::login::{
-            oauth::{
-                flow::code::{
-                    authz_code_callback_op_inner, verify_csrf, verify_login_attempt,
-                    OAuthAuthzCodeReturnQuery, OAuthError, OAuthErrorCode, LOGIN_ATTEMPT_COOKIE,
-                },
-                OAuthProviderName,
-            },
             ExternalUserId, UserInfo,
+            oauth::{
+                OAuthProviderName,
+                flow::code::{
+                    LOGIN_ATTEMPT_COOKIE, OAuthAuthzCodeReturnQuery, OAuthError, OAuthErrorCode,
+                    authz_code_callback_op_inner, verify_csrf, verify_login_attempt,
+                },
+            },
         },
         permissions::VPermission,
     };
@@ -1174,7 +1175,11 @@ mod tests {
         .unwrap();
         let headers = response.headers();
 
-        let expected_location = format!("https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=google_web_client_id&state={}&code_challenge={}&code_challenge_method=S256&redirect_uri=https%3A%2F%2Ftest_public_url%2Flogin%2Foauth%2Fgoogle%2Fcode%2Fcallback&scope=openid+email+profile", attempt.id, challenge.as_str());
+        let expected_location = format!(
+            "https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=google_web_client_id&state={}&code_challenge={}&code_challenge_method=S256&redirect_uri=https%3A%2F%2Ftest_public_url%2Flogin%2Foauth%2Fgoogle%2Fcode%2Fcallback&scope=openid+email+profile",
+            attempt.id,
+            challenge.as_str()
+        );
 
         assert_eq!(
             expected_location,
