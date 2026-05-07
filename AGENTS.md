@@ -5,7 +5,7 @@
 - check: `cargo check --quiet --all-features --workspace --all-targets`
 - test: `cargo test --quiet --all-features --workspace --all-targets`
 - format: `cargo fmt`
-- clippy: `cargo clippy --fix --allow-dirty --all-features --workspace --all-targets`
+- clippy: `cargo clippy --quiet --fix --allow-dirty --all-features --workspace --all-targets`
 
 ## Crates
 
