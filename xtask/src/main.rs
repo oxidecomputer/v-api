@@ -79,14 +79,9 @@ fn bump(place: &VersionPlace, dirty: bool) -> Result<(), String> {
         format!("git branch -D {}", shell_quote(&bump_result.bump_branch)),
     ]
     .join(" && ");
+    let publish_command = [bump_result.push_cmd, bump_result.pr_cmd].join(" && \\\n    ");
 
-    println!();
-    println!("If you would like to undo:");
-    println!("  {undo_command}");
-    println!();
-    println!("If this looks good, push and publish the PR:");
-    println!("  {}", bump_result.publish_command);
-    println!();
+    print_next_steps(&undo_command, &publish_command);
 
     Ok(())
 }
@@ -106,51 +101,41 @@ fn release(place: &VersionPlace, dirty: bool) -> Result<(), String> {
     let repo_url = repo_url(&root_path)?;
     let compare_url = format!("{}/compare/{}...{}", repo_url, previous_tag, current_commit);
 
-    println!(
-        "Tagging {current_commit} on {current_branch} as {release_tag}\n - Preview diff: {}",
-        compare_url
-    );
+    println!("Tagging {current_commit} on {current_branch} as {release_tag}");
+    println!("  Preview diff: {}", compare_url);
     git_status(&root_path, ["tag", &release_tag])?;
 
+    let tag_undo = format!("git tag -d {}", shell_quote(&release_tag));
+    let tag_push = format!("git push -q origin {}", shell_quote(&release_tag));
     if *place == VersionPlace::Pre {
-        println!();
-        println!("If you would like to undo:");
-        println!("  git tag -d {}", shell_quote(&release_tag));
-        println!();
-        println!("If this looks good, push the tag:");
-        println!("  git push origin {}", shell_quote(&release_tag));
-        println!();
-        return Ok(());
+        print_next_steps(&tag_undo, &tag_push);
+        Ok(())
+    } else {
+        let bump_result = bump_on_pr_branch(&root_path, &old_version, place)?;
+        let branch_quoted = shell_quote(&bump_result.bump_branch);
+        let branch_undo = format!("git branch -D {branch_quoted}");
+        let undo_cmd = [tag_undo, branch_undo].join(" && ");
+        let publish_cmd = [bump_result.push_cmd, tag_push, bump_result.pr_cmd].join(" && \\\n    ");
+        print_next_steps(&undo_cmd, &publish_cmd);
+        Ok(())
     }
+}
 
-    let bump_result = bump_on_pr_branch(&root_path, &old_version, place)?;
-
-    let undo_command = [
-        format!("git tag -d {}", shell_quote(&release_tag)),
-        format!("git branch -D {}", shell_quote(&bump_result.bump_branch)),
-    ]
-    .join(" && ");
-    let publish_command = [
-        bump_result.publish_command,
-        format!("git push -q origin {}", shell_quote(&release_tag)),
-    ]
-    .join(" && \\\n    ");
-
+fn print_next_steps(undo_cmd: &str, good_cmd: &str) {
     println!();
     println!("If you would like to undo:");
-    println!("  {undo_command}");
+    println!("  {undo_cmd}");
     println!();
-    println!("If this looks good, push and publish the PR:");
-    println!("  {publish_command}");
+    println!("If this looks good:");
+    println!("  {good_cmd}");
     println!();
-
-    Ok(())
 }
 
 struct BumpPrBranch {
     bump_branch: String,
     original_branch: String,
-    publish_command: String,
+    push_cmd: String,
+    pr_cmd: String,
 }
 
 fn bump_on_pr_branch(
@@ -173,19 +158,18 @@ fn bump_on_pr_branch(
 
     let quoted_bump_branch = shell_quote(&bump_branch);
     let quoted_commit_message = shell_quote(&commit_message);
-    let push_command = format!("git push -q -u origin {quoted_bump_branch}");
-    let pr_command = [
+    let push_cmd = format!("git push -q -u origin {quoted_bump_branch}");
+    let pr_cmd = [
         "gh pr create --web --base main".to_string(),
         format!("--head {quoted_bump_branch}"),
         format!("--title {quoted_commit_message}"),
     ]
     .join(" ");
-    let publish_command = [push_command, pr_command].join(" && \\\n    ");
-
     Ok(BumpPrBranch {
         bump_branch,
         original_branch,
-        publish_command,
+        push_cmd,
+        pr_cmd,
     })
 }
 
