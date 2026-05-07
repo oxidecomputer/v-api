@@ -10,7 +10,7 @@ use serde::{
     de::{self, Visitor},
 };
 use thiserror::Error;
-use url::Url;
+
 
 use crate::{
     permissions::VPermission,
@@ -219,35 +219,16 @@ pub trait UserInfoProvider {
     async fn get_user_info(&self, token: &str) -> Result<UserInfo, UserInfoError>;
 }
 
-/// Structurally compare a candidate redirect URI against a list of registered redirect URIs.
-/// Comparison is performed on scheme, host, port, and path. URIs that fail to parse or contain
-/// fragments are rejected (per RFC 6749 §3.1.2).
+/// Compare a candidate redirect URI against a list of registered redirect URIs using strict
+/// string comparison. Structural validation of redirect URIs should be performed at registration
+/// time before they are stored in the database.
 pub fn is_redirect_uri_valid<'a>(
     redirect_uri: &str,
     registered_uris: impl Iterator<Item = &'a str>,
 ) -> bool {
-    let candidate = match Url::parse(redirect_uri) {
-        Ok(url) => url,
-        Err(_) => return false,
-    };
-
-    // Reject redirect URIs that contain fragments (per RFC 6749 §3.1.2)
-    if candidate.fragment().is_some() {
-        return false;
-    }
-
     registered_uris
         .into_iter()
-        .any(|registered| match Url::parse(registered) {
-            Ok(registered) => {
-                registered.scheme() == candidate.scheme()
-                    && registered.host() == candidate.host()
-                    && registered.port() == candidate.port()
-                    && registered.path() == candidate.path()
-                    && registered.query() == candidate.query()
-            }
-            Err(_) => false,
-        })
+        .any(|registered| registered == redirect_uri)
 }
 
 #[cfg(test)]
@@ -263,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn test_redirect_uri_rejects_different_host() {
+    fn test_redirect_uri_rejects_different_string() {
         assert!(!is_redirect_uri_valid(
             "https://evil.com/callback",
             ["https://example.com/callback"].iter().copied(),
@@ -271,66 +252,31 @@ mod tests {
     }
 
     #[test]
-    fn test_redirect_uri_rejects_different_path() {
+    fn test_redirect_uri_rejects_trailing_slash_difference() {
         assert!(!is_redirect_uri_valid(
-            "https://example.com/other",
+            "https://example.com/callback/",
             ["https://example.com/callback"].iter().copied(),
         ));
     }
 
     #[test]
-    fn test_redirect_uri_rejects_fragment() {
-        assert!(!is_redirect_uri_valid(
-            "https://example.com/callback#fragment",
-            ["https://example.com/callback"].iter().copied(),
-        ));
-    }
-
-    #[test]
-    fn test_redirect_uri_rejects_unparseable() {
-        assert!(!is_redirect_uri_valid(
-            "not-a-url",
-            ["https://example.com/callback"].iter().copied(),
-        ));
-    }
-
-    #[test]
-    fn test_redirect_uri_query_params_must_match() {
-        // Registered with query params — candidate must have the same query
+    fn test_redirect_uri_matches_from_multiple_registered() {
         assert!(is_redirect_uri_valid(
-            "https://example.com/callback?key=value",
-            ["https://example.com/callback?key=value"].iter().copied(),
+            "https://example.com/callback",
+            [
+                "https://other.com/callback",
+                "https://example.com/callback",
+            ]
+            .iter()
+            .copied(),
         ));
+    }
 
-        // Different query param value must be rejected
-        assert!(!is_redirect_uri_valid(
-            "https://example.com/callback?key=evil",
-            ["https://example.com/callback?key=value"].iter().copied(),
-        ));
-
-        // Missing query params when registered URI has them must be rejected
+    #[test]
+    fn test_redirect_uri_rejects_no_registered() {
         assert!(!is_redirect_uri_valid(
             "https://example.com/callback",
-            ["https://example.com/callback?key=value"].iter().copied(),
-        ));
-
-        // Extra query params when registered URI has none must be rejected
-        assert!(!is_redirect_uri_valid(
-            "https://example.com/callback?extra=param",
-            ["https://example.com/callback"].iter().copied(),
-        ));
-    }
-
-    #[test]
-    fn test_redirect_uri_matches_with_port() {
-        assert!(is_redirect_uri_valid(
-            "https://example.com:8443/callback",
-            ["https://example.com:8443/callback"].iter().copied(),
-        ));
-
-        assert!(!is_redirect_uri_valid(
-            "https://example.com:9999/callback",
-            ["https://example.com:8443/callback"].iter().copied(),
+            std::iter::empty(),
         ));
     }
 }
