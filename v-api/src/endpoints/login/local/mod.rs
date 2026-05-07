@@ -13,7 +13,7 @@ use v_model::permissions::PermissionStorage;
 use crate::{
     authn::jwt::Claims,
     context::ApiContext,
-    endpoints::login::{ExternalUserId, UserInfo, oauth::device_token::ProxyTokenResponse},
+    endpoints::login::{ExternalUserId, UserInfo, oauth::flow::device_token::ProxyTokenResponse},
     permissions::{VAppPermission, VPermission},
 };
 
@@ -38,6 +38,7 @@ where
         external_id: ExternalUserId::Local(body.external_id),
         verified_emails: vec![body.email],
         display_name: Some("Local Dev".to_string()),
+        idp_token: None,
     };
 
     let (api_user, api_user_provider) = ctx
