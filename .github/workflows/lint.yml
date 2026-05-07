@@ -45,7 +45,7 @@ jobs:
             echo "Cargo.lock is out of date"
             {
               echo "## Cargo.lock is out of date"
-              echo 'Run `cargo check` locally and commit the updated `Cargo.lock`.'
+              echo 'Run "cargo check" locally and commit the updated Cargo.lock.'
             } >> "$GITHUB_STEP_SUMMARY"
             echo "::group::Cargo.lock diff"
             git diff -- Cargo.lock

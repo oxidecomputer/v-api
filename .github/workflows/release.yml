@@ -17,4 +17,4 @@ jobs:
           draft: ${{ github.event_name == 'pull_request' }}
           tag: ${{ github.ref_name }}
           generateReleaseNotes: true
-          prerelease: ${{ contains(steps.tag.outputs.value, '-pre') }}
+          prerelease: ${{ contains(github.ref_name, '-pre') }}
