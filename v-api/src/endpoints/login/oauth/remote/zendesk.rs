@@ -50,7 +50,7 @@ impl ZendeskOAuthProvider {
             auth_url_endpoint: format!("{}/login/oauth/zendesk/code/authorize", public_url),
             redirect_endpoint: format!("{}/login/oauth/zendesk/code/callback", public_url),
             token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
-            token_endpoint: format!("{}/login/oauth/zendesk/device/exchange", public_url),
+            token_endpoint: format!("{}/login/oauth/zendesk/code/token", public_url),
             remote: OAuthProviderAuthorizationCodeRemoteInfo {
                 client_id: web.remote_client_id,
                 client_secret: web.remote_client_secret.into(),

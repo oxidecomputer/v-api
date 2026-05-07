@@ -571,6 +571,7 @@ where
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct OAuthAuthzCodeExchangeQuery {
+    #[serde(default)]
     pub request_idp_token: bool,
 }
 
