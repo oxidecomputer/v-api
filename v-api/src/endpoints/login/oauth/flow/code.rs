@@ -26,7 +26,7 @@ use tap::TapFallible;
 use tracing::instrument;
 use uuid::Uuid;
 use v_model::{
-    permissions::{AsScope, PermissionStorage},
+    permissions::{AsScope, PermissionStorage, Permissions},
     schema_ext::LoginAttemptState,
     LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient, OAuthClientId,
 };
@@ -734,14 +734,34 @@ where
         !query.request_idp_token,
     )
     .await?;
-    let idp_token = info.idp_token.clone();
 
     tracing::debug!("Retrieved user information from remote provider");
+
+    complete_exchange(ctx, info, &attempt, query.request_idp_token).await
+}
+
+async fn complete_exchange<T>(
+    ctx: &VContext<T>,
+    info: UserInfo,
+    attempt: &LoginAttempt,
+    request_idp_token: bool,
+) -> Result<HttpResponseOk<OAuthAuthzCodeExchangeResponse>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+{
+    let idp_token = info.idp_token.clone();
 
     // Register this user as an API user if needed
     let (api_user_info, api_user_provider) = ctx
         .register_api_user(&ctx.builtin_registration_user(), info)
         .await?;
+
+    // Only return the IdP token if the caller requested it AND the user has permission
+    let idp_token = filter_idp_token(
+        idp_token,
+        request_idp_token,
+        &api_user_info.user.permissions,
+    );
 
     tracing::info!(api_user_id = ?api_user_info.user.id, "Retrieved api user to generate access token for");
 
@@ -766,6 +786,25 @@ where
         expires_in: token.expires_in,
         idp_token,
     }))
+}
+
+/// Filter the IdP token based on whether it was requested and whether the user has
+/// the `RetrieveRemoteAccessToken` permission. Returns `None` if either condition
+/// is not met.
+fn filter_idp_token<T>(idp_token: Option<String>, requested: bool, permissions: &Permissions<T>) -> Option<String>
+where
+    T: VAppPermission,
+{
+    if !requested {
+        return None;
+    }
+
+    if permissions.can(&VPermission::RetrieveRemoteAccessToken.into()) {
+        idp_token
+    } else {
+        tracing::info!("User requested IdP token but lacks RetrieveRemoteAccessToken permission");
+        None
+    }
 }
 
 async fn authorize_code_exchange<T>(
@@ -988,8 +1027,12 @@ mod tests {
     use uuid::Uuid;
     use v_model::{
         schema_ext::LoginAttemptState,
-        storage::{MockLoginAttemptStore, MockOAuthClientStore},
-        LoginAttempt, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret,
+        storage::{
+            MockAccessTokenStore, MockApiUserProviderStore, MockApiUserStore,
+            MockLoginAttemptStore, MockMapperStore, MockOAuthClientStore,
+        },
+        AccessToken, ApiUser, ApiUserInfo, ApiUserProvider, LoginAttempt, NewApiUser,
+        NewApiUserProvider, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret,
     };
 
     use crate::{
@@ -998,12 +1041,15 @@ mod tests {
             test_mocks::{mock_context, MockStorage},
             VContext,
         },
-        endpoints::login::oauth::{
-            flow::code::{
-                authz_code_callback_op_inner, verify_csrf, verify_login_attempt,
-                OAuthAuthzCodeReturnQuery, OAuthError, OAuthErrorCode, LOGIN_ATTEMPT_COOKIE,
+        endpoints::login::{
+            oauth::{
+                flow::code::{
+                    authz_code_callback_op_inner, verify_csrf, verify_login_attempt,
+                    OAuthAuthzCodeReturnQuery, OAuthError, OAuthErrorCode, LOGIN_ATTEMPT_COOKIE,
+                },
+                OAuthProviderName,
             },
-            OAuthProviderName,
+            ExternalUserId, UserInfo,
         },
         permissions::VPermission,
     };
@@ -2065,5 +2111,225 @@ mod tests {
         assert!(super::validate_response_type("code ").is_err());
         assert!(super::validate_response_type("token").is_err());
         assert!(super::validate_response_type("code token").is_err());
+    }
+
+    #[test]
+    fn test_filter_idp_token_returns_token_when_requested_and_permitted() {
+        let permissions: v_model::permissions::Permissions<VPermission> =
+            vec![VPermission::RetrieveRemoteAccessToken].into();
+        let token = Some("idp-token-value".to_string());
+
+        let result = super::filter_idp_token(token, true, &permissions);
+        assert_eq!(result, Some("idp-token-value".to_string()));
+    }
+
+    #[test]
+    fn test_filter_idp_token_returns_none_when_not_requested() {
+        let permissions: v_model::permissions::Permissions<VPermission> =
+            vec![VPermission::RetrieveRemoteAccessToken].into();
+        let token = Some("idp-token-value".to_string());
+
+        // Even with the permission, if not requested the token is not returned
+        let result = super::filter_idp_token(token, false, &permissions);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_filter_idp_token_returns_none_when_permission_missing() {
+        // User has some permissions but not RetrieveRemoteAccessToken
+        let permissions: v_model::permissions::Permissions<VPermission> =
+            vec![VPermission::CreateApiUser].into();
+        let token = Some("idp-token-value".to_string());
+
+        let result = super::filter_idp_token(token, true, &permissions);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_filter_idp_token_returns_none_when_no_permissions() {
+        let permissions: v_model::permissions::Permissions<VPermission> =
+            Vec::<VPermission>::new().into();
+        let token = Some("idp-token-value".to_string());
+
+        let result = super::filter_idp_token(token, true, &permissions);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_filter_idp_token_returns_none_when_token_is_none() {
+        let permissions: v_model::permissions::Permissions<VPermission> =
+            vec![VPermission::RetrieveRemoteAccessToken].into();
+
+        // Token was None (e.g. revoked upstream) — should stay None regardless of permission
+        let result = super::filter_idp_token(None, true, &permissions);
+        assert_eq!(result, None);
+    }
+
+    /// Set up mock storage for `complete_exchange` tests. The registered user will
+    /// have the given `user_permissions`.
+    fn mock_exchange_storage(
+        user_permissions: Vec<VPermission>,
+    ) -> MockStorage {
+        // ApiUserProviderStore: list returns empty (new user), upsert returns a provider
+        let mut provider_store = MockApiUserProviderStore::new();
+        provider_store
+            .expect_list()
+            .returning(move |_, _| Ok(vec![]));
+        provider_store
+            .expect_upsert()
+            .returning(move |p: NewApiUserProvider| {
+                Ok(ApiUserProvider {
+                    id: p.id,
+                    user_id: p.user_id,
+                    provider: p.provider,
+                    provider_id: p.provider_id,
+                    emails: p.emails,
+                    display_names: p.display_names,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    deleted_at: None,
+                })
+            });
+
+        // ApiUserStore: upsert creates a user with the specified permissions
+        let mut user_store = MockApiUserStore::new();
+        user_store
+            .expect_upsert()
+            .returning(move |u: NewApiUser<VPermission>| {
+                Ok(ApiUserInfo {
+                    user: ApiUser {
+                        id: u.id,
+                        permissions: user_permissions.clone().into(),
+                        groups: u.groups,
+                        created_at: Utc::now(),
+                        updated_at: Utc::now(),
+                        deleted_at: None,
+                    },
+                    email: None,
+                    providers: vec![],
+                })
+            });
+
+        // MapperStore: list returns empty (no mappers configured)
+        let mut mapper_store = MockMapperStore::new();
+        mapper_store
+            .expect_list()
+            .returning(|_, _| Ok(vec![]));
+
+        // AccessTokenStore: upsert returns a token
+        let mut access_token_store = MockAccessTokenStore::new();
+        access_token_store
+            .expect_upsert()
+            .returning(|token| {
+                Ok(AccessToken {
+                    id: token.id,
+                    user_id: token.user_id,
+                    revoked_at: None,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                })
+            });
+
+        let mut storage = MockStorage::new();
+        storage.api_user_provider_store = Some(Arc::new(provider_store));
+        storage.api_user_store = Some(Arc::new(user_store));
+        storage.mapper_store = Some(Arc::new(mapper_store));
+        storage.access_token_store = Some(Arc::new(access_token_store));
+        storage
+    }
+
+    fn mock_user_info_with_idp_token() -> UserInfo {
+        UserInfo {
+            external_id: ExternalUserId::Google("test-google-id".to_string()),
+            verified_emails: vec!["user@example.com".to_string()],
+            display_name: Some("Test User".to_string()),
+            idp_token: Some("secret-upstream-token".to_string()),
+        }
+    }
+
+    fn mock_completed_attempt() -> LoginAttempt {
+        LoginAttempt {
+            id: TypedUuid::new_v4(),
+            attempt_state: LoginAttemptState::Complete,
+            client_id: TypedUuid::new_v4(),
+            redirect_uri: "https://example.com/callback".to_string(),
+            state: Some("test-state".to_string()),
+            pkce_challenge: Some("test-challenge".to_string()),
+            pkce_challenge_method: Some("S256".to_string()),
+            authz_code: Some("test-code".to_string()),
+            expires_at: Some(Utc::now().add(TimeDelta::try_seconds(300).unwrap())),
+            error: None,
+            provider: "google".to_string(),
+            provider_pkce_verifier: None,
+            provider_authz_code: Some("remote-code".to_string()),
+            provider_error: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            scope: "user:info:r".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_exchange_returns_idp_token_when_requested_and_permitted() {
+        let storage = mock_exchange_storage(vec![
+            VPermission::CreateAccessToken,
+            VPermission::RetrieveRemoteAccessToken,
+        ]);
+        let ctx = mock_context(Arc::new(storage)).await;
+        let attempt = mock_completed_attempt();
+        let info = mock_user_info_with_idp_token();
+
+        let response = super::complete_exchange(&ctx, info, &attempt, true)
+            .await
+            .unwrap()
+            .0;
+
+        assert_eq!(
+            response.idp_token,
+            Some("secret-upstream-token".to_string()),
+            "IdP token must be returned when requested and user has RetrieveRemoteAccessToken"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_exchange_omits_idp_token_when_permission_missing() {
+        let storage = mock_exchange_storage(vec![
+            VPermission::CreateAccessToken,
+            // Notably missing: VPermission::RetrieveRemoteAccessToken
+        ]);
+        let ctx = mock_context(Arc::new(storage)).await;
+        let attempt = mock_completed_attempt();
+        let info = mock_user_info_with_idp_token();
+
+        let response = super::complete_exchange(&ctx, info, &attempt, true)
+            .await
+            .unwrap()
+            .0;
+
+        assert_eq!(
+            response.idp_token, None,
+            "IdP token must NOT be returned when user lacks RetrieveRemoteAccessToken"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_exchange_omits_idp_token_when_not_requested() {
+        let storage = mock_exchange_storage(vec![
+            VPermission::CreateAccessToken,
+            VPermission::RetrieveRemoteAccessToken,
+        ]);
+        let ctx = mock_context(Arc::new(storage)).await;
+        let attempt = mock_completed_attempt();
+        let info = mock_user_info_with_idp_token();
+
+        let response = super::complete_exchange(&ctx, info, &attempt, false)
+            .await
+            .unwrap()
+            .0;
+
+        assert_eq!(
+            response.idp_token, None,
+            "IdP token must NOT be returned when not requested, even with permission"
+        );
     }
 }
