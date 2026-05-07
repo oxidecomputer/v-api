@@ -57,11 +57,11 @@ impl Printer {
         T: schemars::JsonSchema + serde::Serialize + std::fmt::Debug,
     {
         // Check for 401 Unauthorized up-front, regardless of output format.
-        if let Some(status) = value.status() {
-            if status == reqwest::StatusCode::UNAUTHORIZED {
-                eprintln!("Authentication required. Please run `auth login` first.");
-                return;
-            }
+        if let Some(status) = value.status()
+            && status == reqwest::StatusCode::UNAUTHORIZED
+        {
+            eprintln!("Authentication required. Please run `auth login` first.");
+            return;
         }
 
         match self {

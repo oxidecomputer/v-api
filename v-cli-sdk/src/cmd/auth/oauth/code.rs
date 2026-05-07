@@ -178,10 +178,10 @@ impl CodeOAuth {
                                 .map_err(|e| anyhow::anyhow!(e))?;
 
                             // Send the token back to the main task.
-                            if let Ok(mut guard) = token_tx.lock() {
-                                if let Some(tx) = guard.take() {
-                                    let _ = tx.send(Ok(token));
-                                }
+                            if let Ok(mut guard) = token_tx.lock()
+                                && let Some(tx) = guard.take()
+                            {
+                                let _ = tx.send(Ok(token));
                             }
 
                             // Return a friendly page to the browser so the user
@@ -210,12 +210,12 @@ impl CodeOAuth {
 
                     // If the proxy died before we got a token, unblock the
                     // receiver so the caller is not stuck forever.
-                    if let Ok(mut guard) = error_token_tx.lock() {
-                        if let Some(tx) = guard.take() {
-                            let _ = tx.send(Err(anyhow::anyhow!(
-                                "Proxy server exited unexpectedly: {e}"
-                            )));
-                        }
+                    if let Ok(mut guard) = error_token_tx.lock()
+                        && let Some(tx) = guard.take()
+                    {
+                        let _ = tx.send(Err(anyhow::anyhow!(
+                            "Proxy server exited unexpectedly: {e}"
+                        )));
                     }
                 }
             }

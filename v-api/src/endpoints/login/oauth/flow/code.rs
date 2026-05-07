@@ -743,25 +743,30 @@ where
 
     // Now that the attempt has been claimed, use it to fetch user information from the
     // remote provider. If this fails, the attempt is already consumed and the user must
-    // re-authenticate.
-    let info = fetch_user_info(
-        ctx.public_url(),
-        &*provider,
-        &attempt,
-        !query.request_idp_token,
-    )
-    .await?;
+    // re-authenticate. The upstream access token is always preserved here so that
+    // revocation can be deferred until after the permission check.
+    let (info, upstream_token) = fetch_user_info(ctx.public_url(), &*provider, &attempt).await?;
 
     tracing::debug!("Retrieved user information from remote provider");
 
-    complete_exchange(ctx, info, &attempt, query.request_idp_token).await
+    complete_exchange(
+        ctx,
+        info,
+        &*provider,
+        &attempt,
+        query.request_idp_token,
+        upstream_token,
+    )
+    .await
 }
 
 async fn complete_exchange<T>(
     ctx: &VContext<T>,
     info: UserInfo,
+    provider: &dyn OAuthProvider,
     attempt: &LoginAttempt,
     request_idp_token: bool,
+    upstream_token: Option<String>,
 ) -> Result<HttpResponseOk<OAuthAuthzCodeExchangeResponse>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
@@ -777,6 +782,16 @@ where
     // We must resolve the full caller (including group permissions) rather than checking
     // only the directly assigned user permissions.
     let idp_token = filter_idp_token(ctx, idp_token, request_idp_token, &api_user_info).await;
+
+    // Revoke the upstream access token whenever it will NOT be returned to the caller.
+    // This covers the cases where the token was never requested, where the user lacks
+    // the RetrieveRemoteAccessToken permission, and where the provider did not return
+    // a token at all.
+    if idp_token.is_none()
+        && let Some(upstream) = upstream_token
+    {
+        revoke_upstream_token(provider, &upstream).await;
+    }
 
     tracing::info!(api_user_id = ?api_user_info.user.id, "Retrieved api user to generate access token for");
 
@@ -987,16 +1002,52 @@ fn verify_login_attempt(
     }
 }
 
+/// Revoke an upstream IdP access token if the provider supports revocation.
+/// Failures are logged but do not propagate — callers should not fail the
+/// overall exchange just because revocation was unsuccessful.
+async fn revoke_upstream_token(provider: &dyn OAuthProvider, token_secret: &str) {
+    let provider_info = match provider.authz_code_flow_info() {
+        Some(info) => info,
+        None => return,
+    };
+
+    if provider_info.remote.revocation_endpoint.is_some() {
+        let client = match provider.as_web_client() {
+            Ok(c) => c,
+            Err(err) => {
+                tracing::warn!(
+                    ?err,
+                    "Failed to build web client for upstream token revocation"
+                );
+                return;
+            }
+        };
+        let oauth_client: oauth2_reqwest::ReqwestClient = provider.client().clone().into();
+        let access_token = oauth2::AccessToken::new(token_secret.to_string());
+        match client.revoke_token(access_token.into()) {
+            Ok(req) => {
+                if let Err(err) = req.request_async(&oauth_client).await {
+                    tracing::warn!(?err, "Failed to revoke upstream IdP access token");
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    ?err,
+                    "Failed to build revocation request for upstream token"
+                );
+            }
+        }
+    } else {
+        tracing::debug!("Provider does not support token revocation")
+    }
+}
+
 #[instrument(skip(attempt))]
 async fn fetch_user_info(
     public_url: &str,
     provider: &dyn OAuthProvider,
     attempt: &LoginAttempt,
-    revoke_idp_token: bool,
-) -> Result<UserInfo, HttpError> {
-    let provider_info = provider
-        .authz_code_flow_info()
-        .ok_or_else(|| internal_error("Authorization code flow not supported"))?;
+) -> Result<(UserInfo, Option<String>), HttpError> {
     // Exchange the stored authorization code with the remote provider for a remote access token
     let client = provider.as_web_client().map_err(to_internal_error)?;
 
@@ -1035,18 +1086,11 @@ async fn fetch_user_info(
 
     tracing::info!("Fetched user info from remote service");
 
-    // Now that we are done with fetching user information from the remote API, we can revoke it if
-    // the provider supports it
-    if revoke_idp_token && provider_info.remote.revocation_endpoint.is_some() {
-        client
-            .revoke_token(response.access_token().into())
-            .map_err(internal_error)?
-            .request_async(&oauth_client)
-            .await
-            .map_err(internal_error)?;
-    }
+    // Return the upstream access token alongside the user info so the caller
+    // can decide whether to revoke it after the permission check.
+    let upstream_token = Some(response.access_token().secret().to_string());
 
-    Ok(info)
+    Ok((info, upstream_token))
 }
 
 #[cfg(test)]
@@ -1099,6 +1143,70 @@ mod tests {
     };
 
     use super::{authorize_code_exchange, get_oauth_client, oauth_redirect_response};
+
+    /// A minimal no-op `OAuthProvider` for unit tests that need to pass a
+    /// provider reference to `complete_exchange` without performing any real
+    /// network I/O.  `authz_code_flow_info` returns `None`, so
+    /// `revoke_upstream_token` will short-circuit immediately.
+    #[derive(Debug)]
+    struct NoOpOAuthProvider {
+        client: reqwest::Client,
+    }
+
+    impl NoOpOAuthProvider {
+        fn new() -> Self {
+            Self {
+                client: reqwest::Client::new(),
+            }
+        }
+    }
+
+    impl crate::endpoints::login::oauth::ExtractUserInfo for NoOpOAuthProvider {
+        fn extract_user_info(
+            &self,
+            _data: &[hyper::body::Bytes],
+        ) -> Result<UserInfo, crate::endpoints::login::oauth::UserInfoError> {
+            unimplemented!("not used in tests")
+        }
+    }
+
+    impl crate::endpoints::login::oauth::OAuthProvider for NoOpOAuthProvider {
+        fn name(&self) -> OAuthProviderName {
+            OAuthProviderName::Google
+        }
+        fn initialize_headers(&self, _request: &mut reqwest::Request) {}
+        fn client(&self) -> &reqwest::Client {
+            &self.client
+        }
+        fn user_info_endpoints(&self) -> Vec<&str> {
+            vec![]
+        }
+        fn authz_code_flow_info(
+            &self,
+        ) -> Option<&crate::endpoints::login::oauth::OAuthProviderAuthorizationCodeInfo> {
+            None
+        }
+        fn authz_code_pkce_flow_info(
+            &self,
+        ) -> Option<&crate::endpoints::login::oauth::OAuthProviderAuthorizationCodePkceInfo>
+        {
+            None
+        }
+        fn device_code_flow_info(
+            &self,
+        ) -> Option<&crate::endpoints::login::oauth::OAuthProviderDeviceInfo> {
+            None
+        }
+        fn expires_in(&self) -> Option<u64> {
+            None
+        }
+        fn default_scopes(&self) -> &[String] {
+            &[]
+        }
+        fn supports_pkce(&self) -> bool {
+            false
+        }
+    }
 
     /// Create a mock `OAuthClientStore` that returns a client with the given
     /// `client_id` and a single registered `redirect_uri`. This is needed by
@@ -2396,11 +2504,19 @@ mod tests {
         let ctx = mock_context(Arc::new(storage)).await;
         let attempt = mock_completed_attempt();
         let info = mock_user_info_with_idp_token();
+        let provider = NoOpOAuthProvider::new();
 
-        let response = super::complete_exchange(&ctx, info, &attempt, true)
-            .await
-            .unwrap()
-            .0;
+        let response = super::complete_exchange(
+            &ctx,
+            info,
+            &provider,
+            &attempt,
+            true,
+            Some("secret-upstream-token".to_string()),
+        )
+        .await
+        .unwrap()
+        .0;
 
         assert_eq!(
             response.idp_token,
@@ -2418,11 +2534,19 @@ mod tests {
         let ctx = mock_context(Arc::new(storage)).await;
         let attempt = mock_completed_attempt();
         let info = mock_user_info_with_idp_token();
+        let provider = NoOpOAuthProvider::new();
 
-        let response = super::complete_exchange(&ctx, info, &attempt, true)
-            .await
-            .unwrap()
-            .0;
+        let response = super::complete_exchange(
+            &ctx,
+            info,
+            &provider,
+            &attempt,
+            true,
+            Some("secret-upstream-token".to_string()),
+        )
+        .await
+        .unwrap()
+        .0;
 
         assert_eq!(
             response.idp_token, None,
@@ -2532,7 +2656,9 @@ mod tests {
             idp_token: None,
         };
 
-        let response = super::complete_exchange(&ctx, info, &attempt, false)
+        let provider = NoOpOAuthProvider::new();
+
+        let response = super::complete_exchange(&ctx, info, &provider, &attempt, false, None)
             .await
             .unwrap()
             .0;
@@ -2560,11 +2686,19 @@ mod tests {
         let ctx = mock_context(Arc::new(storage)).await;
         let attempt = mock_completed_attempt();
         let info = mock_user_info_with_idp_token();
+        let provider = NoOpOAuthProvider::new();
 
-        let response = super::complete_exchange(&ctx, info, &attempt, false)
-            .await
-            .unwrap()
-            .0;
+        let response = super::complete_exchange(
+            &ctx,
+            info,
+            &provider,
+            &attempt,
+            false,
+            Some("secret-upstream-token".to_string()),
+        )
+        .await
+        .unwrap()
+        .0;
 
         assert_eq!(
             response.idp_token, None,

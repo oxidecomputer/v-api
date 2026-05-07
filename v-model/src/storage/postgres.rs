@@ -793,7 +793,7 @@ impl LoginAttemptStore for PostgresStore {
                 .filter(login_attempt::attempt_state.eq(expected_state)),
         )
         .set((
-            login_attempt::attempt_state.eq(attempt.attempt_state.clone()),
+            login_attempt::attempt_state.eq(attempt.attempt_state),
             login_attempt::authz_code.eq(attempt.authz_code),
             login_attempt::expires_at.eq(attempt.expires_at),
             login_attempt::error.eq(attempt.error),
