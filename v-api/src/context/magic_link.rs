@@ -731,7 +731,7 @@ mod tests {
             .expect_transition()
             .returning(move |id, signature, from, _to| {
                 if &attempt_transition.id == id
-                    && &attempt_transition.nonce_signature == signature
+                    && attempt_transition.nonce_signature == signature
                     && attempt_transition.attempt_state == from
                 {
                     Ok(Some(MagicLinkAttempt {

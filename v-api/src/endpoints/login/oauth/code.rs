@@ -813,7 +813,7 @@ mod tests {
         let ctx = mock_context(Arc::new(MockStorage::new())).await;
         let client_id = TypedUuid::new_v4();
         let key = RawKey::generate::<8>(&Uuid::new_v4())
-            .sign(&*ctx.signer())
+            .sign(ctx.signer())
             .await
             .unwrap();
         let secret_signature = key.signature().to_string();
@@ -913,7 +913,7 @@ mod tests {
         };
 
         let response = oauth_redirect_response(
-            &ctx.public_url(),
+            ctx.public_url(),
             &*ctx
                 .get_oauth_provider(&OAuthProviderName::Google)
                 .await
@@ -1387,7 +1387,7 @@ mod tests {
         ctx.set_storage(Arc::new(storage));
 
         let invalid_secret = RawKey::generate::<8>(&Uuid::new_v4())
-            .sign(&*ctx.signer())
+            .sign(ctx.signer())
             .await
             .unwrap()
             .signature()
