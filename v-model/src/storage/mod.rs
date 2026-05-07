@@ -257,6 +257,7 @@ pub struct LoginAttemptFilter {
     pub client_id: Option<Vec<TypedUuid<OAuthClientId>>>,
     pub attempt_state: Option<Vec<LoginAttemptState>>,
     pub authz_code: Option<Vec<String>>,
+    pub provider: Option<Vec<String>>,
 }
 
 #[cfg_attr(feature = "mock", automock)]

@@ -678,7 +678,7 @@ where
     // Lookup the request assigned to this code
     let mut attempt = ctx
         .login
-        .get_login_attempt_for_code(&body.code)
+        .get_login_attempt_for_code(&body.code, &provider.name().to_string())
         .await
         .map_err(to_internal_error)?
         .ok_or(OAuthError {
@@ -2506,6 +2506,81 @@ mod tests {
         assert_eq!(
             response.idp_token, None,
             "IdP token must NOT be returned when not requested, even with permission"
+        );
+    }
+
+    /// The authorization code lookup should filter by provider so that a code
+    /// issued for one provider (e.g. Google) is not returned when exchanging
+    /// against a different provider (e.g. GitHub). This is a defense-in-depth
+    /// measure — codes should be scoped to their issuing provider at the query
+    /// level rather than relying solely on post-lookup validation.
+    #[tokio::test]
+    async fn test_code_lookup_filters_by_provider() {
+        // Create a login attempt that was authenticated via Google
+        let google_attempt = LoginAttempt {
+            id: TypedUuid::new_v4(),
+            attempt_state: LoginAttemptState::RemoteAuthenticated,
+            client_id: TypedUuid::new_v4(),
+            redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+            state: Some("test-state".to_string()),
+            pkce_challenge: Some("test-challenge".to_string()),
+            pkce_challenge_method: Some("S256".to_string()),
+            authz_code: Some("authz-code-for-google".to_string()),
+            expires_at: None,
+            error: None,
+            provider: "google".to_string(),
+            provider_pkce_verifier: None,
+            provider_authz_code: Some("remote-code".to_string()),
+            provider_error: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            scope: "user:info:r".to_string(),
+        };
+
+        // The mock store simulates a real database: it only returns the
+        // attempt when the filter's provider field matches.
+        let returned_attempt = google_attempt.clone();
+        let mut attempt_store = MockLoginAttemptStore::new();
+        attempt_store.expect_list().returning(move |filter, _| {
+            let dominated = &returned_attempt;
+            if let Some(providers) = &filter.provider {
+                if providers.iter().any(|p| p == &dominated.provider) {
+                    Ok(vec![dominated.clone()])
+                } else {
+                    Ok(vec![])
+                }
+            } else {
+                Ok(vec![dominated.clone()])
+            }
+        });
+
+        let mut storage = MockStorage::new();
+        storage.login_attempt_store = Some(Arc::new(attempt_store));
+        let ctx = mock_context(Arc::new(storage)).await;
+
+        // Looking up the code for the correct provider should succeed.
+        let google_result = ctx
+            .login
+            .get_login_attempt_for_code("authz-code-for-google", "google")
+            .await
+            .unwrap();
+        assert!(
+            google_result.is_some(),
+            "Code lookup for the issuing provider must return the attempt"
+        );
+
+        // Looking up the same code but for a different provider should return
+        // None, because the provider filter now scopes the query.
+        let github_result = ctx
+            .login
+            .get_login_attempt_for_code("authz-code-for-google", "github")
+            .await
+            .unwrap();
+        assert!(
+            github_result.is_none(),
+            "Code lookup must not return an attempt for a different provider. \
+             Expected None, but got {:?}.",
+            github_result.as_ref().map(|a| &a.provider),
         );
     }
 }

@@ -705,6 +705,7 @@ impl LoginAttemptStore for PostgresStore {
             client_id,
             attempt_state,
             authz_code,
+            provider,
         } = filter;
 
         if let Some(id) = id {
@@ -729,6 +730,10 @@ impl LoginAttemptStore for PostgresStore {
 
         if let Some(authz_code) = authz_code {
             query = query.filter(login_attempt::authz_code.eq_any(authz_code));
+        }
+
+        if let Some(provider) = provider {
+            query = query.filter(login_attempt::provider.eq_any(provider));
         }
 
         let results = query

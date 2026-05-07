@@ -62,10 +62,12 @@ where
     pub async fn get_login_attempt_for_code(
         &self,
         code: &str,
+        provider: &str,
     ) -> Result<Option<LoginAttempt>, StoreError> {
         let filter = LoginAttemptFilter {
             attempt_state: Some(vec![LoginAttemptState::RemoteAuthenticated]),
             authz_code: Some(vec![code.to_string()]),
+            provider: Some(vec![provider.to_string()]),
             ..Default::default()
         };
 
