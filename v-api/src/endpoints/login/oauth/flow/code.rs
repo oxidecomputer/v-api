@@ -37,7 +37,7 @@ use crate::{
     context::{ApiContext, VContext},
     endpoints::login::{
         LoginError, UserInfo,
-        oauth::{CheckOAuthClient, ClientType, OAuthProviderAuthorizationCodePkceInfo},
+        oauth::{CheckOAuthClient, OAuthProviderAuthorizationCodePkceInfo},
     },
     error::ApiError,
     permissions::{VAppPermission, VPermission},
@@ -747,7 +747,6 @@ where
     // re-authenticate.
     let info = fetch_user_info(
         ctx.public_url(),
-        &ctx.web_client(),
         &*provider,
         &attempt,
         !query.request_idp_token,
@@ -992,7 +991,6 @@ fn verify_login_attempt(
 #[instrument(skip(attempt))]
 async fn fetch_user_info(
     public_url: &str,
-    client_type: &ClientType,
     provider: &dyn OAuthProvider,
     attempt: &LoginAttempt,
     revoke_idp_token: bool,
@@ -1601,9 +1599,6 @@ mod tests {
             location
         );
     }
-
-    #[tokio::test]
-    async fn test_fails_callback_with_error() {}
 
     #[tokio::test]
     async fn test_exchange_checks_client_id_and_redirect() {

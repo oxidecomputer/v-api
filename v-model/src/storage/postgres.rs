@@ -807,8 +807,8 @@ impl LoginAttemptStore for PostgresStore {
         match result {
             Some(attempt) => Ok(LoginAttempt::from(attempt)),
             None => Err(StoreError::InvariantFailed(format!(
-                "Login attempt {} is not in expected state for transition to {}",
-                attempt.id, attempt.attempt_state
+                "Login attempt {} is not in expected state for transition to {}. It is in {}",
+                attempt.id, attempt.attempt_state, expected_state
             ))),
         }
     }
