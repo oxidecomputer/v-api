@@ -791,7 +791,11 @@ where
 /// Filter the IdP token based on whether it was requested and whether the user has
 /// the `RetrieveRemoteAccessToken` permission. Returns `None` if either condition
 /// is not met.
-fn filter_idp_token<T>(idp_token: Option<String>, requested: bool, permissions: &Permissions<T>) -> Option<String>
+fn filter_idp_token<T>(
+    idp_token: Option<String>,
+    requested: bool,
+    permissions: &Permissions<T>,
+) -> Option<String>
 where
     T: VAppPermission,
 {
@@ -2167,9 +2171,7 @@ mod tests {
 
     /// Set up mock storage for `complete_exchange` tests. The registered user will
     /// have the given `user_permissions`.
-    fn mock_exchange_storage(
-        user_permissions: Vec<VPermission>,
-    ) -> MockStorage {
+    fn mock_exchange_storage(user_permissions: Vec<VPermission>) -> MockStorage {
         // ApiUserProviderStore: list returns empty (new user), upsert returns a provider
         let mut provider_store = MockApiUserProviderStore::new();
         provider_store
@@ -2212,23 +2214,19 @@ mod tests {
 
         // MapperStore: list returns empty (no mappers configured)
         let mut mapper_store = MockMapperStore::new();
-        mapper_store
-            .expect_list()
-            .returning(|_, _| Ok(vec![]));
+        mapper_store.expect_list().returning(|_, _| Ok(vec![]));
 
         // AccessTokenStore: upsert returns a token
         let mut access_token_store = MockAccessTokenStore::new();
-        access_token_store
-            .expect_upsert()
-            .returning(|token| {
-                Ok(AccessToken {
-                    id: token.id,
-                    user_id: token.user_id,
-                    revoked_at: None,
-                    created_at: Utc::now(),
-                    updated_at: Utc::now(),
-                })
-            });
+        access_token_store.expect_upsert().returning(|token| {
+            Ok(AccessToken {
+                id: token.id,
+                user_id: token.user_id,
+                revoked_at: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            })
+        });
 
         let mut storage = MockStorage::new();
         storage.api_user_provider_store = Some(Arc::new(provider_store));
