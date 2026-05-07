@@ -15,7 +15,7 @@ use newtype_uuid::{GenericUuid, TypedUuid};
 use oauth2::{
     AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope, TokenResponse,
 };
-use percent_encoding::{NON_ALPHANUMERIC, percent_encode};
+
 use schemars::JsonSchema;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
@@ -308,10 +308,10 @@ where
     // TODO: Make this configurable
     attempt.expires_at = Some(Utc::now().add(TimeDelta::try_minutes(5).unwrap()));
 
-    // Add in the user defined state and redirect uri. State is an arbitrary value and may be
-    // malicious. It must be url-encoded before being presented back to the client. Therefore we
-    // process once before storing so all downstream consumers see the encoded value.
-    attempt.state = Some(percent_encode(query.state.as_bytes(), NON_ALPHANUMERIC).to_string());
+    // Store the client's state value as-is. Per RFC 6749 §4.1.1, the authorization server
+    // MUST return the state parameter unmodified. The value will be properly percent-encoded
+    // when it is placed into the redirect URL by `callback_url()` via `append_pair`.
+    attempt.state = Some(query.state);
 
     // Always store the client's PKCE challenge so we can verify it during the token exchange.
     // This is the client-to-v-api PKCE leg and is mandatory for all flows.
@@ -573,6 +573,8 @@ pub struct OAuthAuthzCodeExchangeResponse {
     pub access_token: String,
     pub token_type: String,
     pub expires_in: i64,
+    /// The scope granted to the access token (RFC 6749 §5.1).
+    pub scope: String,
     pub idp_token: Option<String>,
 }
 
@@ -781,6 +783,7 @@ where
         token_type: "Bearer".to_string(),
         access_token: token.signed_token,
         expires_in: token.expires_in,
+        scope: attempt.scope.clone(),
         idp_token,
     }))
 }
@@ -2366,6 +2369,122 @@ mod tests {
         assert_eq!(
             response.idp_token, None,
             "IdP token must NOT be returned when user lacks RetrieveRemoteAccessToken"
+        );
+    }
+
+    /// Verifies that the `state` parameter survives the authorization code flow
+    /// round trip without modification, as required by RFC 6749 §4.1.1. The
+    /// authorization server MUST return the exact `state` value that the client
+    /// originally provided. This test uses a state value containing characters
+    /// that require percent-encoding (`+`, `/`, spaces, `&`, `=`) to ensure
+    /// they are encoded exactly once in the final redirect URL and decoded back
+    /// to the original value by standard URL parsing.
+    #[tokio::test]
+    async fn test_state_roundtrip_preserves_special_characters() {
+        let attempt_id = TypedUuid::new_v4();
+        let original_state = "random+state/with spaces&special=chars";
+
+        // State is now stored as-is (no pre-encoding). callback_url() handles
+        // percent-encoding when building the redirect URL.
+        let attempt = LoginAttempt {
+            id: attempt_id,
+            attempt_state: LoginAttemptState::New,
+            client_id: TypedUuid::new_v4(),
+            redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+            state: Some(original_state.to_string()),
+            pkce_challenge: Some("ox_challenge".to_string()),
+            pkce_challenge_method: Some("S256".to_string()),
+            authz_code: None,
+            expires_at: None,
+            error: None,
+            provider: "google".to_string(),
+            provider_pkce_verifier: Some("v_verifier".to_string()),
+            provider_authz_code: None,
+            provider_error: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            scope: String::new(),
+        };
+
+        let mut attempt_store = MockLoginAttemptStore::new();
+        let original_attempt = attempt.clone();
+        attempt_store
+            .expect_get()
+            .with(eq(attempt.id))
+            .returning(move |_| Ok(Some(original_attempt.clone())));
+
+        attempt_store
+            .expect_update_if_state()
+            .withf(|attempt, expected| {
+                attempt.attempt_state == LoginAttemptState::RemoteAuthenticated
+                    && *expected == LoginAttemptState::New
+            })
+            .returning(move |arg, _| {
+                let mut returned = attempt.clone();
+                returned.attempt_state = arg.attempt_state;
+                returned.authz_code = arg.authz_code;
+                Ok(returned)
+            });
+
+        let mut storage = MockStorage::new();
+        storage.login_attempt_store = Some(Arc::new(attempt_store));
+        let ctx = mock_context(Arc::new(storage)).await;
+
+        let location =
+            authz_code_callback_op_inner(&ctx, &attempt_id, Some("remote-code".to_string()), None)
+                .await
+                .unwrap();
+
+        let url = url::Url::parse(&location).unwrap();
+        let returned_state = url
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .map(|(_, v)| v.into_owned())
+            .expect("state parameter must be present in callback URL");
+
+        // RFC 6749 §4.1.1: the state value MUST be returned to the client
+        // unmodified. The client sent `original_state`, so it should get back
+        // exactly `original_state` after URL decoding.
+        assert_eq!(
+            original_state, returned_state,
+            "RFC 6749 §4.1.1 requires the state parameter to be returned unmodified. \
+             The client sent {:?} but received {:?}.",
+            original_state, returned_state,
+        );
+    }
+
+    /// RFC 6749 §5.1 requires the token response to include a `scope` parameter
+    /// when the issued scope differs from what the client requested, and recommends
+    /// it in all cases. The token response should echo back the scope that was
+    /// granted so clients can verify what permissions they received.
+    #[tokio::test]
+    async fn test_exchange_response_includes_scope() {
+        let storage = mock_exchange_storage(vec![VPermission::CreateAccessToken]);
+        let ctx = mock_context(Arc::new(storage)).await;
+        let attempt = mock_completed_attempt(); // scope = "user:info:r"
+        let info = UserInfo {
+            external_id: ExternalUserId::Google("test-google-id".to_string()),
+            verified_emails: vec!["user@example.com".to_string()],
+            display_name: Some("Test User".to_string()),
+            idp_token: None,
+        };
+
+        let response = super::complete_exchange(&ctx, info, &attempt, false)
+            .await
+            .unwrap()
+            .0;
+
+        // Serialize the response to JSON and check for a "scope" field.
+        // Per RFC 6749 §5.1, the authorization server SHOULD include the scope
+        // in the token response, and MUST include it if it differs from what
+        // the client requested.
+        let json = serde_json::to_value(&response).unwrap();
+        assert!(
+            json.get("scope").is_some(),
+            "Token response must include a 'scope' field per RFC 6749 §5.1. \
+             The login attempt had scope {:?} but the response was: {}",
+            attempt.scope,
+            serde_json::to_string_pretty(&json).unwrap(),
         );
     }
 
