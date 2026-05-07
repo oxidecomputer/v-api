@@ -820,9 +820,7 @@ mod tests {
         let mut store = MockApiUserStore::new();
         store
             .expect_upsert()
-            .withf(|x: &NewApiUser<VPermission>| {
-                x.permissions.can(&VPermission::CreateApiUser.into())
-            })
+            .withf(|x: &NewApiUser<VPermission>| x.permissions.can(&VPermission::CreateApiUser))
             .returning(|user| {
                 Ok(ApiUserInfo {
                     user: ApiUser {
@@ -839,9 +837,7 @@ mod tests {
             });
         store
             .expect_upsert()
-            .withf(|x: &NewApiUser<VPermission>| {
-                x.permissions.can(&VPermission::GetApiUsersAll.into())
-            })
+            .withf(|x: &NewApiUser<VPermission>| x.permissions.can(&VPermission::GetApiUsersAll))
             .returning(|_| Err(StoreError::Unknown));
         let mut api_user_provider_store = MockApiUserProviderStore::new();
         api_user_provider_store
@@ -921,7 +917,7 @@ mod tests {
         let mut store = MockApiUserStore::new();
         store
             .expect_upsert()
-            .withf(move |x: &NewApiUser<VPermission>| &x.id == &success_id)
+            .withf(move |x: &NewApiUser<VPermission>| x.id == success_id)
             .returning(|user| {
                 Ok(ApiUserInfo {
                     user: ApiUser {
@@ -938,7 +934,7 @@ mod tests {
             });
         store
             .expect_upsert()
-            .withf(move |x: &NewApiUser<VPermission>| &x.id == &failure_id)
+            .withf(move |x: &NewApiUser<VPermission>| x.id == failure_id)
             .returning(|_| Err(StoreError::Unknown));
         let mut api_user_provider_store = MockApiUserProviderStore::new();
         api_user_provider_store
@@ -1372,7 +1368,7 @@ mod tests {
         let mut token_store = MockApiKeyStore::new();
         token_store
             .expect_get()
-            .with(eq(api_user_token_path.api_key_id.clone()), eq(false))
+            .with(eq(api_user_token_path.api_key_id), eq(false))
             .returning(move |_, _| Ok(Some(token.clone())));
         token_store
             .expect_get()
@@ -1677,7 +1673,7 @@ mod tests {
         let mut email_store = MockApiUserContactEmailStore::new();
         email_store
             .expect_upsert()
-            .withf(move |arg| arg.user_id == user.id && arg.email == "user@company".to_string())
+            .withf(move |arg| arg.user_id == user.id && arg.email == "user@company")
             .returning(|new| {
                 Ok(ApiUserContactEmail {
                     id: new.id,
