@@ -7,8 +7,8 @@ use thiserror::Error;
 use v_model::storage::StoreError;
 
 use crate::{
-    authn::{jwt::JwtSignerError, SigningKeyError},
-    endpoints::login::{oauth::OAuthProviderError, LoginError},
+    authn::{SigningKeyError, jwt::JwtSignerError},
+    endpoints::login::{LoginError, oauth::OAuthProviderError},
     response::conflict,
     util::response::{forbidden, internal_error, not_found},
 };

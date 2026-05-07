@@ -7,8 +7,8 @@ use http::Method;
 use hyper::{body::Bytes, header::HeaderValue, header::AUTHORIZATION};
 use newtype_uuid::TypedUuid;
 use oauth2::{
-    basic::BasicClient, url::ParseError, AuthUrl, ClientId, ClientSecret, EndpointMaybeSet,
-    EndpointNotSet, EndpointSet, RedirectUrl, RevocationUrl, TokenUrl,
+    AuthUrl, ClientId, ClientSecret, EndpointMaybeSet, EndpointNotSet, EndpointSet, RedirectUrl,
+    RevocationUrl, TokenUrl, basic::BasicClient, url::ParseError,
 };
 use reqwest::Request;
 use schemars::JsonSchema;

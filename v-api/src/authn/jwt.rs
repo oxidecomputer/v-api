@@ -2,23 +2,22 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Utc};
 use dropshot::{RequestContext, SharedExtractor};
 use dropshot_authorization_header::bearer::BearerAuth;
 use jsonwebtoken::{
-    decode, decode_header,
+    Algorithm, DecodingKey, Header, Validation, decode, decode_header,
     jwk::{AlgorithmParameters, Jwk},
-    Algorithm, DecodingKey, Header, Validation,
 };
 use newtype_uuid::TypedUuid;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{fmt::Debug, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
 use v_model::{AccessTokenId, UserId, UserProviderId};
 
-use crate::{authn::Signer, context::VContext, permissions::VAppPermission, ApiContext};
+use crate::{ApiContext, authn::Signer, context::VContext, permissions::VAppPermission};
 
 use super::SigningKeyError;
 

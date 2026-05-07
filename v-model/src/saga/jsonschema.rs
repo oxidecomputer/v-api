@@ -16,7 +16,7 @@ impl JsonSchema for SagaDagWrapper {
         "SagaDag".to_string()
     }
 
-    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
         use schemars::schema::*;
 
         // Define the InternalNode enum schema
@@ -38,7 +38,7 @@ impl JsonSchema for SagaDagWrapper {
                                                 let mut inner_props = schemars::Map::new();
                                                 inner_props.insert(
                                                     "params".to_string(),
-                                                    gen.subschema_for::<serde_json::Value>(),
+                                                    generator.subschema_for::<serde_json::Value>(),
                                                 );
                                                 inner_props
                                             },
@@ -82,15 +82,15 @@ impl JsonSchema for SagaDagWrapper {
                                                 let mut inner_props = schemars::Map::new();
                                                 inner_props.insert(
                                                     "name".to_string(),
-                                                    gen.subschema_for::<String>(),
+                                                    generator.subschema_for::<String>(),
                                                 );
                                                 inner_props.insert(
                                                     "label".to_string(),
-                                                    gen.subschema_for::<String>(),
+                                                    generator.subschema_for::<String>(),
                                                 );
                                                 inner_props.insert(
                                                     "action_name".to_string(),
-                                                    gen.subschema_for::<String>(),
+                                                    generator.subschema_for::<String>(),
                                                 );
                                                 inner_props
                                             },
@@ -128,11 +128,11 @@ impl JsonSchema for SagaDagWrapper {
                                                 let mut inner_props = schemars::Map::new();
                                                 inner_props.insert(
                                                     "name".to_string(),
-                                                    gen.subschema_for::<String>(),
+                                                    generator.subschema_for::<String>(),
                                                 );
                                                 inner_props.insert(
                                                     "value".to_string(),
-                                                    gen.subschema_for::<serde_json::Value>(),
+                                                    generator.subschema_for::<serde_json::Value>(),
                                                 );
                                                 inner_props
                                             },
@@ -166,11 +166,11 @@ impl JsonSchema for SagaDagWrapper {
                                                 let mut inner_props = schemars::Map::new();
                                                 inner_props.insert(
                                                     "saga_name".to_string(),
-                                                    gen.subschema_for::<String>(),
+                                                    generator.subschema_for::<String>(),
                                                 );
                                                 inner_props.insert(
                                                     "params_node_name".to_string(),
-                                                    gen.subschema_for::<String>(),
+                                                    generator.subschema_for::<String>(),
                                                 );
                                                 inner_props
                                             },
@@ -207,7 +207,7 @@ impl JsonSchema for SagaDagWrapper {
                                                 let mut inner_props = schemars::Map::new();
                                                 inner_props.insert(
                                                     "name".to_string(),
-                                                    gen.subschema_for::<String>(),
+                                                    generator.subschema_for::<String>(),
                                                 );
                                                 inner_props
                                             },
@@ -262,7 +262,7 @@ impl JsonSchema for SagaDagWrapper {
                             instance_type: Some(InstanceType::Array.into()),
                             array: Some(Box::new(ArrayValidation {
                                 items: Some(SingleOrVec::Single(Box::new(
-                                    gen.subschema_for::<u32>(),
+                                    generator.subschema_for::<u32>(),
                                 ))),
                                 ..Default::default()
                             })),
@@ -294,7 +294,7 @@ impl JsonSchema for SagaDagWrapper {
                                         instance_type: Some(InstanceType::Array.into()),
                                         array: Some(Box::new(ArrayValidation {
                                             items: Some(SingleOrVec::Single(Box::new(
-                                                gen.subschema_for::<Option<u32>>(),
+                                                generator.subschema_for::<Option<u32>>(),
                                             ))),
                                             min_items: Some(3),
                                             max_items: Some(3),
@@ -347,7 +347,7 @@ impl JsonSchema for SagaDagWrapper {
                     let mut props = schemars::Map::new();
                     props.insert(
                         "saga_name".to_string(),
-                        gen.subschema_for::<String>(),
+                        generator.subschema_for::<String>(),
                     );
                     props.insert(
                         "graph".to_string(),
@@ -355,11 +355,11 @@ impl JsonSchema for SagaDagWrapper {
                     );
                     props.insert(
                         "start_node".to_string(),
-                        gen.subschema_for::<u32>(),
+                        generator.subschema_for::<u32>(),
                     );
                     props.insert(
                         "end_node".to_string(),
-                        gen.subschema_for::<u32>(),
+                        generator.subschema_for::<u32>(),
                     );
                     props
                 },

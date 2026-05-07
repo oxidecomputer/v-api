@@ -10,12 +10,13 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use url::Url;
 use v_model::{
-    permissions::{Caller, PermissionStorage},
     MagicLink, MagicLinkId, MagicLinkRedirectUri, MagicLinkRedirectUriId, MagicLinkSecret,
     MagicLinkSecretId,
+    permissions::{Caller, PermissionStorage},
 };
 
 use crate::{
+    VContext,
     authn::key::RawKey,
     context::{ApiContext, VContextWithCaller},
     permissions::{VAppPermission, VPermission},
@@ -246,17 +247,17 @@ mod tests {
     use mockall::predicate::eq;
     use newtype_uuid::TypedUuid;
     use v_model::{
+        ApiUser, ApiUserInfo, MagicLink, MagicLinkSecret,
         permissions::Caller,
         storage::{MockApiUserStore, MockMagicLinkSecretStore, MockMagicLinkStore},
-        ApiUser, ApiUserInfo, MagicLink, MagicLinkSecret,
     };
 
     use crate::{
         authn::key::RawKey,
-        context::test_mocks::{mock_context, MockStorage},
+        context::test_mocks::{MockStorage, mock_context},
         endpoints::login::magic_link::{
-            client::{create_magic_link_inner, create_magic_link_secret_inner},
             CheckMagicLinkClient,
+            client::{create_magic_link_inner, create_magic_link_secret_inner},
         },
         permissions::VPermission,
     };

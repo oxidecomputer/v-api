@@ -1,7 +1,8 @@
 [package]
 name = "v-api-param"
-version = "0.2.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 
 [dependencies]
 secrecy = { workspace = true, features = ["serde"] }

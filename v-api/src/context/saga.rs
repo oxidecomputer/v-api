@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 use newtype_uuid::{GenericUuid, TypedUuid};
-use slog::{o, Discard, Logger};
+use slog::{Discard, Logger, o};
 use std::{fmt::Debug, future::Future, pin::Pin, sync::Arc};
 use steno::{
     ActionRegistry, SagaCachedState, SagaCreateParams, SagaDag, SagaId as StenoId, SagaNodeEvent,
@@ -23,11 +23,11 @@ use v_model::{
 };
 
 use crate::{
+    ApiContext, VApiStorage,
     permissions::{VAppPermission, VPermission},
     response::{
-        resource_restricted, OptionalResource, ResourceError, ResourceErrorInner, ResourceResult,
+        OptionalResource, ResourceError, ResourceErrorInner, ResourceResult, resource_restricted,
     },
-    ApiContext, VApiStorage,
 };
 
 pub type CreateSagaFuture = Pin<

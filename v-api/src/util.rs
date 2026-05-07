@@ -3,10 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use google_cloudkms1::{
-    hyper_rustls::{HttpsConnector, HttpsConnectorBuilder},
-    hyper_util::client::legacy::{connect::HttpConnector, Client},
-    hyper_util::rt::TokioExecutor,
     CloudKMS,
+    hyper_rustls::{HttpsConnector, HttpsConnectorBuilder},
+    hyper_util::client::legacy::{Client, connect::HttpConnector},
+    hyper_util::rt::TokioExecutor,
 };
 
 use crate::authn::CloudKmsError;
@@ -191,8 +191,8 @@ pub mod response {
     }
 }
 
-pub async fn cloud_kms_client(
-) -> Result<CloudKMS<HttpsConnector<HttpConnector>>, Box<CloudKmsError>> {
+pub async fn cloud_kms_client()
+-> Result<CloudKMS<HttpsConnector<HttpConnector>>, Box<CloudKmsError>> {
     let opts = yup_oauth2::ApplicationDefaultCredentialsFlowOpts::default();
 
     tracing::trace!(?opts, "Request GCP credentials");
@@ -247,8 +247,8 @@ pub mod tests {
     use dropshot::{HttpCodedResponse, HttpError};
     use http::StatusCode;
     use rsa::{
-        pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding},
         RsaPrivateKey, RsaPublicKey,
+        pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding},
     };
 
     use crate::config::AsymmetricKey;

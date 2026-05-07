@@ -6,8 +6,8 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use async_trait::async_trait;
 use chrono::Utc;
 use diesel::{
-    delete, insert_into, query_dsl::QueryDsl, update, BoolExpressionMethods, ExpressionMethods,
-    NullableExpressionMethods, OptionalExtension,
+    BoolExpressionMethods, ExpressionMethods, NullableExpressionMethods, OptionalExtension, delete,
+    insert_into, query_dsl::QueryDsl, update,
 };
 use newtype_uuid::{GenericUuid, TypedUuid};
 
@@ -18,7 +18,7 @@ use crate::{
         view::{SagaExecNodeId, SagaId},
     },
     schema::{saga_events, sagas},
-    storage::{postgres::PostgresStore, ListPagination, StoreError},
+    storage::{ListPagination, StoreError, postgres::PostgresStore},
 };
 
 #[async_trait]
@@ -48,10 +48,10 @@ impl SagaStore for PostgresStore {
             let mut or_expression: Option<
                 Box<
                     dyn diesel::expression::BoxableExpression<
-                        sagas::table,
-                        diesel::pg::Pg,
-                        SqlType = diesel::sql_types::Bool,
-                    >,
+                            sagas::table,
+                            diesel::pg::Pg,
+                            SqlType = diesel::sql_types::Bool,
+                        >,
                 >,
             > = None;
 
@@ -59,10 +59,10 @@ impl SagaStore for PostgresStore {
                 // Start with TRUE and AND each condition
                 let mut and_expression: Box<
                     dyn diesel::expression::BoxableExpression<
-                        sagas::table,
-                        diesel::pg::Pg,
-                        SqlType = diesel::sql_types::Bool,
-                    >,
+                            sagas::table,
+                            diesel::pg::Pg,
+                            SqlType = diesel::sql_types::Bool,
+                        >,
                 > = Box::new(diesel::dsl::sql::<diesel::sql_types::Bool>("TRUE"));
 
                 if let Some(saga_ids) = filter.saga_id {
@@ -223,20 +223,20 @@ impl SagaEventStore for PostgresStore {
             let mut or_expression: Option<
                 Box<
                     dyn diesel::expression::BoxableExpression<
-                        saga_events::table,
-                        diesel::pg::Pg,
-                        SqlType = diesel::sql_types::Bool,
-                    >,
+                            saga_events::table,
+                            diesel::pg::Pg,
+                            SqlType = diesel::sql_types::Bool,
+                        >,
                 >,
             > = None;
 
             for filter in filters {
                 let mut and_expression: Box<
                     dyn diesel::expression::BoxableExpression<
-                        saga_events::table,
-                        diesel::pg::Pg,
-                        SqlType = diesel::sql_types::Bool,
-                    >,
+                            saga_events::table,
+                            diesel::pg::Pg,
+                            SqlType = diesel::sql_types::Bool,
+                        >,
                 > = Box::new(diesel::dsl::sql::<diesel::sql_types::Bool>("TRUE"));
 
                 if let Some(saga_ids) = filter.saga_id {

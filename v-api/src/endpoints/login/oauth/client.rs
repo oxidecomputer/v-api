@@ -10,12 +10,13 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use url::Url;
 use v_model::{
-    permissions::{Caller, PermissionStorage},
     OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId,
     OAuthSecretId,
+    permissions::{Caller, PermissionStorage},
 };
 
 use crate::{
+    VContext,
     authn::key::RawKey,
     context::{ApiContext, VContextWithCaller},
     permissions::{VAppPermission, VPermission},
@@ -245,17 +246,17 @@ mod tests {
     use mockall::predicate::eq;
     use newtype_uuid::TypedUuid;
     use v_model::{
+        ApiUser, ApiUserInfo, OAuthClient, OAuthClientSecret,
         permissions::Caller,
         storage::{MockApiUserStore, MockOAuthClientSecretStore, MockOAuthClientStore},
-        ApiUser, ApiUserInfo, OAuthClient, OAuthClientSecret,
     };
 
     use crate::{
         authn::key::RawKey,
-        context::test_mocks::{mock_context, MockStorage},
+        context::test_mocks::{MockStorage, mock_context},
         endpoints::login::oauth::{
-            client::{create_oauth_client_inner, create_oauth_client_secret_inner},
             CheckOAuthClient,
+            client::{create_oauth_client_inner, create_oauth_client_secret_inner},
         },
         permissions::VPermission,
     };

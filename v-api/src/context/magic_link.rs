@@ -10,27 +10,27 @@ use thiserror::Error;
 use tracing::instrument;
 use url::Url;
 use v_model::{
+    MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri,
+    MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, NewMagicLink, NewMagicLinkAttempt,
+    NewMagicLinkRedirectUri, NewMagicLinkSecret,
     permissions::Caller,
     schema_ext::{MagicLinkAttemptState, MagicLinkMedium},
     storage::{
         ListPagination, MagicLinkAttemptFilter, MagicLinkAttemptStore, MagicLinkFilter,
         MagicLinkRedirectUriStore, MagicLinkSecretStore, MagicLinkStore, StoreError,
     },
-    MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri,
-    MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, NewMagicLink, NewMagicLinkAttempt,
-    NewMagicLinkRedirectUri, NewMagicLinkSecret,
 };
 
 use crate::{
     authn::{
-        key::{ApiKeyError, RawKey},
         Sign, SigningKeyError,
+        key::{ApiKeyError, RawKey},
     },
     messenger::{Message, Messenger, MessengerError},
     permissions::{VAppPermission, VPermission},
     response::{
-        resource_error, resource_restricted, OptionalResource, ResourceError, ResourceErrorInner,
-        ResourceResult,
+        OptionalResource, ResourceError, ResourceErrorInner, ResourceResult, resource_error,
+        resource_restricted,
     },
 };
 
@@ -452,22 +452,22 @@ mod tests {
     use std::{
         ops::Add,
         sync::{
-            atomic::{AtomicBool, Ordering},
             Arc, RwLock,
+            atomic::{AtomicBool, Ordering},
         },
     };
     use url::Url;
     use uuid::Uuid;
     use v_model::{
+        MagicLinkAttempt,
         schema_ext::{MagicLinkAttemptState, MagicLinkMedium},
         storage::MockMagicLinkAttemptStore,
-        MagicLinkAttempt,
     };
 
     use super::{MagicLinkContext, MagicLinkMessage, MagicLinkTarget};
     use crate::{
         authn::key::RawKey,
-        context::test_mocks::{mock_context, MockStorage},
+        context::test_mocks::{MockStorage, mock_context},
         messenger::{Message, Messenger, MessengerError},
         permissions::VPermission,
         response::ResourceError,

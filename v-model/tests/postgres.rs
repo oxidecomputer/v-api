@@ -6,8 +6,9 @@ use std::collections::BTreeSet;
 
 use chrono::{Duration, TimeDelta, Utc};
 use diesel::{
+    PgConnection, RunQueryDsl,
     r2d2::{ConnectionManager, ManageConnection},
-    sql_query, PgConnection, RunQueryDsl,
+    sql_query,
 };
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
@@ -16,12 +17,12 @@ use std::ops::{Add, Sub};
 use uuid::Uuid;
 use v_api_installer::run_migrations;
 use v_model::{
+    NewApiKey, NewApiUser, NewMagicLink, NewMagicLinkAttempt, UserId,
     schema_ext::MagicLinkAttemptState,
     storage::{
-        postgres::PostgresStore, ApiKeyFilter, ApiKeyStore, ApiUserFilter, ApiUserStore,
-        ListPagination, MagicLinkAttemptStore, MagicLinkStore,
+        ApiKeyFilter, ApiKeyStore, ApiUserFilter, ApiUserStore, ListPagination,
+        MagicLinkAttemptStore, MagicLinkStore, postgres::PostgresStore,
     },
-    NewApiKey, NewApiUser, NewMagicLink, NewMagicLinkAttempt, UserId,
 };
 
 fn leakable_dbs() -> Vec<String> {
@@ -178,14 +179,18 @@ async fn test_api_user() {
     .await
     .unwrap();
 
-    assert!(api_user
-        .user
-        .permissions
-        .can(&TestPermission::GetApiKey(api_user_id).into()));
-    assert!(api_user
-        .user
-        .permissions
-        .can(&TestPermission::DeleteApiKey(api_user_id).into()));
+    assert!(
+        api_user
+            .user
+            .permissions
+            .can(&TestPermission::GetApiKey(api_user_id).into())
+    );
+    assert!(
+        api_user
+            .user
+            .permissions
+            .can(&TestPermission::DeleteApiKey(api_user_id).into())
+    );
 
     // 5. Create an API token for the user
     let token = ApiKeyStore::<TestPermission>::upsert(
@@ -221,11 +226,13 @@ async fn test_api_user() {
     .await
     .unwrap();
 
-    assert!(excess_token
-        .permissions
-        .as_ref()
-        .unwrap()
-        .can(&TestPermission::CreateApiUser.into()));
+    assert!(
+        excess_token
+            .permissions
+            .as_ref()
+            .unwrap()
+            .can(&TestPermission::CreateApiUser.into())
+    );
 
     // 7. Create an API token with excess permissions for the user
     let expired_token = ApiKeyStore::<TestPermission>::upsert(

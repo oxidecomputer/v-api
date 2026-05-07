@@ -9,8 +9,8 @@ use serde::Deserialize;
 use std::fmt::Debug;
 use tracing::instrument;
 use v_model::{
-    permissions::{Permission, PermissionStorage, Permissions},
     AccessGroup, AccessGroupId, NewAccessGroup,
+    permissions::{Permission, PermissionStorage, Permissions},
 };
 
 use crate::{

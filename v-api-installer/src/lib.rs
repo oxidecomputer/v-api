@@ -3,10 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use diesel::{
-    r2d2::{ConnectionManager, ManageConnection},
     PgConnection,
+    r2d2::{ConnectionManager, ManageConnection},
 };
-use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("../v-model/migrations");
 

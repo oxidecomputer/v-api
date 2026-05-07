@@ -11,30 +11,30 @@ use std::{
     sync::Arc,
 };
 use thiserror::Error;
-use tracing::{info_span, instrument, Instrument};
+use tracing::{Instrument, info_span, instrument};
 use uuid::Uuid;
 use v_model::{
+    AccessGroupId, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserInfo,
+    ApiUserProvider, ArcMap, NewAccessToken, NewApiKey, NewApiUser, NewApiUserContactEmail,
+    NewApiUserProvider, Permissions, UserId, UserProviderId,
     permissions::{AsScope, Caller, Permission, PermissionError, PermissionStorage},
     storage::{
         AccessGroupFilter, AccessGroupStore, AccessTokenStore, ApiKeyFilter, ApiKeyStore,
         ApiUserContactEmailStore, ApiUserFilter, ApiUserProviderFilter, ApiUserProviderStore,
         ApiUserStore, ListPagination, StoreError,
     },
-    AccessGroupId, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserInfo,
-    ApiUserProvider, ArcMap, NewAccessToken, NewApiKey, NewApiUser, NewApiUserContactEmail,
-    NewApiUserProvider, Permissions, UserId, UserProviderId,
 };
 
 use crate::{
+    VApiStorage,
     authn::{
-        jwt::{Claims, JwtSigner, JwtSignerError},
         AuthToken, Verify,
+        jwt::{Claims, JwtSigner, JwtSignerError},
     },
     permissions::{VAppPermission, VPermission},
     response::{
-        resource_not_found, resource_restricted, OptionalResource, ResourceError, ResourceResult,
+        OptionalResource, ResourceError, ResourceResult, resource_not_found, resource_restricted,
     },
-    VApiStorage,
 };
 
 #[derive(Debug)]

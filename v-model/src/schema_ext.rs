@@ -3,12 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use diesel::{
+    AsExpression, FromSqlRow,
     backend::Backend,
     deserialize::{self, FromSql},
     pg::Pg,
     query_builder::QueryId,
     serialize::{self, IsNull, Output, ToSql},
-    AsExpression, FromSqlRow,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
