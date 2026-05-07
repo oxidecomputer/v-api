@@ -201,7 +201,7 @@ impl OAuthConfig {
         let device = self
             .device
             .as_ref()
-            .and_then(|d| d.resolve(base.clone()).ok());
+            .map(|d| d.resolve(base.clone())).transpose()?;
         let web = self.web.as_ref().map(|w| w.resolve(base.clone())).transpose()?;
         let proxy_web = self.proxy_web.as_ref().map(|p| p.resolve(base)).transpose()?;
         Ok(ResolvedOAuthConfig {
