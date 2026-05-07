@@ -21,7 +21,9 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::cmd::auth::{
-    login::LoginProvider, oauth::{CliOAuthAdapter, CliOAuthProviderInfo}, proxy::run_proxy_server
+    login::LoginProvider,
+    oauth::{CliOAuthAdapter, CliOAuthProviderInfo},
+    proxy::run_proxy_server,
 };
 
 type CodeClient = BasicClient<
