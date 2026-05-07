@@ -25,8 +25,7 @@ use tap::TapFallible;
 use tracing::instrument;
 use uuid::Uuid;
 use v_model::{
-    permissions::{AsScope, PermissionStorage, Permissions},
-    schema_ext::LoginAttemptState,
+    LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient, OAuthClientId, permissions::{AsScope, PermissionStorage, Permissions}, schema_ext::LoginAttemptState
 };
 
 use super::super::{OAuthProvider, OAuthProviderNameParam};
@@ -37,7 +36,6 @@ use crate::{
     endpoints::login::{
         oauth::{CheckOAuthClient, ClientType, OAuthProviderAuthorizationCodePkceInfo},
         LoginError, UserInfo,
-        oauth::{CheckOAuthClient, ClientType},
     },
     error::ApiError,
     permissions::{VAppPermission, VPermission},
@@ -1035,8 +1033,8 @@ mod tests {
             MockAccessTokenStore, MockApiUserProviderStore, MockApiUserStore,
             MockLoginAttemptStore, MockMapperStore, MockOAuthClientStore,
         },
-        AccessToken, ApiUser, ApiUserInfo, ApiUserProvider, LoginAttempt, NewApiUser,
-        NewApiUserProvider, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret,
+        AccessToken, ApiUser, ApiUserInfo, ApiUserProvider, NewApiUser,
+        NewApiUserProvider,
     };
 
     use crate::{

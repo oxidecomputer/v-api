@@ -22,7 +22,6 @@ use crate::{
     permissions::{VAppPermission, VPermission},
     secrets::OpenApiSecretString,
     util::response::{bad_request, to_internal_error},
-    VContext,
 };
 
 #[instrument(skip(rqctx), err(Debug))]
