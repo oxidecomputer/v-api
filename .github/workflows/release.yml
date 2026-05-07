@@ -1,0 +1,20 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "**[0-9]+.[0-9]+.[0-9]+*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@caacf56b56ba217c4eaf0a9deb59dbcdd12abfcd
+        with:
+          draft: ${{ github.event_name == 'pull_request' }}
+          tag: ${{ github.ref_name }}
+          generateReleaseNotes: true
+          prerelease: ${{ contains(steps.tag.outputs.value, '-pre') }}
