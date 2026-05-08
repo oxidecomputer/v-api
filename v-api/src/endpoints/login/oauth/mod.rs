@@ -180,6 +180,8 @@ pub struct OAuthProviderAuthorizationCodeInfo {
     redirect_endpoint: String,
     token_endpoint_content_type: String,
     token_endpoint: String,
+    #[schemars(skip)]
+    #[serde(skip)]
     remote: OAuthProviderAuthorizationCodeRemoteInfo,
 }
 
@@ -206,31 +208,20 @@ pub struct OAuthProviderAuthorizationCodePkceInfo {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct OAuthProviderDeviceInfo {
     client_id: TypedUuid<OAuthClientId>,
-    remote_client_id: String,
     #[schemars(skip)]
     #[serde(skip)]
-    remote_client_secret: OpenApiSecretString,
+    remote: OAuthProviderDeviceRemoteInfo,
+}
+
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct OAuthProviderDeviceRemoteInfo {
+    client_id: String,
+    #[schemars(skip)]
+    #[serde(skip)]
+    client_secret: OpenApiSecretString,
     device_code_endpoint: String,
     token_endpoint: String,
     revocation_endpoint: Option<String>,
-}
-
-impl OAuthProviderDeviceInfo {
-    pub fn remote_client_id(&self) -> &str {
-        &self.remote_client_id
-    }
-
-    pub fn remote_client_secret(&self) -> String {
-        self.remote_client_secret.0.expose_secret().to_string()
-    }
-
-    pub fn device_code_endpoint(&self) -> &str {
-        &self.device_code_endpoint
-    }
-
-    pub fn token_endpoint(&self) -> &str {
-        &self.token_endpoint
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash, Serialize, JsonSchema)]

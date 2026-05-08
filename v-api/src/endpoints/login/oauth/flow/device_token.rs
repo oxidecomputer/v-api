@@ -11,6 +11,7 @@ use oauth2::{
     CsrfToken, EmptyExtraTokenFields, StandardTokenResponse, TokenResponse, basic::BasicTokenType,
 };
 use schemars::JsonSchema;
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::ops::Add;
@@ -121,12 +122,12 @@ where
     // Proxy the device authorization request to the upstream provider
     let client = reqwest::Client::new();
     let upstream_request = UpstreamDeviceAuthzRequest {
-        client_id: device_info.remote_client_id().to_string(),
+        client_id: device_info.remote.client_id.clone(),
         scope: Some(provider.default_scopes().join(" ")),
     };
 
     let response = client
-        .request(Method::POST, device_info.device_code_endpoint())
+        .request(Method::POST, &device_info.remote.device_code_endpoint)
         .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
         .header(header::ACCEPT, "application/json")
         .body(serde_urlencoded::to_string(&upstream_request).unwrap())
@@ -329,15 +330,20 @@ where
         .to_string();
 
     let upstream_request = UpstreamDeviceTokenRequest {
-        client_id: device_info.remote_client_id().to_string(),
+        client_id: device_info.remote.client_id.clone(),
         device_code: upstream_device_code,
         grant_type: body.grant_type.clone(),
-        client_secret: device_info.remote_client_secret().to_string(),
+        client_secret: device_info
+            .remote
+            .client_secret
+            .0
+            .expose_secret()
+            .to_string(),
     };
 
     let client = reqwest::Client::new();
     let response = client
-        .request(Method::POST, device_info.token_endpoint())
+        .request(Method::POST, &device_info.remote.token_endpoint)
         .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
         .header(header::ACCEPT, HeaderValue::from_static("application/json"))
         .body(serde_urlencoded::to_string(&upstream_request).unwrap())

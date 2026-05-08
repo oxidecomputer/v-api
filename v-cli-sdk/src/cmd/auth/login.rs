@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
-use oauth2::TokenResponse;
+
 use std::{error::Error as StdError, fmt::Debug, future::Future, io::Write, pin::Pin, sync::Arc};
 
 use crate::{
@@ -135,7 +135,7 @@ where
                 // possible we use a limited input device flow, but not all providers support it.
                 // To handle those cases we need to use a proxy path that emulates an authorization
                 // code flow.
-                if provider.device_code_endpoint().is_some() {
+                if provider.supports_device_flow() {
                     if *request_idp_token {
                         anyhow::bail!(
                             "Remote token access is not supported via device authentication flow"
@@ -176,28 +176,18 @@ where
         T: CliOAuthAdapter,
         V: CliOAuthProviderInfo,
     {
-        let oauth_client = oauth::device::DeviceOAuth::new(provider)?;
-        let details = oauth_client.get_device_authorization().await?;
+        let client_id = provider.client_id();
+        let login_provider = provider.provider();
 
-        println!(
-            "To complete login visit: {} and enter {}",
-            details.verification_uri().as_str(),
-            details.user_code().secret()
-        );
-
-        let token_response = oauth_client.login(&details).await;
-
-        let identity_token = match token_response {
-            Ok(token) => Ok(token.access_token().to_owned()),
-            Err(err) => Err(anyhow::anyhow!("Authentication failed: {}", err)),
-        }?;
+        let token = oauth::device::login(&adapter, login_provider, client_id, None).await?;
 
         match mode {
-            AuthenticationMode::Identity => Ok(identity_token.secret().to_string()),
+            AuthenticationMode::Identity => Ok(token.access_token().to_string()),
             AuthenticationMode::Token => {
                 let token = adapter
-                    .get_long_lived_token(identity_token.secret())
-                    .await?;
+                    .get_long_lived_token(token.access_token())
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))?;
                 Ok(token.access_token().to_string())
             }
         }

@@ -23,6 +23,39 @@ pub struct AuthorizationCodeExchange {
     pub request_idp_token: bool,
 }
 
+/// Parameters for initiating a device authorization flow.
+pub struct DeviceAuthorizationRequest {
+    pub provider: LoginProvider,
+    pub client_id: Uuid,
+    pub scope: Option<String>,
+}
+
+/// Response from initiating a device authorization flow.
+pub struct DeviceAuthorizationResponse {
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub verification_uri_complete: Option<String>,
+    pub expires_in: Option<u64>,
+    pub interval: Option<u64>,
+}
+
+/// Parameters for exchanging a device code for an access token.
+pub struct DeviceTokenExchange {
+    pub provider: LoginProvider,
+    pub client_id: Uuid,
+    pub device_code: String,
+    pub grant_type: String,
+}
+
+/// Result of a device token exchange poll.
+pub enum DeviceAccessTokenResponse<T> {
+    /// The user has not yet completed authorization. The client should continue polling.
+    Pending,
+    /// The user completed authorization and a token was issued.
+    Token(T),
+}
+
 pub trait CliOAuthAdapter {
     type ShortToken: CliAdapterToken + Send + 'static;
     type LongToken: CliAdapterToken + Send + 'static;
@@ -39,6 +72,21 @@ pub trait CliOAuthAdapter {
         exchange: AuthorizationCodeExchange,
     ) -> Pin<Box<dyn Future<Output = Result<Self::ShortToken, Self::Error>> + Send>>;
     #[allow(clippy::type_complexity)]
+    fn initiate_device_authorization(
+        &self,
+        request: DeviceAuthorizationRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<DeviceAuthorizationResponse, Self::Error>> + Send>>;
+    #[allow(clippy::type_complexity)]
+    fn exchange_device_token(
+        &self,
+        exchange: DeviceTokenExchange,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<DeviceAccessTokenResponse<Self::ShortToken>, Self::Error>>
+                + Send,
+        >,
+    >;
+    #[allow(clippy::type_complexity)]
     fn get_long_lived_token(
         &self,
         access_token: &str,
@@ -48,10 +96,9 @@ pub trait CliOAuthAdapter {
 pub trait CliOAuthProviderInfo {
     fn provider(&self) -> LoginProvider;
     fn client_id(&self) -> Uuid;
-    fn remote_client_id(&self) -> &str;
+    fn supports_device_flow(&self) -> bool;
     fn public_pkce_port(&self) -> Option<u16>;
     fn supports_pkce_only(&self) -> bool;
-    fn device_code_endpoint(&self) -> Option<&str>;
     fn auth_url_endpoint(&self) -> Option<&str>;
     fn token_endpoint(&self) -> &str;
     fn redirect_endpoint(&self) -> Option<&str>;

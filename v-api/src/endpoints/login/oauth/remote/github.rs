@@ -15,6 +15,7 @@ use crate::{
         oauth::{
             OAuthProviderAuthorizationCodeInfo, OAuthProviderAuthorizationCodePkceInfo,
             OAuthProviderAuthorizationCodeRemoteInfo, OAuthProviderDeviceInfo,
+            OAuthProviderDeviceRemoteInfo,
         },
     },
 };
@@ -63,11 +64,13 @@ impl GitHubOAuthProvider {
         });
         let device_code_flow_info = config.device.map(|device| OAuthProviderDeviceInfo {
             client_id: device.client_id,
-            remote_client_id: device.remote_client_id,
-            remote_client_secret: device.remote_client_secret.into(),
-            device_code_endpoint: "https://github.com/login/device/code".to_string(),
-            token_endpoint: "https://github.com/login/oauth/access_token".to_string(),
-            revocation_endpoint: None,
+            remote: OAuthProviderDeviceRemoteInfo {
+                client_id: device.remote_client_id,
+                client_secret: device.remote_client_secret.into(),
+                device_code_endpoint: "https://github.com/login/device/code".to_string(),
+                token_endpoint: "https://github.com/login/oauth/access_token".to_string(),
+                revocation_endpoint: None,
+            },
         });
 
         Self {

@@ -2,95 +2,88 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::time::Duration;
+
 use anyhow::Result;
-use oauth2::{
-    AuthType, AuthUrl, ClientId, DeviceAuthorizationUrl, EmptyExtraTokenFields, EndpointNotSet,
-    EndpointSet, Scope, StandardDeviceAuthorizationResponse, StandardTokenResponse, TokenUrl,
-    basic::{BasicClient, BasicTokenType},
+use uuid::Uuid;
+
+use crate::cmd::auth::login::LoginProvider;
+
+use super::{
+    CliOAuthAdapter, DeviceAccessTokenResponse, DeviceAuthorizationRequest,
+    DeviceAuthorizationResponse, DeviceTokenExchange,
 };
 
-use crate::cmd::auth::oauth::CliOAuthProviderInfo;
+/// Default polling interval in seconds per RFC 8628 §3.2.
+const DEFAULT_POLL_INTERVAL_SECS: u64 = 5;
 
-type DeviceClient = BasicClient<
-    // HasAuthUrl
-    EndpointSet,
-    // HasDeviceAuthUrl
-    EndpointSet,
-    // HasIntrospectionUrl
-    EndpointNotSet,
-    // HasRevocationUrl
-    EndpointNotSet,
-    // HasTokenUrl
-    EndpointSet,
->;
+/// Initiate a device authorization flow through the v-api proxy and poll until
+/// the user completes authorization or the device code expires.
+pub async fn login<T>(
+    adapter: &T,
+    provider: LoginProvider,
+    client_id: Uuid,
+    scope: Option<String>,
+) -> Result<T::ShortToken>
+where
+    T: CliOAuthAdapter,
+{
+    let details = adapter
+        .initiate_device_authorization(DeviceAuthorizationRequest {
+            provider,
+            client_id,
+            scope,
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
 
-pub struct DeviceOAuth {
-    client: DeviceClient,
-    http: oauth2_reqwest::ReqwestClient,
-    scopes: Vec<String>,
+    print_user_instructions(&details);
+
+    poll_for_token(adapter, provider, client_id, &details).await
 }
 
-impl DeviceOAuth {
-    pub fn new<T>(provider: T) -> Result<Self>
-    where
-        T: CliOAuthProviderInfo,
-    {
-        if let Some(device_endpoint) = provider.device_code_endpoint() {
-            let device_auth_url = DeviceAuthorizationUrl::new(device_endpoint.to_string())?;
+fn print_user_instructions(details: &DeviceAuthorizationResponse) {
+    if let Some(complete_uri) = &details.verification_uri_complete {
+        println!(
+            "To complete login visit:\n\n  {}\n\nOr go to {} and enter code: {}\n",
+            complete_uri, details.verification_uri, details.user_code,
+        );
+    } else {
+        println!(
+            "To complete login visit: {} and enter code: {}\n",
+            details.verification_uri, details.user_code,
+        );
+    }
+}
 
-            let client = BasicClient::new(ClientId::new(provider.client_id().to_string()))
-                .set_auth_uri(AuthUrl::new(
-                    provider
-                        .device_code_endpoint()
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "OAuth device flow provider must define an device code url"
-                            )
-                        })?
-                        .to_string(),
-                )?)
-                .set_auth_type(AuthType::RequestBody)
-                .set_token_uri(TokenUrl::new(provider.token_endpoint().to_string())?)
-                .set_device_authorization_url(device_auth_url);
+async fn poll_for_token<T>(
+    adapter: &T,
+    provider: LoginProvider,
+    client_id: Uuid,
+    details: &DeviceAuthorizationResponse,
+) -> Result<T::ShortToken>
+where
+    T: CliOAuthAdapter,
+{
+    let interval = Duration::from_secs(details.interval.unwrap_or(DEFAULT_POLL_INTERVAL_SECS));
+    let grant_type = "urn:ietf:params:oauth:grant-type:device_code".to_string();
 
-            Ok(Self {
-                client,
-                http: oauth2_reqwest::ReqwestClient::from(
-                    reqwest::ClientBuilder::new()
-                        .redirect(reqwest::redirect::Policy::none())
-                        .build()
-                        .unwrap(),
-                ),
-                scopes: provider.scopes().iter().map(|s| s.to_string()).collect(),
+    loop {
+        tokio::time::sleep(interval).await;
+
+        let result = adapter
+            .exchange_device_token(DeviceTokenExchange {
+                provider,
+                client_id,
+                device_code: details.device_code.clone(),
+                grant_type: grant_type.clone(),
             })
-        } else {
-            anyhow::bail!("Device authorization is not supported by this provider")
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        match result {
+            DeviceAccessTokenResponse::Pending => continue,
+            DeviceAccessTokenResponse::Token(token) => return Ok(token),
         }
-    }
-
-    pub async fn login(
-        &self,
-        details: &StandardDeviceAuthorizationResponse,
-    ) -> Result<StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>> {
-        let token = self
-            .client
-            .exchange_device_access_token(details)
-            .set_max_backoff_interval(details.interval())
-            .request_async(&self.http, tokio::time::sleep, Some(details.expires_in()))
-            .await;
-
-        Ok(token?)
-    }
-
-    pub async fn get_device_authorization(&self) -> Result<StandardDeviceAuthorizationResponse> {
-        let mut req = self.client.exchange_device_code();
-
-        for scope in &self.scopes {
-            req = req.add_scope(Scope::new(scope.to_string()));
-        }
-
-        let res = req.request_async(&self.http).await;
-
-        Ok(res?)
     }
 }
