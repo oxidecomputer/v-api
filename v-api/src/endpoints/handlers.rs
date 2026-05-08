@@ -76,9 +76,10 @@ mod macros {
                             OAuthAuthzCodeQuery, OAuthAuthzCodeReturnQuery,
                         },
                         flow::device_token::{
-                            exchange_device_token_op, get_device_provider_op, AccessTokenExchangeRequest,
+                            exchange_device_token_op, device_authz_op,
+                            DeviceTokenExchangeRequest, DeviceAuthorizationRequest,
                         },
-                        OAuthProviderNameParam, OAuthProviderDeviceInfo, OAuthProviderAuthorizationCodePkceInfo
+                        OAuthProviderNameParam, OAuthProviderAuthorizationCodePkceInfo
                     }
                 },
                 mappers::{
@@ -319,19 +320,23 @@ mod macros {
 
             // DEVICE CODE FLOW
 
-            /// Retrieve the metadata about an OAuth provider for limited input flow
+            /// Initiate a device authorization flow by proxying the request to the
+            /// upstream OAuth provider. Creates a login attempt and returns the
+            /// upstream device authorization response.
             #[endpoint {
-                method = GET,
+                method = POST,
                 path = "/login/oauth/{provider}/device"
             }]
-            pub async fn get_device_provider(
+            pub async fn device_authz(
                 rqctx: RequestContext<$context_type>,
                 path: Path<OAuthProviderNameParam>,
-            ) -> Result<HttpResponseOk<OAuthProviderDeviceInfo>, HttpError> {
-                get_device_provider_op(&rqctx, path).await
+                body: TypedBody<DeviceAuthorizationRequest>,
+            ) -> Result<Response<Body>, HttpError> {
+                device_authz_op(&rqctx, path, body).await
             }
 
-            /// Exchange an OAuth device code request for an access token
+            /// Exchange an OAuth device code for an access token. The client polls
+            /// this endpoint until the user completes authorization.
             #[endpoint {
                 method = POST,
                 path = "/login/oauth/{provider}/device/exchange",
@@ -340,7 +345,7 @@ mod macros {
             pub async fn exchange_device_token(
                 rqctx: RequestContext<$context_type>,
                 path: Path<OAuthProviderNameParam>,
-                body: TypedBody<AccessTokenExchangeRequest>,
+                body: TypedBody<DeviceTokenExchangeRequest>,
             ) -> Result<Response<Body>, HttpError> {
                 exchange_device_token_op(&rqctx, path, body).await
             }
@@ -775,7 +780,7 @@ mod macros {
             // OAuth Login
             $api.register(get_web_pkce_provider)
                 .expect("Failed to register endpoint");
-            $api.register(get_device_provider)
+            $api.register(device_authz)
                 .expect("Failed to register endpoint");
             $api.register(exchange_device_token)
                 .expect("Failed to register endpoint");

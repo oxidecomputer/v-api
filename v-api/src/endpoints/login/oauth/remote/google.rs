@@ -75,7 +75,6 @@ impl GoogleOAuthProvider {
             remote_client_id: device.remote_client_id,
             remote_client_secret: device.remote_client_secret.into(),
             device_code_endpoint: "https://oauth2.googleapis.com/device/code".to_string(),
-            token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
             token_endpoint: "https://oauth2.googleapis.com/token".to_string(),
             revocation_endpoint: Some("https://oauth2.googleapis.com/revoke".to_string()),
         });

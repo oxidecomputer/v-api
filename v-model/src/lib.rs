@@ -261,7 +261,7 @@ pub struct LoginAttempt {
     pub id: TypedUuid<LoginAttemptId>,
     pub attempt_state: LoginAttemptState,
     pub client_id: TypedUuid<OAuthClientId>,
-    pub redirect_uri: String,
+    pub redirect_uri: Option<String>,
     pub state: Option<String>,
     pub pkce_challenge: Option<String>,
     pub pkce_challenge_method: Option<String>,
@@ -277,11 +277,18 @@ pub struct LoginAttempt {
     #[partial(NewLoginAttempt(skip))]
     pub updated_at: DateTime<Utc>,
     pub scope: String,
+    pub grant_type: String,
+    pub device_code: Option<String>,
+    pub provider_device_code: Option<String>,
 }
 
 impl LoginAttempt {
-    pub fn callback_url(&self) -> Result<String, url::ParseError> {
-        let mut url = Url::parse(&self.redirect_uri)?;
+    pub fn callback_url(&self) -> Result<Option<String>, url::ParseError> {
+        let redirect_uri = match &self.redirect_uri {
+            Some(uri) => uri,
+            None => return Ok(None),
+        };
+        let mut url = Url::parse(redirect_uri)?;
 
         {
             let mut pairs = url.query_pairs_mut();
@@ -295,7 +302,7 @@ impl LoginAttempt {
             }
         }
 
-        Ok(url.to_string())
+        Ok(Some(url.to_string()))
     }
 }
 
@@ -315,15 +322,18 @@ impl NewLoginAttempt {
     pub fn new(
         provider: String,
         client_id: TypedUuid<OAuthClientId>,
-        redirect_uri: String,
+        redirect_uri: Option<String>,
         scope: String,
+        grant_type: String,
     ) -> Result<Self, InvalidValueError> {
         // Validate that the redirect URI is a well-formed URL. This ensures
         // callback_url() can always parse it later.
-        Url::parse(&redirect_uri).map_err(|err| InvalidValueError {
-            field: "redirect_uri".to_string(),
-            error: format!("Invalid URL: {}", err),
-        })?;
+        if let Some(uri) = &redirect_uri {
+            Url::parse(uri).map_err(|err| InvalidValueError {
+                field: "redirect_uri".to_string(),
+                error: format!("Invalid URL: {}", err),
+            })?;
+        }
 
         Ok(Self {
             id: TypedUuid::new_v4(),
@@ -341,6 +351,9 @@ impl NewLoginAttempt {
             provider_authz_code: None,
             provider_error: None,
             scope,
+            grant_type,
+            device_code: None,
+            provider_device_code: None,
         })
     }
 }
@@ -365,6 +378,9 @@ impl From<LoginAttemptModel> for LoginAttempt {
             created_at: value.created_at,
             updated_at: value.updated_at,
             scope: value.scope,
+            grant_type: value.grant_type,
+            device_code: value.device_code,
+            provider_device_code: value.provider_device_code,
         }
     }
 }

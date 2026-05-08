@@ -2,89 +2,243 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use chrono::{DateTime, Utc};
-use dropshot::{Body, HttpError, HttpResponseOk, Method, Path, RequestContext, TypedBody};
+use chrono::{TimeDelta, Utc};
+use dropshot::{Body, HttpError, Method, Path, RequestContext, TypedBody};
 use http::{HeaderMap, HeaderValue, Response, StatusCode, header};
 use hyper::body::Bytes;
-use oauth2::{EmptyExtraTokenFields, StandardTokenResponse, TokenResponse, basic::BasicTokenType};
+use newtype_uuid::TypedUuid;
+use oauth2::{
+    CsrfToken, EmptyExtraTokenFields, StandardTokenResponse, TokenResponse, basic::BasicTokenType,
+};
 use schemars::JsonSchema;
-use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+use std::ops::Add;
 use tap::TapFallible;
 use tracing::instrument;
-use v_model::permissions::PermissionStorage;
+use v_model::{
+    NewLoginAttempt, OAuthClientId,
+    permissions::{AsScope, PermissionStorage},
+};
 
 use super::super::OAuthProviderNameParam;
 use crate::endpoints::login::UserInfoProvider;
 use crate::{
     context::ApiContext,
-    endpoints::login::{LoginError, oauth::OAuthProviderDeviceInfo},
+    endpoints::login::LoginError,
     error::ApiError,
-    permissions::VAppPermission,
+    permissions::{VAppPermission, VPermission},
     response::internal_error,
     util::response::bad_request,
 };
 
-#[instrument(skip(rqctx), err(Debug))]
-pub async fn get_device_provider_op<T>(
+use super::complete_exchange;
+
+/// Request body for initiating a device authorization flow. The client sends its
+/// `client_id` and an optional `scope`. The API server proxies the device
+/// authorization request to the upstream provider and tracks it as a login attempt.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DeviceAuthorizationRequest {
+    pub client_id: TypedUuid<OAuthClientId>,
+    pub scope: Option<String>,
+}
+
+/// Subset of the upstream device authorization response that we forward to the
+/// client (RFC 8628 §3.2).
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
+pub struct DeviceAuthorizationResponse {
+    /// The device verification code (opaque to the end-user).
+    pub device_code: String,
+    /// The end-user verification code displayed to the user.
+    pub user_code: String,
+    /// The end-user verification URI on the authorization server.
+    pub verification_uri: String,
+    /// Optional verification URI that includes the user_code.
+    #[serde(default)]
+    pub verification_uri_complete: Option<String>,
+    /// Lifetime in seconds of the device_code and user_code.
+    #[serde(default)]
+    pub expires_in: Option<i64>,
+    /// Minimum polling interval in seconds (default 5 per RFC 8628 §3.5).
+    #[serde(default)]
+    pub interval: Option<i64>,
+}
+
+/// Body sent to the upstream provider's device authorization endpoint.
+#[derive(Serialize)]
+struct UpstreamDeviceAuthzRequest {
+    client_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope: Option<String>,
+}
+
+static DEFAULT_SCOPE: &str = "user:info:r";
+
+/// Initiate a device authorization flow by proxying the request to the upstream
+/// OAuth provider. On success a `LoginAttempt` is created (state = New) and the
+/// upstream device authorization response is returned to the caller.
+#[instrument(skip(rqctx, body), err(Debug))]
+pub async fn device_authz_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<OAuthProviderNameParam>,
-) -> Result<HttpResponseOk<OAuthProviderDeviceInfo>, HttpError>
+    body: TypedBody<DeviceAuthorizationRequest>,
+) -> Result<Response<Body>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
 {
+    let ctx = rqctx.v_ctx();
     let path = path.into_inner();
+    let body = body.into_inner();
 
-    tracing::trace!("Getting OAuth data for {}", path.provider);
-
-    let provider = rqctx
-        .v_ctx()
+    let provider = ctx
         .get_oauth_provider(&path.provider)
         .await
         .map_err(ApiError::OAuth)?;
 
-    Ok(HttpResponseOk(
-        provider
-            .device_code_flow_info()
-            .cloned()
-            .ok_or_else(|| bad_request("Provider does not support device clients"))?,
-    ))
+    let device_info = provider
+        .device_code_flow_info()
+        .ok_or_else(|| bad_request("Provider does not support device code flow"))?;
+
+    // Validate the client_id. In the future we may tie maximum scopes to a
+    // client as well
+    let _client = ctx
+        .oauth
+        .get_oauth_client(&ctx.builtin_registration_user(), &body.client_id)
+        .await
+        .map_err(|_| bad_request("Unknown client id"))?;
+
+    // Validate scope if provided
+    let scope = body.scope.unwrap_or_else(|| DEFAULT_SCOPE.to_string());
+    if let Err(err) = VPermission::from_scope_arg(&scope) {
+        tracing::warn!(?err, ?scope, "Client submitted an invalid scope");
+        return Ok(error_response(
+            StatusCode::BAD_REQUEST,
+            "invalid_scope",
+            Some(format!("Invalid scope: {}", scope)),
+        ));
+    }
+
+    // Proxy the device authorization request to the upstream provider
+    let client = reqwest::Client::new();
+    let upstream_request = UpstreamDeviceAuthzRequest {
+        client_id: device_info.remote_client_id().to_string(),
+        scope: Some(provider.default_scopes().join(" ")),
+    };
+
+    let response = client
+        .request(Method::POST, device_info.device_code_endpoint())
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(header::ACCEPT, "application/json")
+        .body(serde_urlencoded::to_string(&upstream_request).unwrap())
+        .send()
+        .await
+        .tap_err(|err| tracing::error!(?err, "Device authorization request failed"))
+        .map_err(internal_error)?;
+
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = response.bytes().await.map_err(internal_error)?;
+
+    if !status.is_success() {
+        tracing::debug!(
+            provider = ?path.provider,
+            ?status,
+            "Upstream device authorization returned error"
+        );
+        return Ok(proxy_upstream_response(bytes, headers, status));
+    }
+
+    // Parse the upstream device authorization response
+    let device_authz: DeviceAuthorizationResponse =
+        serde_json::from_slice(&bytes).map_err(|err| {
+            tracing::error!(
+                ?err,
+                "Failed to parse upstream device authorization response"
+            );
+            internal_error("Failed to parse upstream device authorization response")
+        })?;
+
+    // Create a LoginAttempt to track this device flow. Device flow has no
+    // redirect_uri — the token is returned directly via the exchange endpoint.
+    let mut attempt = NewLoginAttempt::new(
+        provider.name().to_string(),
+        body.client_id,
+        None,
+        scope,
+        "urn:ietf:params:oauth:grant-type:device_code".to_string(),
+    )
+    .map_err(|err| {
+        tracing::error!(?err, "Failed to construct login attempt");
+        internal_error("Failed to construct login attempt")
+    })?;
+
+    // Set expiration from upstream response or default to 10 minutes
+    let expires_in_secs = device_authz.expires_in.unwrap_or(600);
+    attempt.expires_at = Some(Utc::now().add(TimeDelta::try_seconds(expires_in_secs).unwrap()));
+
+    // Store the upstream device_code privately — the caller never sees this.
+    attempt.provider_device_code = Some(device_authz.device_code.clone());
+
+    // Generate a v-api opaque device code that the caller will use to poll the
+    // exchange endpoint.
+    let vapi_device_code = CsrfToken::new_random().secret().to_string();
+    attempt.device_code = Some(vapi_device_code.clone());
+
+    let attempt = ctx
+        .login
+        .create_login_attempt(attempt)
+        .await
+        .map_err(|err| {
+            tracing::error!(?err, "Failed to store login attempt");
+            internal_error("Failed to store login attempt")
+        })?;
+
+    tracing::info!(?attempt.id, "Created device flow login attempt");
+
+    // Return the response to the client, replacing the upstream device_code with
+    // our v-api-issued code. The user_code and verification_uri are passed through
+    // so the end-user can complete the browser-based authorization.
+    let client_response = DeviceAuthorizationResponse {
+        device_code: vapi_device_code,
+        user_code: device_authz.user_code,
+        verification_uri: device_authz.verification_uri,
+        verification_uri_complete: device_authz.verification_uri_complete,
+        expires_in: device_authz.expires_in,
+        interval: device_authz.interval,
+    };
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(serde_json::to_vec(&client_response).unwrap().into())?)
 }
 
+// ─── Device Token Exchange (Step 2) ─────────────────────────────────────────
+
+/// Request body for the device token exchange. The client polls this endpoint
+/// with the device_code received from the authorization step.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AccessTokenExchangeRequest {
+pub struct DeviceTokenExchangeRequest {
+    pub client_id: TypedUuid<OAuthClientId>,
     pub device_code: String,
     pub grant_type: String,
-    pub expires_at: Option<DateTime<Utc>>,
+    pub pkce_verifier: Option<String>,
 }
 
+/// Body sent to the upstream provider's token endpoint during device code exchange.
 #[derive(Serialize)]
-pub struct AccessTokenExchange {
-    provider: ProviderTokenExchange,
-    expires_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Serialize)]
-pub struct ProviderTokenExchange {
+struct UpstreamDeviceTokenRequest {
     client_id: String,
     device_code: String,
     grant_type: String,
     client_secret: String,
 }
 
-impl AccessTokenExchange {
-    pub fn new(req: AccessTokenExchangeRequest, provider: &OAuthProviderDeviceInfo) -> Self {
-        Self {
-            provider: ProviderTokenExchange {
-                client_id: provider.remote_client_id.clone(),
-                device_code: req.device_code,
-                grant_type: req.grant_type,
-                client_secret: provider.remote_client_secret.0.expose_secret().to_string(),
-            },
-            expires_at: req.expires_at,
-        }
-    }
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
+pub struct ProxyTokenError {
+    error: String,
+    error_description: Option<String>,
+    error_uri: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
@@ -96,196 +250,197 @@ pub struct ProxyTokenResponse {
     pub scopes: Option<Vec<String>>,
 }
 
-#[derive(Debug, Deserialize, JsonSchema, Serialize)]
-pub struct ProxyTokenError {
-    error: String,
-    error_description: Option<String>,
-    error_uri: Option<String>,
-}
-
-// Complete a device exchange request against the specified provider. This effectively proxies the
-// requests that would go to the provider, captures the returned access tokens, and registers a
-// new internal user as needed. The user is then returned an token that is valid for interacting
-// with the API
+/// Exchange a device code for an access token. This endpoint is polled by the
+/// client. Upstream pending/slow_down responses are proxied through directly.
+/// On success the login attempt is completed, the user is registered, and a
+/// v-api access token is minted.
 #[instrument(skip(rqctx, body), err(Debug))]
 pub async fn exchange_device_token_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<OAuthProviderNameParam>,
-    body: TypedBody<AccessTokenExchangeRequest>,
+    body: TypedBody<DeviceTokenExchangeRequest>,
 ) -> Result<Response<Body>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
 {
     let ctx = rqctx.v_ctx();
     let path = path.into_inner();
+    let body = body.into_inner();
+
     let provider = ctx
         .get_oauth_provider(&path.provider)
         .await
         .map_err(ApiError::OAuth)?;
-    let device_info = provider.device_code_flow_info();
 
-    tracing::debug!(provider = ?provider.name(), "Acquired OAuth provider for token exchange");
+    let device_info = provider
+        .device_code_flow_info()
+        .ok_or_else(|| bad_request("Provider does not support device code flow"))?;
 
-    if device_info.is_none() {
-        return Ok(Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(
-                serde_json::to_vec(&ProxyTokenError {
-                    error: "unsupported_grant_type".to_string(),
-                    error_description: Some(format!(
-                        "{} does not support device code flow",
-                        path.provider
-                    )),
-                    error_uri: None,
-                })
-                .unwrap()
-                .into(),
-            )?);
-    }
-
-    let device_info = device_info.unwrap();
-    let exchange_request = body.into_inner();
+    tracing::debug!(provider = ?provider.name(), "Acquired OAuth provider for device token exchange");
 
     // Validate grant_type per RFC 8628 §3.4
-    if !validate_device_grant_type(&exchange_request.grant_type) {
-        return Ok(Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(
-                serde_json::to_vec(&ProxyTokenError {
-                    error: "unsupported_grant_type".to_string(),
-                    error_description: Some(
-                        "grant_type must be urn:ietf:params:oauth:grant-type:device_code"
-                            .to_string(),
-                    ),
-                    error_uri: None,
-                })
-                .unwrap()
-                .into(),
-            )?);
+    if !validate_device_grant_type(&body.grant_type) {
+        return Ok(error_response(
+            StatusCode::BAD_REQUEST,
+            "unsupported_grant_type",
+            Some("grant_type must be urn:ietf:params:oauth:grant-type:device_code".to_string()),
+        ));
     }
 
-    let exchange = AccessTokenExchange::new(exchange_request, device_info);
+    // Look up the login attempt by the v-api-issued device code (stored in
+    // authz_code) and client_id.
+    let attempt = ctx
+        .login
+        .get_login_attempt_for_device_code(&body.device_code, &body.client_id)
+        .await
+        .map_err(|err| {
+            tracing::error!(?err, "Failed to look up device login attempt");
+            internal_error("Failed to look up login attempt")
+        })?
+        .ok_or_else(|| bad_request("Unknown device code or client id"))?;
+
+    // Verify the attempt is still in the New state
+    if attempt.attempt_state != v_model::schema_ext::LoginAttemptState::New {
+        return Ok(error_response(
+            StatusCode::BAD_REQUEST,
+            "invalid_grant",
+            Some("Device code has already been exchanged".to_string()),
+        ));
+    }
+
+    // Check expiration
+    if attempt.expires_at.map(|t| t <= Utc::now()).unwrap_or(false) {
+        return Ok(error_response(
+            StatusCode::BAD_REQUEST,
+            "expired_token",
+            Some("The device code has expired".to_string()),
+        ));
+    }
+
+    // Retrieve the real upstream device_code from the login attempt and proxy
+    // the token exchange to the upstream provider.
+    let upstream_device_code = attempt
+        .provider_device_code
+        .as_deref()
+        .ok_or_else(|| {
+            tracing::error!("Login attempt is missing upstream device code");
+            internal_error("Login attempt is missing upstream device code")
+        })?
+        .to_string();
+
+    let upstream_request = UpstreamDeviceTokenRequest {
+        client_id: device_info.remote_client_id().to_string(),
+        device_code: upstream_device_code,
+        grant_type: body.grant_type.clone(),
+        client_secret: device_info.remote_client_secret().to_string(),
+    };
 
     let client = reqwest::Client::new();
-
     let response = client
-        .request(Method::POST, &device_info.token_endpoint)
-        .header(
-            header::CONTENT_TYPE,
-            &device_info.token_endpoint_content_type,
-        )
+        .request(Method::POST, device_info.token_endpoint())
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
         .header(header::ACCEPT, HeaderValue::from_static("application/json"))
-        .body(
-            // We know that this is safe to unwrap as we just deserialized it via the body Extractor
-            serde_urlencoded::to_string(&exchange.provider).unwrap(),
-        )
+        .body(serde_urlencoded::to_string(&upstream_request).unwrap())
         .send()
         .await
         .tap_err(|err| tracing::error!(?err, "Token exchange request failed"))
         .map_err(internal_error)?;
 
-    // Take a part the response as we will need the individual parts later
     let status = response.status();
     let headers = response.headers().clone();
     let bytes = response.bytes().await.map_err(internal_error)?;
 
-    // We unfortunately can not trust our providers to follow specs and therefore need to do
-    // our own inspection of the response to determine what to do
     if !status.is_success() {
-        // If the server returned a non-success status then we are going to trust the server and
-        // report their error back to the client
-        tracing::debug!(provider = ?path.provider, ?headers, ?status, "Received error response from OAuth provider");
+        // Non-success status — proxy the upstream error through (includes
+        // authorization_pending, slow_down, etc.)
+        tracing::debug!(
+            provider = ?path.provider,
+            ?status,
+            "Received error response from upstream provider during device exchange"
+        );
+        return Ok(proxy_upstream_response(bytes, headers, status));
+    }
 
-        Ok(proxy_upstream_response(bytes, headers, status))
-    } else {
-        // The server gave us back a non-error response but it still may not be a success.
-        // GitHub for instance does not use a status code for indicating the success or failure
-        // of a call. So instead we try to deserialize the body into an access token, with the
-        // understanding that it may fail and we will need to try and treat the response as
-        // an error instead.
+    // Try to parse as a successful token response
+    let parsed: Result<
+        StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>,
+        serde_json::Error,
+    > = serde_json::from_slice(&bytes);
 
-        let parsed: Result<
-            StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>,
-            serde_json::Error,
-        > = serde_json::from_slice(&bytes);
+    match parsed {
+        Ok(parsed) => {
+            // Success! The user has completed the device authorization.
 
-        match parsed {
-            Ok(parsed) => {
-                let info = provider
-                    .get_user_info(parsed.access_token().secret())
-                    .await
-                    .map_err(LoginError::UserInfo)
-                    .tap_err(|err| tracing::error!(?err, "Failed to look up user information"))?;
+            // Claim the login attempt (New -> Complete)
+            let attempt = ctx
+                .login
+                .claim_device_login_attempt(attempt)
+                .await
+                .map_err(|err| {
+                    tracing::warn!(?err, "Failed to claim device login attempt");
+                    internal_error("Failed to claim login attempt")
+                })?;
 
-                tracing::debug!("Verified and validated OAuth user");
+            // Fetch user info from the upstream provider
+            let info = provider
+                .get_user_info(parsed.access_token().secret())
+                .await
+                .map_err(LoginError::UserInfo)
+                .tap_err(|err| tracing::error!(?err, "Failed to look up user information"))?;
 
-                let (api_user_info, api_user_provider) = ctx
-                    .register_api_user(&ctx.builtin_registration_user(), info)
-                    .await?;
+            tracing::debug!("Verified and validated OAuth user via device flow");
 
-                tracing::info!(api_user_id = ?api_user_info.user.id, api_user_provider_id = ?api_user_provider.id, "Retrieved api user to generate device token for");
+            let response = complete_exchange(ctx, info, &*provider, &attempt, false, None).await?;
 
-                let claims =
-                    ctx.generate_claims(&api_user_info.user.id, &api_user_provider.id, None);
-                let token = ctx
-                    .user
-                    .register_access_token(
-                        &ctx.builtin_registration_user(),
-                        ctx.jwt_signer(),
-                        &api_user_info.user.id,
-                        &claims,
-                    )
-                    .await?;
+            let exchange_response = response.0;
 
-                tracing::info!(provider = ?path.provider, api_user_id = ?api_user_info.user.id, "Generated access token");
+            Ok(Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(serde_json::to_string(&exchange_response).unwrap().into())?)
+        }
+        Err(_) => {
+            // Could not parse as a token — might be a GitHub-style 200 error
+            tracing::debug!("Failed to parse a success response from the remote token endpoint");
 
-                Ok(Response::builder()
-                    .status(StatusCode::OK)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(
-                        serde_json::to_string(&ProxyTokenResponse {
-                            access_token: token.signed_token,
-                            token_type: "Bearer".to_string(),
-                            expires_in: Some(claims.exp - Utc::now().timestamp()),
-                            refresh_token: None,
-                            scopes: None,
-                        })
-                        .unwrap()
-                        .into(),
-                    )?)
-            }
-            Err(_) => {
-                // Do not log the error here as we want to ensure we do not leak token information
-                tracing::debug!(
-                    "Failed to parse a success response from the remote token endpoint"
-                );
-
-                Ok(handle_token_parse_failure(
-                    &path.provider.to_string(),
-                    bytes,
-                    headers,
-                    status,
-                ))
-            }
+            Ok(handle_token_parse_failure(
+                &path.provider.to_string(),
+                bytes,
+                headers,
+                status,
+            ))
         }
     }
 }
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
 /// Validate the grant_type for device code exchange per RFC 8628 §3.4.
 fn validate_device_grant_type(grant_type: &str) -> bool {
     grant_type == "urn:ietf:params:oauth:grant-type:device_code"
 }
 
+/// Build a JSON error response body.
+fn error_response(status: StatusCode, error: &str, description: Option<String>) -> Response<Body> {
+    Response::builder()
+        .status(status)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(
+            serde_json::to_vec(&ProxyTokenError {
+                error: error.to_string(),
+                error_description: description,
+                error_uri: None,
+            })
+            .unwrap()
+            .into(),
+        )
+        .unwrap()
+}
+
 /// Headers that are safe to forward from an upstream OAuth provider response.
-/// Only `Content-Type` is needed so the client can parse the body. Polling backoff
-/// is handled via the JSON body per RFC 8628 (`interval` field / `slow_down` error),
-/// not via HTTP headers.
 const FORWARDED_HEADERS: &[header::HeaderName] = &[header::CONTENT_TYPE];
 
-/// Copy only allowlisted headers from an upstream response to avoid forwarding
-/// dangerous headers such as `Set-Cookie`, `Location`, or CORS headers.
+/// Copy only allowlisted headers from an upstream response.
 fn filter_upstream_headers(upstream: &HeaderMap) -> HeaderMap {
     let mut filtered = HeaderMap::new();
     for name in FORWARDED_HEADERS {
@@ -296,8 +451,7 @@ fn filter_upstream_headers(upstream: &HeaderMap) -> HeaderMap {
     filtered
 }
 
-/// Build a response to the client by proxying an upstream provider's response. This is used
-/// when the upstream provider returns a non-success status code.
+/// Build a response to the client by proxying an upstream provider's response.
 fn proxy_upstream_response(bytes: Bytes, headers: HeaderMap, status: StatusCode) -> Response<Body> {
     let mut client_response = Response::new(Body::from(bytes));
     *client_response.headers_mut() = filter_upstream_headers(&headers);
@@ -305,20 +459,16 @@ fn proxy_upstream_response(bytes: Bytes, headers: HeaderMap, status: StatusCode)
     client_response
 }
 
-/// Handle the case where the upstream provider returned a 200 status but the body could not be
-/// parsed as a valid token response. We try to interpret the body as an error response and proxy
-/// it back. If the body is not a recognizable error either, we return our own error.
+/// Handle the case where the upstream provider returned a 200 status but the body
+/// could not be parsed as a valid token response.
 fn handle_token_parse_failure(
     provider_name: &str,
     bytes: Bytes,
     headers: HeaderMap,
     status: StatusCode,
 ) -> Response<Body> {
-    // Try to deserialize the body as an error
     let mut error_response = match serde_json::from_slice::<ProxyTokenError>(&bytes) {
         Ok(error) => {
-            // We found an error in the message body. This is not ideal, but we at
-            // least can understand what the server was trying to tell us
             tracing::debug!(
                 ?error,
                 provider_name,
@@ -328,12 +478,9 @@ fn handle_token_parse_failure(
             let mut client_response = Response::new(Body::from(bytes));
             *client_response.headers_mut() = filter_upstream_headers(&headers);
             *client_response.status_mut() = status;
-
             client_response
         }
         Err(_) => {
-            // We still do not know what the remote server is doing... and need to
-            // cancel the request ourselves
             tracing::warn!("Remote OAuth provider returned a response that we do not understand");
 
             Response::new(
@@ -372,8 +519,6 @@ mod tests {
 
     #[test]
     fn test_upstream_set_cookie_is_stripped_from_error_response() {
-        // A malicious or compromised upstream provider includes a Set-Cookie header
-        // that would set a cookie on our API's domain in the user's browser
         let mut upstream_headers = HeaderMap::new();
         upstream_headers.insert(
             header::CONTENT_TYPE,
@@ -387,12 +532,10 @@ mod tests {
         let body = Bytes::from_static(b"{\"error\": \"authorization_pending\"}");
         let response = proxy_upstream_response(body, upstream_headers, StatusCode::FORBIDDEN);
 
-        // The Set-Cookie header must NOT be forwarded to our client
         assert!(
             response.headers().get(SET_COOKIE).is_none(),
             "Upstream Set-Cookie header must not be forwarded to the client"
         );
-        // But Content-Type should still be forwarded
         assert!(
             response.headers().get(header::CONTENT_TYPE).is_some(),
             "Content-Type should be forwarded from upstream"
@@ -401,8 +544,6 @@ mod tests {
 
     #[test]
     fn test_upstream_cors_headers_are_stripped_from_error_response() {
-        // A malicious upstream provider injects permissive CORS headers that would
-        // weaken our API's cross-origin protections
         let mut upstream_headers = HeaderMap::new();
         upstream_headers.insert(
             header::CONTENT_TYPE,
@@ -420,7 +561,6 @@ mod tests {
         let body = Bytes::from_static(b"{\"error\": \"authorization_pending\"}");
         let response = proxy_upstream_response(body, upstream_headers, StatusCode::BAD_REQUEST);
 
-        // CORS headers must NOT be forwarded from upstream
         assert!(
             response
                 .headers()
@@ -439,8 +579,6 @@ mod tests {
 
     #[test]
     fn test_upstream_location_and_framing_headers_are_stripped_from_token_parse_failure() {
-        // When the upstream returns a 200 status but the body is an error (not a valid
-        // token), handle_token_parse_failure must not forward dangerous headers.
         let mut upstream_headers = HeaderMap::new();
         upstream_headers.insert(
             header::CONTENT_TYPE,
@@ -455,14 +593,12 @@ mod tests {
             HeaderValue::from_static("ALLOW-FROM https://evil.example.com"),
         );
 
-        // Body that parses as a ProxyTokenError but NOT as a valid token
         let body = Bytes::from_static(
             b"{\"error\": \"slow_down\", \"error_description\": null, \"error_uri\": null}",
         );
         let response =
             handle_token_parse_failure("test-provider", body, upstream_headers, StatusCode::OK);
 
-        // Dangerous headers must NOT be forwarded
         assert!(
             response.headers().get(header::LOCATION).is_none(),
             "Upstream Location header must not be forwarded to the client"
@@ -471,7 +607,6 @@ mod tests {
             response.headers().get("x-frame-options").is_none(),
             "Upstream X-Frame-Options header must not be forwarded to the client"
         );
-        // But Content-Type should still be present (set by the function itself)
         assert!(
             response.headers().get(header::CONTENT_TYPE).is_some(),
             "Content-Type should be present on the response"
@@ -480,8 +615,6 @@ mod tests {
 
     #[test]
     fn test_upstream_set_cookie_is_stripped_from_token_parse_failure() {
-        // Even when the upstream returns 200 and the body is a parseable error,
-        // a Set-Cookie header must not be forwarded to our client
         let mut upstream_headers = HeaderMap::new();
         upstream_headers.insert(
             header::CONTENT_TYPE,
@@ -498,7 +631,6 @@ mod tests {
         let response =
             handle_token_parse_failure("test-provider", body, upstream_headers, StatusCode::OK);
 
-        // The Set-Cookie header must NOT be forwarded
         assert!(
             response.headers().get(SET_COOKIE).is_none(),
             "Upstream Set-Cookie header must not be forwarded via token parse failure path"

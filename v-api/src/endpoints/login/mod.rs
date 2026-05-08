@@ -11,7 +11,6 @@ use serde::{
 };
 use thiserror::Error;
 
-
 use crate::{
     permissions::VPermission,
     util::response::{bad_request, internal_error},
@@ -263,12 +262,9 @@ mod tests {
     fn test_redirect_uri_matches_from_multiple_registered() {
         assert!(is_redirect_uri_valid(
             "https://example.com/callback",
-            [
-                "https://other.com/callback",
-                "https://example.com/callback",
-            ]
-            .iter()
-            .copied(),
+            ["https://other.com/callback", "https://example.com/callback",]
+                .iter()
+                .copied(),
         ));
     }
 

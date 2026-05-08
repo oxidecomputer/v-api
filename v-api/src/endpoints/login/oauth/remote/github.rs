@@ -66,7 +66,6 @@ impl GitHubOAuthProvider {
             remote_client_id: device.remote_client_id,
             remote_client_secret: device.remote_client_secret.into(),
             device_code_endpoint: "https://github.com/login/device/code".to_string(),
-            token_endpoint_content_type: "application/x-www-form-urlencoded".to_string(),
             token_endpoint: "https://github.com/login/oauth/access_token".to_string(),
             revocation_endpoint: None,
         });

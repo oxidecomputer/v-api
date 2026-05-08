@@ -296,8 +296,9 @@ where
     let mut attempt = NewLoginAttempt::new(
         provider.name().to_string(),
         query.client_id,
-        query.redirect_uri,
+        Some(query.redirect_uri),
         scope,
+        "authorization_code".to_string(),
     )
     .map_err(|err| {
         tracing::error!(?err, "Attempted to construct invalid login attempt");
@@ -513,7 +514,11 @@ where
         .oauth
         .get_oauth_client(&ctx.builtin_registration_user(), &attempt.client_id)
         .await?;
-    if !client.is_redirect_uri_valid(&attempt.redirect_uri) {
+    if !attempt
+        .redirect_uri
+        .as_deref()
+        .is_some_and(|uri| client.is_redirect_uri_valid(uri))
+    {
         tracing::warn!(
             redirect_uri = ?attempt.redirect_uri,
             client_id = ?attempt.client_id,
@@ -565,6 +570,9 @@ where
     attempt.callback_url().map_err(|err| {
         tracing::error!(?err, redirect_uri = ?attempt.redirect_uri, "Login attempt contains an invalid redirect URI");
         to_internal_error(err)
+    })?.ok_or_else(|| {
+        tracing::error!("Login attempt has no redirect URI");
+        internal_error("Login attempt has no redirect URI")
     })
 }
 
@@ -749,7 +757,7 @@ where
 
     tracing::debug!("Retrieved user information from remote provider");
 
-    complete_exchange(
+    super::complete_exchange(
         ctx,
         info,
         &*provider,
@@ -758,109 +766,6 @@ where
         upstream_token,
     )
     .await
-}
-
-async fn complete_exchange<T>(
-    ctx: &VContext<T>,
-    info: UserInfo,
-    provider: &dyn OAuthProvider,
-    attempt: &LoginAttempt,
-    request_idp_token: bool,
-    upstream_token: Option<String>,
-) -> Result<HttpResponseOk<OAuthAuthzCodeExchangeResponse>, HttpError>
-where
-    T: VAppPermission + PermissionStorage,
-{
-    let idp_token = info.idp_token.clone();
-
-    // Register this user as an API user if needed
-    let (api_user_info, api_user_provider) = ctx
-        .register_api_user(&ctx.builtin_registration_user(), info)
-        .await?;
-
-    // Only return the IdP token if the caller requested it AND the user has permission.
-    // We must resolve the full caller (including group permissions) rather than checking
-    // only the directly assigned user permissions.
-    let idp_token = filter_idp_token(ctx, idp_token, request_idp_token, &api_user_info).await;
-
-    // Revoke the upstream access token whenever it will NOT be returned to the caller.
-    // This covers the cases where the token was never requested, where the user lacks
-    // the RetrieveRemoteAccessToken permission, and where the provider did not return
-    // a token at all.
-    if idp_token.is_none()
-        && let Some(upstream) = upstream_token
-    {
-        revoke_upstream_token(provider, &upstream).await;
-    }
-
-    tracing::info!(api_user_id = ?api_user_info.user.id, "Retrieved api user to generate access token for");
-
-    let scope = attempt
-        .scope
-        .split(' ')
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>();
-
-    let token = ctx
-        .generate_access_token(
-            &ctx.builtin_registration_user(),
-            &api_user_info.user.id,
-            &api_user_provider.id,
-            Some(scope),
-        )
-        .await?;
-
-    Ok(HttpResponseOk(OAuthAuthzCodeExchangeResponse {
-        token_type: "Bearer".to_string(),
-        access_token: token.signed_token,
-        expires_in: token.expires_in,
-        scope: attempt.scope.clone(),
-        idp_token,
-    }))
-}
-
-/// Filter the IdP token based on whether it was requested and whether the user has
-/// the `RetrieveRemoteAccessToken` permission (including permissions inherited from
-/// groups). Returns `None` if either condition is not met.
-async fn filter_idp_token<T>(
-    ctx: &VContext<T>,
-    idp_token: Option<String>,
-    requested: bool,
-    api_user_info: &v_model::ApiUserInfo<T>,
-) -> Option<String>
-where
-    T: VAppPermission + PermissionStorage,
-{
-    if !requested {
-        return None;
-    }
-
-    // Resolve the caller so that group-inherited permissions are included in the
-    // permission check, not just directly-assigned user permissions.
-    let caller = match ctx
-        .user
-        .resolve_caller(api_user_info, crate::context::BasePermissions::Full)
-        .await
-    {
-        Ok(caller) => caller,
-        Err(err) => {
-            tracing::warn!(
-                ?err,
-                "Failed to resolve caller permissions for IdP token check"
-            );
-            return None;
-        }
-    };
-
-    if caller
-        .permissions
-        .can(&VPermission::RetrieveRemoteAccessToken.into())
-    {
-        idp_token
-    } else {
-        tracing::info!("User requested IdP token but lacks RetrieveRemoteAccessToken permission");
-        None
-    }
 }
 
 async fn authorize_code_exchange<T>(
@@ -950,7 +855,7 @@ fn verify_login_attempt(
             error_uri: None,
             state: None,
         })
-    } else if attempt.redirect_uri != redirect_uri {
+    } else if attempt.redirect_uri.as_deref() != Some(redirect_uri) {
         Err(OAuthError {
             error: OAuthErrorCode::InvalidGrant,
             error_description: Some("Invalid redirect uri".to_string()),
@@ -999,46 +904,6 @@ fn verify_login_attempt(
                 state: None,
             }),
         }
-    }
-}
-
-/// Revoke an upstream IdP access token if the provider supports revocation.
-/// Failures are logged but do not propagate — callers should not fail the
-/// overall exchange just because revocation was unsuccessful.
-async fn revoke_upstream_token(provider: &dyn OAuthProvider, token_secret: &str) {
-    let provider_info = match provider.authz_code_flow_info() {
-        Some(info) => info,
-        None => return,
-    };
-
-    if provider_info.remote.revocation_endpoint.is_some() {
-        let client = match provider.as_web_client() {
-            Ok(c) => c,
-            Err(err) => {
-                tracing::warn!(
-                    ?err,
-                    "Failed to build web client for upstream token revocation"
-                );
-                return;
-            }
-        };
-        let oauth_client: oauth2_reqwest::ReqwestClient = provider.client().clone().into();
-        let access_token = oauth2::AccessToken::new(token_secret.to_string());
-        match client.revoke_token(access_token.into()) {
-            Ok(req) => {
-                if let Err(err) = req.request_async(&oauth_client).await {
-                    tracing::warn!(?err, "Failed to revoke upstream IdP access token");
-                }
-            }
-            Err(err) => {
-                tracing::warn!(
-                    ?err,
-                    "Failed to build revocation request for upstream token"
-                );
-            }
-        }
-    } else {
-        tracing::debug!("Provider does not support token revocation")
     }
 }
 
@@ -1142,6 +1007,7 @@ mod tests {
         permissions::VPermission,
     };
 
+    use super::super::{complete_exchange, filter_idp_token};
     use super::{authorize_code_exchange, get_oauth_client, oauth_redirect_response};
 
     /// A minimal no-op `OAuthProvider` for unit tests that need to pass a
@@ -1325,7 +1191,7 @@ mod tests {
             id: TypedUuid::new_v4(),
             attempt_state: LoginAttemptState::New,
             client_id: TypedUuid::new_v4(),
-            redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+            redirect_uri: Some("https://test.oxeng.dev/callback".to_string()),
             state: Some("ox_state".to_string()),
             pkce_challenge: Some("ox_challenge".to_string()),
             pkce_challenge_method: Some("S256".to_string()),
@@ -1339,6 +1205,9 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             scope: String::new(),
+            grant_type: "authorization_code".to_string(),
+            device_code: None,
+            provider_device_code: None,
         };
 
         let response = oauth_redirect_response(
@@ -1464,7 +1333,7 @@ mod tests {
                 id: attempt_id,
                 attempt_state: state,
                 client_id: TypedUuid::new_v4(),
-                redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+                redirect_uri: Some("https://test.oxeng.dev/callback".to_string()),
                 state: Some("ox_state".to_string()),
                 pkce_challenge: Some("ox_challenge".to_string()),
                 pkce_challenge_method: Some("S256".to_string()),
@@ -1478,6 +1347,9 @@ mod tests {
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 scope: String::new(),
+                grant_type: "authorization_code".to_string(),
+                device_code: None,
+                provider_device_code: None,
             };
 
             let mut storage = MockStorage::new();
@@ -1509,7 +1381,7 @@ mod tests {
             id: attempt_id,
             attempt_state: LoginAttemptState::New,
             client_id,
-            redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+            redirect_uri: Some("https://test.oxeng.dev/callback".to_string()),
             state: Some("ox_state".to_string()),
             pkce_challenge: Some("ox_challenge".to_string()),
             pkce_challenge_method: Some("S256".to_string()),
@@ -1523,6 +1395,9 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             scope: String::new(),
+            grant_type: "authorization_code".to_string(),
+            device_code: None,
+            provider_device_code: None,
         };
 
         let mut attempt_store = MockLoginAttemptStore::new();
@@ -1577,7 +1452,7 @@ mod tests {
             id: attempt_id,
             attempt_state: LoginAttemptState::New,
             client_id,
-            redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+            redirect_uri: Some("https://test.oxeng.dev/callback".to_string()),
             state: Some("ox_state".to_string()),
             pkce_challenge: Some("ox_challenge".to_string()),
             pkce_challenge_method: Some("S256".to_string()),
@@ -1591,6 +1466,9 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             scope: String::new(),
+            grant_type: "authorization_code".to_string(),
+            device_code: None,
+            provider_device_code: None,
         };
 
         let mut attempt_store = MockLoginAttemptStore::new();
@@ -1645,7 +1523,7 @@ mod tests {
             id: attempt_id,
             attempt_state: LoginAttemptState::New,
             client_id,
-            redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+            redirect_uri: Some("https://test.oxeng.dev/callback".to_string()),
             state: Some("ox_state".to_string()),
             pkce_challenge: Some("ox_challenge".to_string()),
             pkce_challenge_method: Some("S256".to_string()),
@@ -1659,6 +1537,9 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             scope: String::new(),
+            grant_type: "authorization_code".to_string(),
+            device_code: None,
+            provider_device_code: None,
         };
 
         let mut attempt_store = MockLoginAttemptStore::new();
@@ -1972,7 +1853,7 @@ mod tests {
             id: TypedUuid::new_v4(),
             attempt_state: LoginAttemptState::RemoteAuthenticated,
             client_id: TypedUuid::new_v4(),
-            redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+            redirect_uri: Some("https://test.oxeng.dev/callback".to_string()),
             state: Some("ox_state".to_string()),
             pkce_challenge: Some(challenge.as_str().to_string()),
             pkce_challenge_method: Some("S256".to_string()),
@@ -1986,6 +1867,9 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             scope: String::new(),
+            grant_type: "authorization_code".to_string(),
+            device_code: None,
+            provider_device_code: None,
         };
 
         let bad_client_id = LoginAttempt {
@@ -2004,14 +1888,14 @@ mod tests {
                 &bad_client_id,
                 &attempt.provider,
                 attempt.client_id,
-                &attempt.redirect_uri,
+                attempt.redirect_uri.as_deref().unwrap(),
                 verifier.secret().as_str(),
             )
             .unwrap_err()
         );
 
         let bad_redirect_uri = LoginAttempt {
-            redirect_uri: "https://bad.oxeng.dev/callback".to_string(),
+            redirect_uri: Some("https://bad.oxeng.dev/callback".to_string()),
             ..attempt.clone()
         };
 
@@ -2026,7 +1910,7 @@ mod tests {
                 &bad_redirect_uri,
                 &attempt.provider,
                 attempt.client_id,
-                &attempt.redirect_uri,
+                attempt.redirect_uri.as_deref().unwrap(),
                 verifier.secret().as_str(),
             )
             .unwrap_err()
@@ -2048,7 +1932,7 @@ mod tests {
                 &unconfirmed_state,
                 &attempt.provider,
                 attempt.client_id,
-                &attempt.redirect_uri,
+                attempt.redirect_uri.as_deref().unwrap(),
                 verifier.secret().as_str(),
             )
             .unwrap_err()
@@ -2070,7 +1954,7 @@ mod tests {
                 &already_used_state,
                 &attempt.provider,
                 attempt.client_id,
-                &attempt.redirect_uri,
+                attempt.redirect_uri.as_deref().unwrap(),
                 verifier.secret().as_str(),
             )
             .unwrap_err()
@@ -2092,7 +1976,7 @@ mod tests {
                 &failed_state,
                 &attempt.provider,
                 attempt.client_id,
-                &attempt.redirect_uri,
+                attempt.redirect_uri.as_deref().unwrap(),
                 verifier.secret().as_str(),
             )
             .unwrap_err()
@@ -2114,7 +1998,7 @@ mod tests {
                 &expired,
                 &attempt.provider,
                 attempt.client_id,
-                &attempt.redirect_uri,
+                attempt.redirect_uri.as_deref().unwrap(),
                 verifier.secret().as_str(),
             )
             .unwrap_err()
@@ -2139,7 +2023,7 @@ mod tests {
                 &missing_challenge,
                 &attempt.provider,
                 attempt.client_id,
-                &attempt.redirect_uri,
+                attempt.redirect_uri.as_deref().unwrap(),
                 verifier.secret().as_str(),
             )
             .unwrap_err()
@@ -2161,7 +2045,7 @@ mod tests {
                 &invalid_pkce,
                 &attempt.provider,
                 attempt.client_id,
-                &attempt.redirect_uri,
+                attempt.redirect_uri.as_deref().unwrap(),
                 verifier.secret().as_str(),
             )
             .unwrap_err()
@@ -2173,7 +2057,7 @@ mod tests {
                 &attempt,
                 &attempt.provider,
                 attempt.client_id,
-                &attempt.redirect_uri,
+                attempt.redirect_uri.as_deref().unwrap(),
                 verifier.secret().as_str(),
             )
             .unwrap()
@@ -2189,7 +2073,7 @@ mod tests {
             id: TypedUuid::new_v4(),
             attempt_state: LoginAttemptState::RemoteAuthenticated,
             client_id: TypedUuid::new_v4(),
-            redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+            redirect_uri: Some("https://test.oxeng.dev/callback".to_string()),
             state: Some("ox_state".to_string()),
             pkce_challenge: Some(challenge.as_str().to_string()),
             pkce_challenge_method: Some("S256".to_string()),
@@ -2203,6 +2087,9 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             scope: String::new(),
+            grant_type: "authorization_code".to_string(),
+            device_code: None,
+            provider_device_code: None,
         };
 
         // Exchanging against a different provider must fail
@@ -2217,7 +2104,7 @@ mod tests {
                 &attempt,
                 "github",
                 attempt.client_id,
-                &attempt.redirect_uri,
+                attempt.redirect_uri.as_deref().unwrap(),
                 verifier.secret().as_str(),
             )
             .unwrap_err()
@@ -2230,7 +2117,7 @@ mod tests {
                 &attempt,
                 "google",
                 attempt.client_id,
-                &attempt.redirect_uri,
+                attempt.redirect_uri.as_deref().unwrap(),
                 verifier.secret().as_str(),
             )
             .unwrap()
@@ -2346,7 +2233,7 @@ mod tests {
             mock_filter_idp_token_ctx(vec![VPermission::RetrieveRemoteAccessToken]).await;
         let token = Some("idp-token-value".to_string());
 
-        let result = super::filter_idp_token(&ctx, token, true, &info).await;
+        let result = filter_idp_token(&ctx, token, true, &info).await;
         assert_eq!(result, Some("idp-token-value".to_string()));
     }
 
@@ -2357,7 +2244,7 @@ mod tests {
         let token = Some("idp-token-value".to_string());
 
         // Even with the permission, if not requested the token is not returned
-        let result = super::filter_idp_token(&ctx, token, false, &info).await;
+        let result = filter_idp_token(&ctx, token, false, &info).await;
         assert_eq!(result, None);
     }
 
@@ -2367,7 +2254,7 @@ mod tests {
         let (ctx, info) = mock_filter_idp_token_ctx(vec![VPermission::CreateApiUser]).await;
         let token = Some("idp-token-value".to_string());
 
-        let result = super::filter_idp_token(&ctx, token, true, &info).await;
+        let result = filter_idp_token(&ctx, token, true, &info).await;
         assert_eq!(result, None);
     }
 
@@ -2376,7 +2263,7 @@ mod tests {
         let (ctx, info) = mock_filter_idp_token_ctx(vec![]).await;
         let token = Some("idp-token-value".to_string());
 
-        let result = super::filter_idp_token(&ctx, token, true, &info).await;
+        let result = filter_idp_token(&ctx, token, true, &info).await;
         assert_eq!(result, None);
     }
 
@@ -2386,7 +2273,7 @@ mod tests {
             mock_filter_idp_token_ctx(vec![VPermission::RetrieveRemoteAccessToken]).await;
 
         // Token was None (e.g. revoked upstream) — should stay None regardless of permission
-        let result = super::filter_idp_token(&ctx, None, true, &info).await;
+        let result = filter_idp_token(&ctx, None, true, &info).await;
         assert_eq!(result, None);
     }
 
@@ -2478,7 +2365,7 @@ mod tests {
             id: TypedUuid::new_v4(),
             attempt_state: LoginAttemptState::Complete,
             client_id: TypedUuid::new_v4(),
-            redirect_uri: "https://example.com/callback".to_string(),
+            redirect_uri: Some("https://example.com/callback".to_string()),
             state: Some("test-state".to_string()),
             pkce_challenge: Some("test-challenge".to_string()),
             pkce_challenge_method: Some("S256".to_string()),
@@ -2492,6 +2379,9 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             scope: "user:info:r".to_string(),
+            grant_type: "authorization_code".to_string(),
+            device_code: None,
+            provider_device_code: None,
         }
     }
 
@@ -2506,7 +2396,7 @@ mod tests {
         let info = mock_user_info_with_idp_token();
         let provider = NoOpOAuthProvider::new();
 
-        let response = super::complete_exchange(
+        let response = complete_exchange(
             &ctx,
             info,
             &provider,
@@ -2536,7 +2426,7 @@ mod tests {
         let info = mock_user_info_with_idp_token();
         let provider = NoOpOAuthProvider::new();
 
-        let response = super::complete_exchange(
+        let response = complete_exchange(
             &ctx,
             info,
             &provider,
@@ -2573,7 +2463,7 @@ mod tests {
             id: attempt_id,
             attempt_state: LoginAttemptState::New,
             client_id,
-            redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+            redirect_uri: Some("https://test.oxeng.dev/callback".to_string()),
             state: Some(original_state.to_string()),
             pkce_challenge: Some("ox_challenge".to_string()),
             pkce_challenge_method: Some("S256".to_string()),
@@ -2587,6 +2477,9 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             scope: String::new(),
+            grant_type: "authorization_code".to_string(),
+            device_code: None,
+            provider_device_code: None,
         };
 
         let mut attempt_store = MockLoginAttemptStore::new();
@@ -2658,7 +2551,7 @@ mod tests {
 
         let provider = NoOpOAuthProvider::new();
 
-        let response = super::complete_exchange(&ctx, info, &provider, &attempt, false, None)
+        let response = complete_exchange(&ctx, info, &provider, &attempt, false, None)
             .await
             .unwrap()
             .0;
@@ -2688,7 +2581,7 @@ mod tests {
         let info = mock_user_info_with_idp_token();
         let provider = NoOpOAuthProvider::new();
 
-        let response = super::complete_exchange(
+        let response = complete_exchange(
             &ctx,
             info,
             &provider,
@@ -2725,7 +2618,7 @@ mod tests {
             id: attempt_id,
             attempt_state: LoginAttemptState::New,
             client_id,
-            redirect_uri: deregistered_uri.to_string(),
+            redirect_uri: Some(deregistered_uri.to_string()),
             state: Some("test-state".to_string()),
             pkce_challenge: Some("test-challenge".to_string()),
             pkce_challenge_method: Some("S256".to_string()),
@@ -2739,6 +2632,9 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             scope: "user:info:r".to_string(),
+            grant_type: "authorization_code".to_string(),
+            device_code: None,
+            provider_device_code: None,
         };
 
         let mut attempt_store = MockLoginAttemptStore::new();
@@ -2816,7 +2712,7 @@ mod tests {
             id: TypedUuid::new_v4(),
             attempt_state: LoginAttemptState::RemoteAuthenticated,
             client_id: TypedUuid::new_v4(),
-            redirect_uri: "https://test.oxeng.dev/callback".to_string(),
+            redirect_uri: Some("https://test.oxeng.dev/callback".to_string()),
             state: Some("test-state".to_string()),
             pkce_challenge: Some("test-challenge".to_string()),
             pkce_challenge_method: Some("S256".to_string()),
@@ -2830,6 +2726,9 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             scope: "user:info:r".to_string(),
+            grant_type: "authorization_code".to_string(),
+            device_code: None,
+            provider_device_code: None,
         };
 
         // The mock store simulates a real database: it only returns the

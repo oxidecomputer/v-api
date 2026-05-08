@@ -6,7 +6,7 @@ use newtype_uuid::TypedUuid;
 use oauth2::CsrfToken;
 use std::sync::Arc;
 use v_model::{
-    LoginAttempt, LoginAttemptId, LoginAttemptState, NewLoginAttempt,
+    LoginAttempt, LoginAttemptId, LoginAttemptState, NewLoginAttempt, OAuthClientId,
     storage::{ListPagination, LoginAttemptFilter, LoginAttemptStore, StoreError},
 };
 
@@ -102,6 +102,46 @@ where
             LoginAttemptState::RemoteAuthenticated,
         )
         .await
+    }
+
+    /// Look up a login attempt by the v-api-issued device code and the client
+    /// id. Returns `None` if no matching attempt is found.
+    pub async fn get_login_attempt_for_device_code(
+        &self,
+        device_code: &str,
+        client_id: &TypedUuid<OAuthClientId>,
+    ) -> Result<Option<LoginAttempt>, StoreError> {
+        let filter = LoginAttemptFilter {
+            attempt_state: Some(vec![LoginAttemptState::New]),
+            client_id: Some(vec![*client_id]),
+            device_code: Some(vec![device_code.to_string()]),
+            ..Default::default()
+        };
+
+        let mut attempts = LoginAttemptStore::list(
+            &*self.storage,
+            filter,
+            &ListPagination {
+                offset: 0,
+                limit: 1,
+            },
+        )
+        .await?;
+
+        Ok(attempts.pop())
+    }
+
+    /// Atomically claim a device flow login attempt by transitioning it from `New`
+    /// to `Complete`. Device flow attempts skip the `RemoteAuthenticated` state
+    /// because the API server proxies both the authorization and token exchange.
+    pub async fn claim_device_login_attempt(
+        &self,
+        attempt: LoginAttempt,
+    ) -> Result<LoginAttempt, StoreError> {
+        let mut update: NewLoginAttempt = attempt.into();
+        update.attempt_state = LoginAttemptState::Complete;
+
+        LoginAttemptStore::update_if_state(&*self.storage, update, LoginAttemptState::New).await
     }
 
     pub async fn fail_login_attempt(

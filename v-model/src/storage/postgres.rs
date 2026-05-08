@@ -706,6 +706,7 @@ impl LoginAttemptStore for PostgresStore {
             attempt_state,
             authz_code,
             provider,
+            device_code,
         } = filter;
 
         if let Some(id) = id {
@@ -736,6 +737,10 @@ impl LoginAttemptStore for PostgresStore {
             query = query.filter(login_attempt::provider.eq_any(provider));
         }
 
+        if let Some(device_code) = device_code {
+            query = query.filter(login_attempt::device_code.eq_any(device_code));
+        }
+
         let results = query
             .offset(pagination.offset)
             .limit(pagination.limit)
@@ -764,6 +769,9 @@ impl LoginAttemptStore for PostgresStore {
                 login_attempt::provider_authz_code.eq(attempt.provider_authz_code),
                 login_attempt::provider_error.eq(attempt.provider_error),
                 login_attempt::scope.eq(attempt.scope),
+                login_attempt::grant_type.eq(attempt.grant_type),
+                login_attempt::device_code.eq(attempt.device_code),
+                login_attempt::provider_device_code.eq(attempt.provider_device_code),
             ))
             .on_conflict(login_attempt::id)
             .do_update()
@@ -799,6 +807,8 @@ impl LoginAttemptStore for PostgresStore {
             login_attempt::error.eq(attempt.error),
             login_attempt::provider_authz_code.eq(attempt.provider_authz_code),
             login_attempt::provider_error.eq(attempt.provider_error),
+            login_attempt::device_code.eq(attempt.device_code),
+            login_attempt::provider_device_code.eq(attempt.provider_device_code),
         ))
         .get_result_async::<LoginAttemptModel>(&*conn)
         .await

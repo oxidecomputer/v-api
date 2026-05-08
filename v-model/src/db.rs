@@ -84,7 +84,7 @@ pub struct LoginAttemptModel {
     pub id: Uuid,
     pub attempt_state: LoginAttemptState,
     pub client_id: Uuid,
-    pub redirect_uri: String,
+    pub redirect_uri: Option<String>,
     pub state: Option<String>,
     pub pkce_challenge: Option<String>,
     pub pkce_challenge_method: Option<String>,
@@ -98,6 +98,9 @@ pub struct LoginAttemptModel {
     pub provider_error: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub grant_type: String,
+    pub device_code: Option<String>,
+    pub provider_device_code: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
