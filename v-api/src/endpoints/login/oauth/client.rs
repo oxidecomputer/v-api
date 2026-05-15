@@ -56,10 +56,13 @@ where
     // Create the new client
     let client = ctx.oauth.create_oauth_client(&caller).await?;
 
-    // Give the caller permission to perform actions on the client
+    // Give the caller permission to perform actions on the client they just created.
+    // This uses the registration caller which has sufficient privileges to grant these
+    // permissions on behalf of the system.
+    let registration_caller = ctx.builtin_registration_user();
     ctx.user
         .add_permissions_to_user(
-            &caller,
+            &registration_caller,
             &caller.id,
             vec![
                 VPermission::GetOAuthClient(client.id),

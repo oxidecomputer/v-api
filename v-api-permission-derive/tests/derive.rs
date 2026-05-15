@@ -344,22 +344,21 @@ fn test_implies_system_manage_group_membership_all() {
 }
 
 #[test]
-fn test_implies_system_create_oauth_client_implies_manage() {
+fn test_implies_system_create_oauth_client_does_not_imply_manage() {
     use v_model::OAuthClientId;
 
     let client_id = TypedUuid::<OAuthClientId>::new_v4();
 
-    // CreateOAuthClient implies Get/Manage for any client instance
-    assert!(VPermission::implies(
+    // CreateOAuthClient must NOT imply Get/Manage on arbitrary clients.
+    // Auto-granting after creation uses an internal system caller.
+    assert!(!VPermission::implies(
         &VPermission::CreateOAuthClient,
         &VPermission::GetOAuthClient(client_id),
     ));
-    assert!(VPermission::implies(
+    assert!(!VPermission::implies(
         &VPermission::CreateOAuthClient,
         &VPermission::ManageOAuthClient(client_id),
     ));
-
-    // But not the All variants
     assert!(!VPermission::implies(
         &VPermission::CreateOAuthClient,
         &VPermission::GetOAuthClientsAll,
@@ -371,16 +370,16 @@ fn test_implies_system_create_oauth_client_implies_manage() {
 }
 
 #[test]
-fn test_implies_system_create_magic_link_client_implies_manage() {
+fn test_implies_system_create_magic_link_client_does_not_imply_manage() {
     use v_model::MagicLinkId;
 
     let client_id = TypedUuid::<MagicLinkId>::new_v4();
 
-    assert!(VPermission::implies(
+    assert!(!VPermission::implies(
         &VPermission::CreateMagicLinkClient,
         &VPermission::GetMagicLinkClient(client_id),
     ));
-    assert!(VPermission::implies(
+    assert!(!VPermission::implies(
         &VPermission::CreateMagicLinkClient,
         &VPermission::ManageMagicLinkClient(client_id),
     ));

@@ -753,11 +753,7 @@ fn system_permission_tokens() -> TokenStream {
             )]
             ManageMappersAll,
 
-            #[v_api(
-                implies(variant = GetOAuthClient),
-                implies(variant = ManageOAuthClient),
-                scope(to = "oauth:client:w", from = "oauth:client:w")
-            )]
+            #[v_api(scope(to = "oauth:client:w", from = "oauth:client:w"))]
             CreateOAuthClient,
             #[v_api(
                 contract(kind = append, variant = GetOAuthClients),
@@ -806,11 +802,7 @@ fn system_permission_tokens() -> TokenStream {
             )]
             ManageOAuthClientsAll,
 
-            #[v_api(
-                implies(variant = GetMagicLinkClient),
-                implies(variant = ManageMagicLinkClient),
-                scope(to = "mlink:client:w", from = "mlink:client:w")
-            )]
+            #[v_api(scope(to = "mlink:client:w", from = "mlink:client:w"))]
             CreateMagicLinkClient,
             #[v_api(
                 contract(kind = append, variant = GetMagicLinkClients),
