@@ -5,16 +5,12 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use newtype_uuid::{GenericUuid, TypedUuid};
-use std::{
-    collections::{BTreeSet, HashMap},
-    error::Error,
-    sync::Arc,
-};
+use std::{collections::HashMap, error::Error, sync::Arc};
 use thiserror::Error;
 use tracing::{Instrument, info_span, instrument};
 use uuid::Uuid;
 use v_model::{
-    AccessGroupId, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserInfo,
+    AccessGroup, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserInfo,
     ApiUserProvider, ArcMap, NewAccessToken, NewApiKey, NewApiUser, NewApiUserContactEmail,
     NewApiUserProvider, Permissions, UserId, UserProviderId,
     permissions::{AsScope, Caller, Permission, PermissionError, PermissionStorage},
@@ -387,13 +383,21 @@ where
         &self,
         caller: &Caller<T>,
         permissions: Permissions<T>,
-        groups: BTreeSet<TypedUuid<AccessGroupId>>,
+        groups: Vec<AccessGroup<T>>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.can(&VPermission::CreateApiUser.into()) {
+        let group_permissions: Permissions<T> = groups
+            .iter()
+            .flat_map(|g| g.permissions.iter().cloned())
+            .collect();
+
+        if caller.can(&VPermission::CreateApiUser.into())
+            && caller.can_grant_all(&permissions)
+            && caller.can_grant_all(&group_permissions)
+        {
             let mut new_user = NewApiUser {
                 id: TypedUuid::new_v4(),
                 permissions,
-                groups,
+                groups: groups.into_iter().map(|g| g.id).collect(),
             };
             new_user.permissions = <T as PermissionStorage>::contract(&new_user.permissions);
             Ok(ApiUserStore::upsert(&*self.storage, new_user).await?)
@@ -435,7 +439,8 @@ where
                 VPermission::ManageApiUsersAll.into(),
             ]
             .iter(),
-        ) {
+        ) && caller.can_grant_all(&new_permissions)
+        {
             let info = self.get_api_user(caller, user_id).await?;
 
             let mut user_update: NewApiUser<T> = info.user.into();

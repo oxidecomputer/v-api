@@ -502,9 +502,23 @@ where
                     "Did not find any existing users. Registering a new user."
                 );
 
+                // Resolve the full groups so that create_api_user can verify
+                // the caller is allowed to grant the permissions they carry.
+                let groups = self
+                    .group
+                    .list_groups(
+                        caller,
+                        v_model::storage::AccessGroupFilter {
+                            id: Some(mapped_groups.into_iter().collect()),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .inner_err_into()?;
+
                 let user = self
                     .user
-                    .create_api_user(caller, mapped_permissions, mapped_groups)
+                    .create_api_user(caller, mapped_permissions, groups)
                     .await
                     .inner_err_into()?;
 
@@ -641,13 +655,15 @@ where
         api_user_id: &TypedUuid<UserId>,
         group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
+        let group = self.group.get_group(caller, group_id).await?;
         if caller.any(
             &mut [
                 VPermission::ManageGroupMembership(*group_id).into(),
                 VPermission::ManageGroupMembershipsAll.into(),
             ]
             .iter(),
-        ) {
+        ) && caller.can_grant_all(&group.permissions)
+        {
             // TODO: This needs to be wrapped in a transaction. That requires reworking the way the
             // store traits are handled. Ideally we could have an API that still abstracts away the
             // underlying connection management while allowing for transactions. Possibly something

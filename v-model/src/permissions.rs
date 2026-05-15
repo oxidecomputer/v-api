@@ -73,6 +73,27 @@ where
         result
     }
 
+    /// Returns true if this caller's permissions are sufficient to grant `target` to another
+    /// entity. This checks the permission hierarchy (e.g., holding an "All" permission
+    /// implies specific instance permissions).
+    pub fn can_grant(&self, target: &T) -> bool
+    where
+        T: PermissionStorage,
+    {
+        let result = self.permissions.can_grant(target);
+        tracing::trace!(?target, ?result, "Test if caller can grant");
+        result
+    }
+
+    /// Returns true if this caller's permissions are sufficient to grant all of the target
+    /// permissions to another entity.
+    pub fn can_grant_all(&self, targets: &Permissions<T>) -> bool
+    where
+        T: PermissionStorage,
+    {
+        self.permissions.can_grant_all(targets)
+    }
+
     pub fn insert<U>(&mut self, value: U) -> Option<Arc<U>>
     where
         U: Send + Sync + 'static,
@@ -202,6 +223,23 @@ where
     }
 }
 
+impl<T> Permissions<T>
+where
+    T: Permission + PermissionStorage,
+{
+    /// Returns true if the permissions held in this set are sufficient to grant `target`.
+    /// This checks whether any held permission implies the target permission.
+    pub fn can_grant(&self, target: &T) -> bool {
+        self.iter().any(|held| T::implies(held, target))
+    }
+
+    /// Returns true if the permissions held in this set are sufficient to grant all of the
+    /// target permissions. Every target permission must be implied by at least one held permission.
+    pub fn can_grant_all(&self, targets: &Permissions<T>) -> bool {
+        targets.iter().all(|target| self.can_grant(target))
+    }
+}
+
 impl<T> IntoIterator for Permissions<T>
 where
     T: Permission,
@@ -300,6 +338,13 @@ pub trait PermissionStorage {
         actor_permissions: Option<&Permissions<Self>>,
         extensions: &ArcMap,
     ) -> Permissions<Self>
+    where
+        Self: Sized;
+
+    /// Returns true if holding permission `held` implies that you effectively also have `target`.
+    /// This is used for privilege escalation checks: a caller can only grant permissions that
+    /// are implied by permissions they already hold.
+    fn implies(held: &Self, target: &Self) -> bool
     where
         Self: Sized;
 }

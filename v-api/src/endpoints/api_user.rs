@@ -20,7 +20,7 @@ use v_model::{
     AccessGroupId, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserProvider, NewApiKey, NewApiUser,
     UserId,
     permissions::{Caller, Permission, PermissionStorage, Permissions},
-    storage::{ApiUserFilter, ApiUserProviderFilter, ListPagination},
+    storage::{AccessGroupFilter, ApiUserFilter, ApiUserProviderFilter, ListPagination},
 };
 
 use crate::{
@@ -224,9 +224,22 @@ where
     T: VAppPermission + JsonSchema + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
+    // Resolve the full groups so that create_api_user can verify the caller
+    // is allowed to grant the permissions they carry.
+    let groups = ctx
+        .group
+        .list_groups(
+            &caller,
+            AccessGroupFilter {
+                id: Some(body.group_ids.into_iter().collect()),
+                ..Default::default()
+            },
+        )
+        .await?;
+
     let info = ctx
         .user
-        .create_api_user(&caller, body.permissions, body.group_ids)
+        .create_api_user(&caller, body.permissions, groups)
         .await?;
 
     let filter = ApiUserProviderFilter {
@@ -775,8 +788,8 @@ mod tests {
         ApiKey, ApiUser, ApiUserContactEmail, ApiUserInfo, ApiUserProvider, NewApiUser,
         permissions::{Caller, Permissions},
         storage::{
-            ApiKeyFilter, ListPagination, MockApiKeyStore, MockApiUserContactEmailStore,
-            MockApiUserProviderStore, MockApiUserStore, StoreError,
+            ApiKeyFilter, ListPagination, MockAccessGroupStore, MockApiKeyStore,
+            MockApiUserContactEmailStore, MockApiUserProviderStore, MockApiUserStore, StoreError,
         },
     };
 
@@ -844,9 +857,15 @@ mod tests {
             .expect_list()
             .returning(|_, _| Ok(vec![]));
 
+        let mut access_group_store = MockAccessGroupStore::new();
+        access_group_store
+            .expect_list()
+            .returning(|_, _| Ok(vec![]));
+
         let mut storage = MockStorage::new();
         storage.api_user_store = Some(Arc::new(store));
         storage.api_user_provider_store = Some(Arc::new(api_user_provider_store));
+        storage.access_group_store = Some(Arc::new(access_group_store));
 
         let ctx = mock_context(Arc::new(storage)).await;
 
@@ -897,7 +916,7 @@ mod tests {
         .await;
 
         assert!(resp.is_err());
-        assert_eq!(get_status(&resp), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

@@ -33,19 +33,36 @@ where
         self.storage = storage;
     }
 
-    pub async fn get_groups(
+    pub async fn get_group(
         &self,
         caller: &Caller<T>,
+        group_id: &TypedUuid<AccessGroupId>,
+    ) -> ResourceResult<AccessGroup<T>, StoreError> {
+        if caller.any(
+            [
+                VPermission::GetGroup(*group_id).into(),
+                VPermission::GetGroupsAll.into(),
+            ]
+            .iter(),
+        ) {
+            AccessGroupStore::get(&*self.storage, group_id, false)
+                .await
+                .optional()
+        } else {
+            resource_restricted()
+        }
+    }
+
+    pub async fn list_groups(
+        &self,
+        caller: &Caller<T>,
+        filter: AccessGroupFilter,
     ) -> ResourceResult<Vec<AccessGroup<T>>, StoreError> {
-        let mut groups = AccessGroupStore::list(
-            &*self.storage,
-            AccessGroupFilter::default(),
-            &ListPagination::unlimited(),
-        )
-        .await?;
+        let mut groups =
+            AccessGroupStore::list(&*self.storage, filter, &ListPagination::unlimited()).await?;
         groups.retain(|group| {
             caller.any(
-                &mut [
+                [
                     VPermission::GetGroupsAll.into(),
                     VPermission::GetGroup(group.id).into(),
                 ]
@@ -56,12 +73,20 @@ where
         Ok(groups)
     }
 
+    pub async fn get_groups(
+        &self,
+        caller: &Caller<T>,
+    ) -> ResourceResult<Vec<AccessGroup<T>>, StoreError> {
+        self.list_groups(caller, AccessGroupFilter::default()).await
+    }
+
     pub async fn create_group(
         &self,
         caller: &Caller<T>,
         group: NewAccessGroup<T>,
     ) -> ResourceResult<AccessGroup<T>, StoreError> {
-        if caller.can(&VPermission::CreateGroup.into()) {
+        if caller.can(&VPermission::CreateGroup.into()) && caller.can_grant_all(&group.permissions)
+        {
             Ok(AccessGroupStore::upsert(&*self.storage, &group).await?)
         } else {
             resource_restricted()
@@ -79,7 +104,8 @@ where
                 VPermission::ManageGroupsAll.into(),
             ]
             .iter(),
-        ) {
+        ) && caller.can_grant_all(&group.permissions)
+        {
             Ok(AccessGroupStore::upsert(&*self.storage, &group).await?)
         } else {
             resource_restricted()
