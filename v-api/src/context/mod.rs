@@ -485,7 +485,7 @@ where
             .await
             .inner_err_into()?;
 
-        let (mut mapped_permissions, mut mapped_groups) = self
+        let (mapped_permissions, mapped_groups) = self
             .mapping
             .get_mapped_fields(caller, &info)
             .await
@@ -566,22 +566,22 @@ where
 
                 tracing::info!(?provider.id, ?provider.user_id, "Updating found user permissions and groups");
 
-                // Update the found user to ensure it has at least the mapped permissions and groups
-                let user = self
-                    .user
-                    .get_api_user(caller, &provider.user_id)
+                // Add mapped permissions to the existing user
+                self.user
+                    .add_permissions_to_user(caller, &provider.user_id, mapped_permissions)
                     .await
                     .inner_err_into()?;
 
-                tracing::info!(?user.user.id, "Updating found user permissions and groups");
-
-                let mut update: NewApiUser<T> = user.user.into();
-                update.permissions.append(&mut mapped_permissions);
-                update.groups.append(&mut mapped_groups);
+                // Add mapped groups to the existing user
+                for group_id in &mapped_groups {
+                    self.add_api_user_to_group(caller, &provider.user_id, group_id)
+                        .await
+                        .inner_err_into()?;
+                }
 
                 let updated_user = self
                     .user
-                    .update_api_user(caller, update)
+                    .get_api_user(caller, &provider.user_id)
                     .await
                     .inner_err_into()?;
 

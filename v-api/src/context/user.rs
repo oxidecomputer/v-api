@@ -380,27 +380,33 @@ where
             && caller.can_grant_all(&permissions)
             && caller.can_grant_all(&group_permissions)
         {
-            let mut new_user = NewApiUser {
+            let new_user = NewApiUser {
                 id: TypedUuid::new_v4(),
                 permissions,
                 groups: groups.into_iter().map(|g| g.id).collect(),
             };
-            new_user.permissions = <T as PermissionStorage>::contract(&new_user.permissions);
-            Ok(ApiUserStore::upsert(&*self.storage, new_user).await?)
+            self.save_api_user(new_user).await
         } else {
             resource_restricted()
         }
     }
 
-    #[instrument(skip(self, caller, api_user), fields(caller = ?caller.id))]
-    pub async fn update_api_user(
+    /// Replaces the direct permissions on a user. Group membership is not affected.
+    /// The caller must hold every permission that is being newly added.
+    #[instrument(skip(self, caller, user_id, permissions), fields(caller = ?caller.id))]
+    pub async fn set_api_user_permissions(
         &self,
         caller: &Caller<T>,
-        mut api_user: NewApiUser<T>,
+        user_id: &TypedUuid<UserId>,
+        permissions: Permissions<T>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.can(&VPermission::ManageApiUser(api_user.id).into()) {
-            api_user.permissions = <T as PermissionStorage>::contract(&api_user.permissions);
-            Ok(ApiUserStore::upsert(&*self.storage, api_user).await?)
+        if caller.can(&VPermission::ManageApiUser(*user_id).into())
+            && caller.can_grant_all(&permissions)
+        {
+            let info = self.get_api_user(caller, user_id).await?;
+            let mut update: NewApiUser<T> = info.user.into();
+            update.permissions = permissions;
+            self.save_api_user(update).await
         } else {
             resource_restricted()
         }
@@ -424,10 +430,64 @@ where
                 user_update.permissions.insert(permission);
             }
 
-            self.update_api_user(caller, user_update).await
+            self.save_api_user(user_update).await
         } else {
             resource_restricted()
         }
+    }
+
+    /// Adds a single permission to a user. The caller must hold the permission being added.
+    #[instrument(skip(self, caller, user_id, permission), fields(caller = ?caller.id))]
+    pub async fn add_permission_to_user(
+        &self,
+        caller: &Caller<T>,
+        user_id: &TypedUuid<UserId>,
+        permission: T,
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
+        if caller.can(&VPermission::ManageApiUser(*user_id).into()) && caller.can_grant(&permission)
+        {
+            let info = self.get_api_user(caller, user_id).await?;
+
+            let mut user_update: NewApiUser<T> = info.user.into();
+            tracing::info!(id = ?user_id, ?permission, "Adding permission to user");
+            user_update.permissions.insert(permission);
+
+            self.save_api_user(user_update).await
+        } else {
+            resource_restricted()
+        }
+    }
+
+    /// Removes a single permission from a user. The caller does not need to hold the
+    /// permission being removed, only the ability to manage the target user.
+    #[instrument(skip(self, caller, user_id, permission), fields(caller = ?caller.id))]
+    pub async fn remove_permission_from_user(
+        &self,
+        caller: &Caller<T>,
+        user_id: &TypedUuid<UserId>,
+        permission: &T,
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
+        if caller.can(&VPermission::ManageApiUser(*user_id).into()) {
+            let info = self.get_api_user(caller, user_id).await?;
+
+            let mut user_update: NewApiUser<T> = info.user.into();
+            tracing::info!(id = ?user_id, ?permission, "Removing permission from user");
+            user_update.permissions.remove(permission);
+
+            self.save_api_user(user_update).await
+        } else {
+            resource_restricted()
+        }
+    }
+
+    /// Contracts permissions and persists the user. Callers are responsible for performing
+    /// any authorization and escalation checks before calling this method.
+    async fn save_api_user(
+        &self,
+        mut api_user: NewApiUser<T>,
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
+        api_user.permissions = <T as PermissionStorage>::contract(&api_user.permissions);
+        Ok(ApiUserStore::upsert(&*self.storage, api_user).await?)
     }
 
     #[instrument(skip(self, caller, token, api_user_id), fields(caller = ?caller.id))]
