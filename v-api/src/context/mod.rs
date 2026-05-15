@@ -1277,7 +1277,7 @@ pub(crate) mod test_mocks {
     // Construct a mock context that can be used in tests
     pub async fn mock_context(storage: Arc<MockStorage>) -> VContext<VPermission> {
         let MockKey { signer, verifier } = mock_key("test");
-        let mut ctx = VContextBuilder::<VPermission>::new()
+        let ctx = VContextBuilder::<VPermission>::new()
             .with_public_url("https://test_public_url".to_string())
             .with_storage(storage)
             .with_jwt_expiration(JwtConfig::default().default_expiration)

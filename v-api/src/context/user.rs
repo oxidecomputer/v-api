@@ -497,7 +497,13 @@ where
         token: NewApiKey<T>,
         api_user_id: &TypedUuid<UserId>,
     ) -> ResourceResult<ApiKey<T>, StoreError> {
-        if caller.can(&VPermission::CreateApiKey(*api_user_id).into()) {
+        let can_create = caller.can(&VPermission::CreateApiKey(*api_user_id).into());
+        let can_grant = token
+            .permissions
+            .as_ref()
+            .is_none_or(|p| caller.can_grant_all(p));
+
+        if can_create && can_grant {
             Ok(ApiKeyStore::upsert(&*self.storage, token).await?)
         } else {
             resource_restricted()
