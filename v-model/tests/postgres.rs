@@ -40,6 +40,23 @@ enum TestPermission {
     DeleteApiKey(TypedUuid<UserId>),
 }
 
+impl v_model::permissions::PermissionStorage for TestPermission {
+    fn contract(collection: &v_model::Permissions<Self>) -> v_model::Permissions<Self> {
+        collection.clone()
+    }
+    fn expand(
+        collection: &v_model::Permissions<Self>,
+        _actor: &v_model::ApiUser<Self>,
+        _actor_permissions: Option<&v_model::Permissions<Self>>,
+        _extensions: &v_model::permissions::ArcMap,
+    ) -> v_model::Permissions<Self> {
+        collection.clone()
+    }
+    fn implies(held: &Self, target: &Self) -> bool {
+        held == target
+    }
+}
+
 // A fresh test database that will be created and migrated for use in a test. At the end of the
 // the test (or when the database is dropped) the database will be deleted
 #[derive(Debug)]

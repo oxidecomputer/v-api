@@ -11,7 +11,7 @@ use tracing::instrument;
 use v_model::{
     AccessGroupId,
     permissions::{Caller, Permissions},
-    storage::StoreError,
+    storage::{AccessGroupFilter, StoreError},
 };
 
 use crate::{
@@ -63,7 +63,7 @@ where
         tracing::trace!("Running default mapper");
         let groups = self
             .group
-            .get_groups(&self.caller)
+            .list_groups(&self.caller, AccessGroupFilter::default())
             .await?
             .into_iter()
             .filter_map(|group| {

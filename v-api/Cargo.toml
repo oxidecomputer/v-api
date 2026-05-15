@@ -7,7 +7,7 @@ publish.workspace = true
 [features]
 default = ["sagas"]
 local-dev = []
-sagas = ["slog", "steno", "v-model/sagas"]
+sagas = ["slog", "steno", "v-api-permission-derive/sagas", "v-model/sagas"]
 
 [dependencies]
 anyhow = { workspace = true }

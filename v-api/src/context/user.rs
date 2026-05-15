@@ -5,16 +5,12 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use newtype_uuid::{GenericUuid, TypedUuid};
-use std::{
-    collections::{BTreeSet, HashMap},
-    error::Error,
-    sync::Arc,
-};
+use std::{collections::HashMap, error::Error, sync::Arc};
 use thiserror::Error;
 use tracing::{Instrument, info_span, instrument};
 use uuid::Uuid;
 use v_model::{
-    AccessGroupId, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserInfo,
+    AccessGroup, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserInfo,
     ApiUserProvider, ArcMap, NewAccessToken, NewApiKey, NewApiUser, NewApiUserContactEmail,
     NewApiUserProvider, Permissions, UserId, UserProviderId,
     permissions::{AsScope, Caller, Permission, PermissionError, PermissionStorage},
@@ -219,7 +215,7 @@ where
                         UserContextError::InvalidKey
                     })?);
 
-                    let mut key = if caller.any(&mut [VPermission::GetApiKey(id).into(), VPermission::GetApiKeysAll.into()].iter()) {
+                    let mut key = if caller.can(&VPermission::GetApiKey(id).into()) {
                         Ok(ApiKeyStore::list(
                             &*self.storage,
                             ApiKeyFilter {
@@ -334,13 +330,7 @@ where
         caller: &Caller<T>,
         id: &TypedUuid<UserId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::GetApiUser(*id).into(),
-                VPermission::GetApiUsersAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::GetApiUser(*id).into()) {
             let mut info = ApiUserStore::get(&*self.storage, id, false)
                 .await
                 .optional()?;
@@ -369,15 +359,7 @@ where
     ) -> ResourceResult<Vec<ApiUserInfo<T>>, StoreError> {
         let mut users = ApiUserStore::list(&*self.storage, filter, pagination).await?;
 
-        users.retain(|info| {
-            caller.any(
-                &mut [
-                    VPermission::GetApiUser(info.user.id).into(),
-                    VPermission::GetApiUsersAll.into(),
-                ]
-                .iter(),
-            )
-        });
+        users.retain(|info| caller.can(&VPermission::GetApiUser(info.user.id).into()));
 
         Ok(users)
     }
@@ -387,36 +369,44 @@ where
         &self,
         caller: &Caller<T>,
         permissions: Permissions<T>,
-        groups: BTreeSet<TypedUuid<AccessGroupId>>,
+        groups: Vec<AccessGroup<T>>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.can(&VPermission::CreateApiUser.into()) {
-            let mut new_user = NewApiUser {
+        let group_permissions: Permissions<T> = groups
+            .iter()
+            .flat_map(|g| g.permissions.iter().cloned())
+            .collect();
+
+        if caller.can(&VPermission::CreateApiUser.into())
+            && caller.can_grant_all(&permissions)
+            && caller.can_grant_all(&group_permissions)
+        {
+            let new_user = NewApiUser {
                 id: TypedUuid::new_v4(),
                 permissions,
-                groups,
+                groups: groups.into_iter().map(|g| g.id).collect(),
             };
-            new_user.permissions = <T as PermissionStorage>::contract(&new_user.permissions);
-            Ok(ApiUserStore::upsert(&*self.storage, new_user).await?)
+            self.save_api_user(new_user).await
         } else {
             resource_restricted()
         }
     }
 
-    #[instrument(skip(self, caller, api_user), fields(caller = ?caller.id))]
-    pub async fn update_api_user(
+    /// Replaces the direct permissions on a user. Group membership is not affected.
+    /// The caller must hold every permission that is being newly added.
+    #[instrument(skip(self, caller, user_id, permissions), fields(caller = ?caller.id))]
+    pub async fn set_api_user_permissions(
         &self,
         caller: &Caller<T>,
-        mut api_user: NewApiUser<T>,
+        user_id: &TypedUuid<UserId>,
+        permissions: Permissions<T>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageApiUser(api_user.id).into(),
-                VPermission::ManageApiUsersAll.into(),
-            ]
-            .iter(),
-        ) {
-            api_user.permissions = <T as PermissionStorage>::contract(&api_user.permissions);
-            Ok(ApiUserStore::upsert(&*self.storage, api_user).await?)
+        if caller.can(&VPermission::ManageApiUser(*user_id).into())
+            && caller.can_grant_all(&permissions)
+        {
+            let info = self.get_api_user(caller, user_id).await?;
+            let mut update: NewApiUser<T> = info.user.into();
+            update.permissions = permissions;
+            self.save_api_user(update).await
         } else {
             resource_restricted()
         }
@@ -429,13 +419,9 @@ where
         user_id: &TypedUuid<UserId>,
         new_permissions: Permissions<T>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageApiUser(*user_id).into(),
-                VPermission::ManageApiUsersAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::ManageApiUser(*user_id).into())
+            && caller.can_grant_all(&new_permissions)
+        {
             let info = self.get_api_user(caller, user_id).await?;
 
             let mut user_update: NewApiUser<T> = info.user.into();
@@ -444,10 +430,64 @@ where
                 user_update.permissions.insert(permission);
             }
 
-            self.update_api_user(caller, user_update).await
+            self.save_api_user(user_update).await
         } else {
             resource_restricted()
         }
+    }
+
+    /// Adds a single permission to a user. The caller must hold the permission being added.
+    #[instrument(skip(self, caller, user_id, permission), fields(caller = ?caller.id))]
+    pub async fn add_permission_to_user(
+        &self,
+        caller: &Caller<T>,
+        user_id: &TypedUuid<UserId>,
+        permission: T,
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
+        if caller.can(&VPermission::ManageApiUser(*user_id).into()) && caller.can_grant(&permission)
+        {
+            let info = self.get_api_user(caller, user_id).await?;
+
+            let mut user_update: NewApiUser<T> = info.user.into();
+            tracing::info!(id = ?user_id, ?permission, "Adding permission to user");
+            user_update.permissions.insert(permission);
+
+            self.save_api_user(user_update).await
+        } else {
+            resource_restricted()
+        }
+    }
+
+    /// Removes a single permission from a user. The caller does not need to hold the
+    /// permission being removed, only the ability to manage the target user.
+    #[instrument(skip(self, caller, user_id, permission), fields(caller = ?caller.id))]
+    pub async fn remove_permission_from_user(
+        &self,
+        caller: &Caller<T>,
+        user_id: &TypedUuid<UserId>,
+        permission: &T,
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
+        if caller.can(&VPermission::ManageApiUser(*user_id).into()) {
+            let info = self.get_api_user(caller, user_id).await?;
+
+            let mut user_update: NewApiUser<T> = info.user.into();
+            tracing::info!(id = ?user_id, ?permission, "Removing permission from user");
+            user_update.permissions.remove(permission);
+
+            self.save_api_user(user_update).await
+        } else {
+            resource_restricted()
+        }
+    }
+
+    /// Contracts permissions and persists the user. Callers are responsible for performing
+    /// any authorization and escalation checks before calling this method.
+    async fn save_api_user(
+        &self,
+        mut api_user: NewApiUser<T>,
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
+        api_user.permissions = <T as PermissionStorage>::contract(&api_user.permissions);
+        Ok(ApiUserStore::upsert(&*self.storage, api_user).await?)
     }
 
     #[instrument(skip(self, caller, token, api_user_id), fields(caller = ?caller.id))]
@@ -457,13 +497,7 @@ where
         token: NewApiKey<T>,
         api_user_id: &TypedUuid<UserId>,
     ) -> ResourceResult<ApiKey<T>, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::CreateApiKey(*api_user_id).into(),
-                VPermission::CreateApiKeyAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::CreateApiKey(*api_user_id).into()) {
             Ok(ApiKeyStore::upsert(&*self.storage, token).await?)
         } else {
             resource_restricted()
@@ -475,13 +509,7 @@ where
         caller: &Caller<T>,
         api_key_id: &TypedUuid<ApiKeyId>,
     ) -> ResourceResult<ApiKey<T>, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::GetApiKey(*api_key_id).into(),
-                VPermission::GetApiKeysAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::GetApiKey(*api_key_id).into()) {
             ApiKeyStore::get(&*self.storage, api_key_id, false)
                 .await
                 .optional()
@@ -508,15 +536,7 @@ where
         )
         .await?;
 
-        tokens.retain(|token| {
-            caller.any(
-                &mut [
-                    VPermission::GetApiKey(token.id).into(),
-                    VPermission::GetApiKeysAll.into(),
-                ]
-                .iter(),
-            )
-        });
+        tokens.retain(|token| caller.can(&VPermission::GetApiKey(token.id).into()));
 
         Ok(tokens)
     }
@@ -527,13 +547,7 @@ where
         user_id: TypedUuid<UserId>,
         email: &str,
     ) -> ResourceResult<ApiUserContactEmail, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageApiUser(user_id).into(),
-                VPermission::ManageApiUsersAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::ManageApiUser(user_id).into()) {
             let user = self.get_api_user(caller, &user_id).await?;
 
             if user.owns_email(email) {
@@ -563,13 +577,7 @@ where
         user_id: &TypedUuid<UserId>,
         provider_id: &TypedUuid<UserProviderId>,
     ) -> ResourceResult<ApiUserProvider, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::GetApiUser(*user_id).into(),
-                VPermission::GetApiUsersAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::GetApiUser(*user_id).into()) {
             let provider = ApiUserProviderStore::get(&*self.storage, provider_id, false)
                 .await
                 .optional()?;
@@ -593,15 +601,7 @@ where
     ) -> ResourceResult<Vec<ApiUserProvider>, StoreError> {
         let mut providers = ApiUserProviderStore::list(&*self.storage, filter, pagination).await?;
 
-        providers.retain(|provider| {
-            caller.any(
-                &mut [
-                    VPermission::GetApiUser(provider.user_id).into(),
-                    VPermission::GetApiUsersAll.into(),
-                ]
-                .iter(),
-            )
-        });
+        providers.retain(|provider| caller.can(&VPermission::GetApiUser(provider.user_id).into()));
 
         Ok(providers)
     }
@@ -611,13 +611,7 @@ where
         caller: &Caller<T>,
         api_user_provider: NewApiUserProvider,
     ) -> ResourceResult<ApiUserProvider, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageApiUser(api_user_provider.user_id).into(),
-                VPermission::ManageApiUsersAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::ManageApiUser(api_user_provider.user_id).into()) {
             Ok(ApiUserProviderStore::upsert(&*self.storage, api_user_provider).await?)
         } else {
             resource_restricted()
@@ -629,13 +623,7 @@ where
         caller: &Caller<T>,
         id: &TypedUuid<ApiKeyId>,
     ) -> ResourceResult<ApiKey<T>, UserContextError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageApiKey(*id).into(),
-                VPermission::ManageApiKeysAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::ManageApiKey(*id).into()) {
             Ok(ApiKeyStore::delete(&*self.storage, id).await.optional()?)
         } else {
             resource_restricted()

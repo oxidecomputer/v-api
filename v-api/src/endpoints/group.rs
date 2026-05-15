@@ -11,6 +11,7 @@ use tracing::instrument;
 use v_model::{
     AccessGroup, AccessGroupId, NewAccessGroup,
     permissions::{Permission, PermissionStorage, Permissions},
+    storage::AccessGroupFilter,
 };
 
 use crate::{
@@ -48,7 +49,7 @@ where
     let (ctx, caller) = rqctx.as_ctx().await?;
     Ok(HttpResponseOk(
         ctx.group
-            .get_groups(&caller)
+            .list_groups(&caller, AccessGroupFilter::default())
             .await?
             .into_iter()
             .map(into_group_response)

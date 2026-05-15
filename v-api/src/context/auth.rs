@@ -54,6 +54,9 @@ where
             VPermission::CreateMapper.into(),
             VPermission::GetMappersAll.into(),
             VPermission::GetOAuthClientsAll.into(),
+            VPermission::ManageOAuthClientsAll.into(),
+            VPermission::GetMagicLinkClientsAll.into(),
+            VPermission::ManageMagicLinkClientsAll.into(),
             VPermission::CreateAccessToken.into(),
         ]);
         Ok(Self {

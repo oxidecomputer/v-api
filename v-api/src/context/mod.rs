@@ -485,7 +485,7 @@ where
             .await
             .inner_err_into()?;
 
-        let (mut mapped_permissions, mut mapped_groups) = self
+        let (mapped_permissions, mapped_groups) = self
             .mapping
             .get_mapped_fields(caller, &info)
             .await
@@ -502,9 +502,23 @@ where
                     "Did not find any existing users. Registering a new user."
                 );
 
+                // Resolve the full groups so that create_api_user can verify
+                // the caller is allowed to grant the permissions they carry.
+                let groups = self
+                    .group
+                    .list_groups(
+                        caller,
+                        v_model::storage::AccessGroupFilter {
+                            id: Some(mapped_groups.into_iter().collect()),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .inner_err_into()?;
+
                 let user = self
                     .user
-                    .create_api_user(caller, mapped_permissions, mapped_groups)
+                    .create_api_user(caller, mapped_permissions, groups)
                     .await
                     .inner_err_into()?;
 
@@ -552,22 +566,22 @@ where
 
                 tracing::info!(?provider.id, ?provider.user_id, "Updating found user permissions and groups");
 
-                // Update the found user to ensure it has at least the mapped permissions and groups
-                let user = self
-                    .user
-                    .get_api_user(caller, &provider.user_id)
+                // Add mapped permissions to the existing user
+                self.user
+                    .add_permissions_to_user(caller, &provider.user_id, mapped_permissions)
                     .await
                     .inner_err_into()?;
 
-                tracing::info!(?user.user.id, "Updating found user permissions and groups");
-
-                let mut update: NewApiUser<T> = user.user.into();
-                update.permissions.append(&mut mapped_permissions);
-                update.groups.append(&mut mapped_groups);
+                // Add mapped groups to the existing user
+                for group_id in &mapped_groups {
+                    self.add_api_user_to_group(caller, &provider.user_id, group_id)
+                        .await
+                        .inner_err_into()?;
+                }
 
                 let updated_user = self
                     .user
-                    .update_api_user(caller, update)
+                    .get_api_user(caller, &provider.user_id)
                     .await
                     .inner_err_into()?;
 
@@ -615,13 +629,7 @@ where
         caller: &Caller<T>,
         group_id: TypedUuid<AccessGroupId>,
     ) -> ResourceResult<Vec<ApiUserInfo<T>>, StoreError> {
-        if caller.any(
-            [
-                VPermission::GetGroup(group_id).into(),
-                VPermission::GetGroupsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::GetGroup(group_id).into()) {
             Ok(self
                 .user
                 .list_api_user(
@@ -641,13 +649,10 @@ where
         api_user_id: &TypedUuid<UserId>,
         group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageGroupMembership(*group_id).into(),
-                VPermission::ManageGroupMembershipsAll.into(),
-            ]
-            .iter(),
-        ) {
+        let group = self.group.get_group(caller, group_id).await?;
+        if caller.can(&VPermission::ManageGroupMembership(*group_id).into())
+            && caller.can_grant_all(&group.permissions)
+        {
             // TODO: This needs to be wrapped in a transaction. That requires reworking the way the
             // store traits are handled. Ideally we could have an API that still abstracts away the
             // underlying connection management while allowing for transactions. Possibly something
@@ -672,13 +677,7 @@ where
         api_user_id: &TypedUuid<UserId>,
         group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageGroupMembership(*group_id).into(),
-                VPermission::ManageGroupMembershipsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::ManageGroupMembership(*group_id).into()) {
             // TODO: This needs to be wrapped in a transaction. That requires reworking the way the
             // store traits are handled. Ideally we could have an API that still abstracts away the
             // underlying connection management while allowing for transactions. Possibly something
@@ -1225,6 +1224,15 @@ pub(crate) mod test_mocks {
     use newtype_uuid::{GenericUuid, TypedUuid};
     use std::{collections::HashMap, sync::Arc};
     use uuid::Uuid;
+    #[cfg(feature = "sagas")]
+    use v_model::saga::{
+        db::{ModelSagaCachedState, NewSagaEventModel, NewSagaModel, SagaEventModel, SagaModel},
+        storage::{
+            MockSagaEventStore, MockSagaStore, SagaEventFilter, SagaEventStore, SagaFilter,
+            SagaStore,
+        },
+        view::{SagaExecNodeId, SagaId},
+    };
     use v_model::{
         AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail,
         ApiUserProvider, LinkRequestId, LoginAttemptId, MagicLink, MagicLinkAttempt,
@@ -1234,16 +1242,6 @@ pub(crate) mod test_mocks {
         NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, OAuthClientId,
         OAuthRedirectUriId, OAuthSecretId, UserContactEmailId, UserId, UserProviderId,
         permissions::Caller,
-        saga::{
-            db::{
-                ModelSagaCachedState, NewSagaEventModel, NewSagaModel, SagaEventModel, SagaModel,
-            },
-            storage::{
-                MockSagaEventStore, MockSagaStore, SagaEventFilter, SagaEventStore, SagaFilter,
-                SagaStore,
-            },
-            view::{SagaExecNodeId, SagaId},
-        },
         schema_ext::MagicLinkAttemptState,
         storage::{
             AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore,
@@ -1283,11 +1281,10 @@ pub(crate) mod test_mocks {
             .with_public_url("https://test_public_url".to_string())
             .with_storage(storage)
             .with_jwt_expiration(JwtConfig::default().default_expiration)
-            .with_keys(vec![signer, verifier])
-            .with_saga_backend(TypedUuid::new_v4(), None)
-            .build()
-            .await
-            .unwrap();
+            .with_keys(vec![signer, verifier]);
+        #[cfg(feature = "sagas")]
+        let ctx = ctx.with_saga_backend(TypedUuid::new_v4(), None);
+        let mut ctx = ctx.build().await.unwrap();
 
         let mapping_engine = Arc::new(DefaultMappingEngine::new(
             ctx.builtin_registration_user(),
@@ -1357,7 +1354,9 @@ pub(crate) mod test_mocks {
         pub magic_link_secret_store: Option<Arc<MockMagicLinkSecretStore>>,
         pub magic_link_redirect_store: Option<Arc<MockMagicLinkRedirectUriStore>>,
         pub magic_link_attempt_store: Option<Arc<MockMagicLinkAttemptStore>>,
+        #[cfg(feature = "sagas")]
         pub saga_store: Option<Arc<MockSagaStore>>,
+        #[cfg(feature = "sagas")]
         pub saga_event_store: Option<Arc<MockSagaEventStore>>,
     }
 
@@ -1380,7 +1379,9 @@ pub(crate) mod test_mocks {
                 magic_link_secret_store: None,
                 magic_link_redirect_store: None,
                 magic_link_attempt_store: None,
+                #[cfg(feature = "sagas")]
                 saga_store: None,
+                #[cfg(feature = "sagas")]
                 saga_event_store: None,
             }
         }
@@ -2014,6 +2015,7 @@ pub(crate) mod test_mocks {
         }
     }
 
+    #[cfg(feature = "sagas")]
     #[async_trait]
     impl SagaStore for MockStorage {
         async fn get(&self, saga_id: TypedUuid<SagaId>) -> Result<Option<SagaModel>, StoreError> {
@@ -2080,6 +2082,7 @@ pub(crate) mod test_mocks {
         }
     }
 
+    #[cfg(feature = "sagas")]
     #[async_trait]
     impl SagaEventStore for MockStorage {
         async fn list(
