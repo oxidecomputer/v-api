@@ -135,7 +135,7 @@ where
                 // possible we use a limited input device flow, but not all providers support it.
                 // To handle those cases we need to use a proxy path that emulates an authorization
                 // code flow.
-                if provider.supports_device_flow() {
+                if provider.device_authorization_endpoint().is_some() {
                     if *request_idp_token {
                         anyhow::bail!(
                             "Remote token access is not supported via device authentication flow"
@@ -176,16 +176,13 @@ where
         T: CliOAuthAdapter,
         V: CliOAuthProviderInfo,
     {
-        let client_id = provider.client_id();
-        let login_provider = provider.provider();
-
-        let token = oauth::device::login(&adapter, login_provider, client_id, None).await?;
+        let token = oauth::device::login(&provider).await?;
 
         match mode {
-            AuthenticationMode::Identity => Ok(token.access_token().to_string()),
+            AuthenticationMode::Identity => Ok(token.access_token.clone()),
             AuthenticationMode::Token => {
                 let token = adapter
-                    .get_long_lived_token(token.access_token())
+                    .get_long_lived_token(&token.access_token)
                     .await
                     .map_err(|e| anyhow::anyhow!(e))?;
                 Ok(token.access_token().to_string())

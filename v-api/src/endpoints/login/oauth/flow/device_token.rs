@@ -34,6 +34,31 @@ use crate::{
 };
 
 use super::complete_exchange;
+use crate::endpoints::login::oauth::OAuthProviderDeviceInfo;
+
+#[instrument(skip(rqctx), err(Debug))]
+pub async fn get_device_provider_op<T>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+    path: Path<OAuthProviderNameParam>,
+) -> Result<dropshot::HttpResponseOk<OAuthProviderDeviceInfo>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+{
+    let path = path.into_inner();
+
+    let provider = rqctx
+        .v_ctx()
+        .get_oauth_provider(&path.provider)
+        .await
+        .map_err(ApiError::OAuth)?;
+
+    Ok(dropshot::HttpResponseOk(
+        provider
+            .device_code_flow_info()
+            .cloned()
+            .ok_or_else(|| bad_request("Provider does not support device clients"))?,
+    ))
+}
 
 /// Request body for initiating a device authorization flow. The client sends its
 /// `client_id` and an optional `scope`. The API server proxies the device

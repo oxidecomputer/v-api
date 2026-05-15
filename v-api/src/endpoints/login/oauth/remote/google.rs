@@ -73,6 +73,8 @@ impl GoogleOAuthProvider {
             });
         let device_code_flow_info = config.device.map(|device| OAuthProviderDeviceInfo {
             client_id: device.client_id,
+            auth_url_endpoint: format!("{}/login/oauth/google/device", public_url),
+            token_endpoint: format!("{}/login/oauth/google/device/exchange", public_url),
             remote: OAuthProviderDeviceRemoteInfo {
                 client_id: device.remote_client_id,
                 client_secret: device.remote_client_secret.into(),

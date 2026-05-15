@@ -208,6 +208,8 @@ pub struct OAuthProviderAuthorizationCodePkceInfo {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct OAuthProviderDeviceInfo {
     client_id: TypedUuid<OAuthClientId>,
+    auth_url_endpoint: String,
+    token_endpoint: String,
     #[schemars(skip)]
     #[serde(skip)]
     remote: OAuthProviderDeviceRemoteInfo,

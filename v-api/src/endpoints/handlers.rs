@@ -76,10 +76,11 @@ mod macros {
                             OAuthAuthzCodeQuery, OAuthAuthzCodeReturnQuery,
                         },
                         flow::device_token::{
-                            exchange_device_token_op, device_authz_op,
+                            exchange_device_token_op, device_authz_op, get_device_provider_op,
                             DeviceTokenExchangeRequest, DeviceAuthorizationRequest,
                         },
-                        OAuthProviderNameParam, OAuthProviderAuthorizationCodePkceInfo
+                        OAuthProviderNameParam, OAuthProviderAuthorizationCodePkceInfo,
+                        OAuthProviderDeviceInfo
                     }
                 },
                 mappers::{
@@ -319,6 +320,18 @@ mod macros {
             }
 
             // DEVICE CODE FLOW
+
+            /// Retrieve the metadata about an OAuth provider for device authorization flow
+            #[endpoint {
+                method = GET,
+                path = "/login/oauth/{provider}/device"
+            }]
+            pub async fn get_device_provider(
+                rqctx: RequestContext<$context_type>,
+                path: Path<OAuthProviderNameParam>,
+            ) -> Result<HttpResponseOk<OAuthProviderDeviceInfo>, HttpError> {
+                get_device_provider_op(&rqctx, path).await
+            }
 
             /// Initiate a device authorization flow by proxying the request to the
             /// upstream OAuth provider. Creates a login attempt and returns the
@@ -779,6 +792,8 @@ mod macros {
 
             // OAuth Login
             $api.register(get_web_pkce_provider)
+                .expect("Failed to register endpoint");
+            $api.register(get_device_provider)
                 .expect("Failed to register endpoint");
             $api.register(device_authz)
                 .expect("Failed to register endpoint");
