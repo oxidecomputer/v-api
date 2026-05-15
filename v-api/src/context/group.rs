@@ -59,13 +59,6 @@ where
         Ok(groups)
     }
 
-    pub async fn get_groups(
-        &self,
-        caller: &Caller<T>,
-    ) -> ResourceResult<Vec<AccessGroup<T>>, StoreError> {
-        self.list_groups(caller, AccessGroupFilter::default()).await
-    }
-
     pub async fn create_group(
         &self,
         caller: &Caller<T>,
