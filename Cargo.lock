@@ -3654,7 +3654,6 @@ dependencies = [
  "hyper",
  "hyper-util",
  "oauth2",
- "oauth2-reqwest",
  "owo-colors",
  "progenitor-client",
  "reqwest",

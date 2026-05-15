@@ -12,7 +12,6 @@ http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["server", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 oauth2 = { workspace = true }
-oauth2-reqwest = { workspace = true }
 owo-colors = { workspace = true }
 progenitor-client = { workspace = true }
 reqwest = { workspace = true }
