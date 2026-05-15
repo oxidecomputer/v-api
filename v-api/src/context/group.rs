@@ -38,13 +38,7 @@ where
         caller: &Caller<T>,
         group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<AccessGroup<T>, StoreError> {
-        if caller.any(
-            [
-                VPermission::GetGroup(*group_id).into(),
-                VPermission::GetGroupsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::GetGroup(*group_id).into()) {
             AccessGroupStore::get(&*self.storage, group_id, false)
                 .await
                 .optional()
@@ -60,15 +54,7 @@ where
     ) -> ResourceResult<Vec<AccessGroup<T>>, StoreError> {
         let mut groups =
             AccessGroupStore::list(&*self.storage, filter, &ListPagination::unlimited()).await?;
-        groups.retain(|group| {
-            caller.any(
-                [
-                    VPermission::GetGroupsAll.into(),
-                    VPermission::GetGroup(group.id).into(),
-                ]
-                .iter(),
-            )
-        });
+        groups.retain(|group| caller.can(&VPermission::GetGroup(group.id).into()));
 
         Ok(groups)
     }
@@ -98,13 +84,8 @@ where
         caller: &Caller<T>,
         group: NewAccessGroup<T>,
     ) -> ResourceResult<AccessGroup<T>, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageGroup(group.id).into(),
-                VPermission::ManageGroupsAll.into(),
-            ]
-            .iter(),
-        ) && caller.can_grant_all(&group.permissions)
+        if caller.can(&VPermission::ManageGroup(group.id).into())
+            && caller.can_grant_all(&group.permissions)
         {
             Ok(AccessGroupStore::upsert(&*self.storage, &group).await?)
         } else {
@@ -117,13 +98,7 @@ where
         caller: &Caller<T>,
         group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<AccessGroup<T>, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageGroup(*group_id).into(),
-                VPermission::ManageGroupsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::ManageGroup(*group_id).into()) {
             AccessGroupStore::delete(&*self.storage, group_id)
                 .await
                 .optional()

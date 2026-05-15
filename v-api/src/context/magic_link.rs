@@ -130,13 +130,7 @@ where
         caller: &Caller<T>,
         id: &TypedUuid<MagicLinkId>,
     ) -> ResourceResult<MagicLink, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::GetMagicLinkClient(*id).into(),
-                VPermission::GetMagicLinkClientsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::GetMagicLinkClient(*id).into()) {
             MagicLinkStore::get(&*self.storage, id, false)
                 .await
                 .optional()
@@ -161,15 +155,7 @@ where
         )
         .await?;
 
-        clients.retain(|client| {
-            caller.any(
-                &mut [
-                    VPermission::GetMagicLinkClient(client.id).into(),
-                    VPermission::GetMagicLinkClientsAll.into(),
-                ]
-                .iter(),
-            )
-        });
+        clients.retain(|client| caller.can(&VPermission::GetMagicLinkClient(client.id).into()));
 
         Ok(clients)
     }
@@ -181,13 +167,7 @@ where
         client_id: &TypedUuid<MagicLinkId>,
         secret: &str,
     ) -> ResourceResult<MagicLinkSecret, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageMagicLinkClient(*client_id).into(),
-                VPermission::ManageMagicLinkClientsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::ManageMagicLinkClient(*client_id).into()) {
             Ok(MagicLinkSecretStore::upsert(
                 &*self.storage,
                 NewMagicLinkSecret {
@@ -208,13 +188,7 @@ where
         id: &TypedUuid<MagicLinkSecretId>,
         client_id: &TypedUuid<MagicLinkId>,
     ) -> ResourceResult<MagicLinkSecret, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageMagicLinkClient(*client_id).into(),
-                VPermission::ManageMagicLinkClientsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::ManageMagicLinkClient(*client_id).into()) {
             MagicLinkSecretStore::delete(&*self.storage, id)
                 .await
                 .optional()
@@ -229,13 +203,7 @@ where
         client_id: &TypedUuid<MagicLinkId>,
         uri: &str,
     ) -> ResourceResult<MagicLinkRedirectUri, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageMagicLinkClient(*client_id).into(),
-                VPermission::ManageMagicLinkClientsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::ManageMagicLinkClient(*client_id).into()) {
             Ok(MagicLinkRedirectUriStore::upsert(
                 &*self.storage,
                 NewMagicLinkRedirectUri {
@@ -256,13 +224,7 @@ where
         id: &TypedUuid<MagicLinkRedirectUriId>,
         client_id: &TypedUuid<MagicLinkId>,
     ) -> ResourceResult<MagicLinkRedirectUri, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageMagicLinkClient(*client_id).into(),
-                VPermission::ManageMagicLinkClientsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::ManageMagicLinkClient(*client_id).into()) {
             MagicLinkRedirectUriStore::delete(&*self.storage, id)
                 .await
                 .optional()

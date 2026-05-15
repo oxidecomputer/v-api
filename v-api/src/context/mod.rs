@@ -629,13 +629,7 @@ where
         caller: &Caller<T>,
         group_id: TypedUuid<AccessGroupId>,
     ) -> ResourceResult<Vec<ApiUserInfo<T>>, StoreError> {
-        if caller.any(
-            [
-                VPermission::GetGroup(group_id).into(),
-                VPermission::GetGroupsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::GetGroup(group_id).into()) {
             Ok(self
                 .user
                 .list_api_user(
@@ -656,13 +650,8 @@ where
         group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
         let group = self.group.get_group(caller, group_id).await?;
-        if caller.any(
-            &mut [
-                VPermission::ManageGroupMembership(*group_id).into(),
-                VPermission::ManageGroupMembershipsAll.into(),
-            ]
-            .iter(),
-        ) && caller.can_grant_all(&group.permissions)
+        if caller.can(&VPermission::ManageGroupMembership(*group_id).into())
+            && caller.can_grant_all(&group.permissions)
         {
             // TODO: This needs to be wrapped in a transaction. That requires reworking the way the
             // store traits are handled. Ideally we could have an API that still abstracts away the
@@ -688,13 +677,7 @@ where
         api_user_id: &TypedUuid<UserId>,
         group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageGroupMembership(*group_id).into(),
-                VPermission::ManageGroupMembershipsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::ManageGroupMembership(*group_id).into()) {
             // TODO: This needs to be wrapped in a transaction. That requires reworking the way the
             // store traits are handled. Ideally we could have an API that still abstracts away the
             // underlying connection management while allowing for transactions. Possibly something

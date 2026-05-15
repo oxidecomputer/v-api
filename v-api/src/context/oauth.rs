@@ -59,13 +59,7 @@ where
         caller: &Caller<T>,
         id: &TypedUuid<OAuthClientId>,
     ) -> ResourceResult<OAuthClient, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::GetOAuthClient(*id).into(),
-                VPermission::GetOAuthClientsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::GetOAuthClient(*id).into()) {
             OAuthClientStore::get(&*self.storage, id, false)
                 .await
                 .optional()
@@ -88,15 +82,7 @@ where
         )
         .await?;
 
-        clients.retain(|client| {
-            caller.any(
-                &mut [
-                    VPermission::GetOAuthClient(client.id).into(),
-                    VPermission::GetOAuthClientsAll.into(),
-                ]
-                .iter(),
-            )
-        });
+        clients.retain(|client| caller.can(&VPermission::GetOAuthClient(client.id).into()));
 
         Ok(clients)
     }
@@ -108,13 +94,7 @@ where
         client_id: &TypedUuid<OAuthClientId>,
         secret: &str,
     ) -> ResourceResult<OAuthClientSecret, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageOAuthClient(*client_id).into(),
-                VPermission::ManageOAuthClientsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
             Ok(OAuthClientSecretStore::upsert(
                 &*self.storage,
                 NewOAuthClientSecret {
@@ -135,13 +115,7 @@ where
         id: &TypedUuid<OAuthSecretId>,
         client_id: &TypedUuid<OAuthClientId>,
     ) -> ResourceResult<OAuthClientSecret, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageOAuthClient(*client_id).into(),
-                VPermission::ManageOAuthClientsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
             OAuthClientSecretStore::delete(&*self.storage, id)
                 .await
                 .optional()
@@ -156,13 +130,7 @@ where
         client_id: &TypedUuid<OAuthClientId>,
         uri: &str,
     ) -> ResourceResult<OAuthClientRedirectUri, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageOAuthClient(*client_id).into(),
-                VPermission::ManageOAuthClientsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
             Ok(OAuthClientRedirectUriStore::upsert(
                 &*self.storage,
                 NewOAuthClientRedirectUri {
@@ -183,13 +151,7 @@ where
         id: &TypedUuid<OAuthRedirectUriId>,
         client_id: &TypedUuid<OAuthClientId>,
     ) -> ResourceResult<OAuthClientRedirectUri, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageOAuthClient(*client_id).into(),
-                VPermission::ManageOAuthClientsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
             OAuthClientRedirectUriStore::delete(&*self.storage, id)
                 .await
                 .optional()
