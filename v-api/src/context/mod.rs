@@ -485,7 +485,7 @@ where
             .await
             .inner_err_into()?;
 
-        let (mut mapped_permissions, mut mapped_groups) = self
+        let (mapped_permissions, mapped_groups) = self
             .mapping
             .get_mapped_fields(caller, &info)
             .await
@@ -502,9 +502,23 @@ where
                     "Did not find any existing users. Registering a new user."
                 );
 
+                // Resolve the full groups so that create_api_user can verify
+                // the caller is allowed to grant the permissions they carry.
+                let groups = self
+                    .group
+                    .list_groups(
+                        caller,
+                        v_model::storage::AccessGroupFilter {
+                            id: Some(mapped_groups.into_iter().collect()),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .inner_err_into()?;
+
                 let user = self
                     .user
-                    .create_api_user(caller, mapped_permissions, mapped_groups)
+                    .create_api_user(caller, mapped_permissions, groups)
                     .await
                     .inner_err_into()?;
 
@@ -552,22 +566,22 @@ where
 
                 tracing::info!(?provider.id, ?provider.user_id, "Updating found user permissions and groups");
 
-                // Update the found user to ensure it has at least the mapped permissions and groups
-                let user = self
-                    .user
-                    .get_api_user(caller, &provider.user_id)
+                // Add mapped permissions to the existing user
+                self.user
+                    .add_permissions_to_user(caller, &provider.user_id, mapped_permissions)
                     .await
                     .inner_err_into()?;
 
-                tracing::info!(?user.user.id, "Updating found user permissions and groups");
-
-                let mut update: NewApiUser<T> = user.user.into();
-                update.permissions.append(&mut mapped_permissions);
-                update.groups.append(&mut mapped_groups);
+                // Add mapped groups to the existing user
+                for group_id in &mapped_groups {
+                    self.add_api_user_to_group(caller, &provider.user_id, group_id)
+                        .await
+                        .inner_err_into()?;
+                }
 
                 let updated_user = self
                     .user
-                    .update_api_user(caller, update)
+                    .get_api_user(caller, &provider.user_id)
                     .await
                     .inner_err_into()?;
 
@@ -615,13 +629,7 @@ where
         caller: &Caller<T>,
         group_id: TypedUuid<AccessGroupId>,
     ) -> ResourceResult<Vec<ApiUserInfo<T>>, StoreError> {
-        if caller.any(
-            [
-                VPermission::GetGroup(group_id).into(),
-                VPermission::GetGroupsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::GetGroup(group_id).into()) {
             Ok(self
                 .user
                 .list_api_user(
@@ -641,13 +649,10 @@ where
         api_user_id: &TypedUuid<UserId>,
         group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageGroupMembership(*group_id).into(),
-                VPermission::ManageGroupMembershipsAll.into(),
-            ]
-            .iter(),
-        ) {
+        let group = self.group.get_group(caller, group_id).await?;
+        if caller.can(&VPermission::ManageGroupMembership(*group_id).into())
+            && caller.can_grant_all(&group.permissions)
+        {
             // TODO: This needs to be wrapped in a transaction. That requires reworking the way the
             // store traits are handled. Ideally we could have an API that still abstracts away the
             // underlying connection management while allowing for transactions. Possibly something
@@ -672,13 +677,7 @@ where
         api_user_id: &TypedUuid<UserId>,
         group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.any(
-            &mut [
-                VPermission::ManageGroupMembership(*group_id).into(),
-                VPermission::ManageGroupMembershipsAll.into(),
-            ]
-            .iter(),
-        ) {
+        if caller.can(&VPermission::ManageGroupMembership(*group_id).into()) {
             // TODO: This needs to be wrapped in a transaction. That requires reworking the way the
             // store traits are handled. Ideally we could have an API that still abstracts away the
             // underlying connection management while allowing for transactions. Possibly something

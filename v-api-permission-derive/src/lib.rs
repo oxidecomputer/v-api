@@ -43,6 +43,7 @@ struct VariantSettings(Vec<VariantSetting>);
 enum VariantSetting {
     Contract(ContractSettings),
     Expand(ExpandSettings),
+    Implies(ImpliesSettings),
     Scope(ScopeSettings),
 }
 
@@ -114,6 +115,33 @@ enum ExpandKind {
     Replace,
 }
 
+#[derive(Clone, Debug)]
+struct ImpliesSettings {
+    variant: Ident,
+}
+
+impl Parse for ImpliesSettings {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let span = input.span();
+        let mut settings = vec![];
+        while !input.is_empty() {
+            if let Some(setting) = parse_setting::<Ident>(input)? {
+                let _: Result<Token![,]> = input.parse();
+                settings.push(setting);
+            }
+        }
+
+        Ok(ImpliesSettings {
+            variant: settings
+                .iter()
+                .find(|s| s.name == "variant")
+                .cloned()
+                .ok_or_else(|| Error::new(span, "Implies must contain a \"variant\" setting"))?
+                .value,
+        })
+    }
+}
+
 impl Parse for VariantSettings {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut settings = vec![];
@@ -130,6 +158,8 @@ impl Parse for VariantSettings {
                 ));
             } else if name == "expand" {
                 settings.push(VariantSetting::Expand(content.parse::<ExpandSettings>()?));
+            } else if name == "implies" {
+                settings.push(VariantSetting::Implies(content.parse::<ImpliesSettings>()?));
             } else if name == "scope" {
                 settings.push(VariantSetting::Scope(content.parse::<ScopeSettings>()?));
             }
@@ -277,7 +307,18 @@ pub fn v_api(attr: TokenStream, input: TokenStream) -> TokenStream {
 
     let mut contract_settings = vec![];
     let mut expand_settings = vec![];
+    let mut implies_settings = vec![];
     let mut scope_settings = vec![];
+
+    // Collect variant field counts for generating implies match patterns
+    let variant_field_counts: HashMap<String, usize> = match &input.data {
+        Data::Enum(data_enum) => data_enum
+            .variants
+            .iter()
+            .map(|v| (v.ident.to_string(), v.fields.len()))
+            .collect(),
+        _ => HashMap::new(),
+    };
 
     let trait_impl_tokens: proc_macro2::TokenStream = match input.data {
         Data::Enum(ref mut data_enum) => {
@@ -293,6 +334,8 @@ pub fn v_api(attr: TokenStream, input: TokenStream) -> TokenStream {
                                             .push((variant_clone.clone(), setting.clone())),
                                         VariantSetting::Expand(setting) => expand_settings
                                             .push((variant_clone.clone(), setting.clone())),
+                                        VariantSetting::Implies(setting) => implies_settings
+                                            .push((variant_clone.clone(), setting.clone())),
                                         VariantSetting::Scope(setting) => scope_settings
                                             .push((variant_clone.clone(), setting.clone())),
                                     }
@@ -306,8 +349,13 @@ pub fn v_api(attr: TokenStream, input: TokenStream) -> TokenStream {
                 variant.attrs.retain(|attr| !attr.path().is_ident(MACRO_ID));
             }
             let as_scope_out = as_scope_trait_tokens(input.ident.clone(), scope_settings);
-            let permission_storage_out =
-                permission_storage_trait_tokens(&input.ident, contract_settings, expand_settings);
+            let permission_storage_out = permission_storage_trait_tokens(
+                &input.ident,
+                contract_settings,
+                expand_settings,
+                implies_settings,
+                &variant_field_counts,
+            );
 
             quote! {
                 #as_scope_out
@@ -518,6 +566,10 @@ fn system_permission_tokens() -> TokenStream {
             )]
             GetApiUsersAssigned,
             #[v_api(
+                implies(variant = GetApiUser),
+                implies(variant = GetApiUsers),
+                implies(variant = GetApiUserSelf),
+                implies(variant = GetApiUsersAssigned),
                 scope(to = "user:info:r", from = "user:info:r")
             )]
             GetApiUsersAll,
@@ -537,7 +589,12 @@ fn system_permission_tokens() -> TokenStream {
                 scope(to = "user:info:w", from = "user:info:w")
             )]
             ManageApiUsersAssigned,
-            #[v_api(scope(to = "user:info:w", from = "user:info:w"))]
+            #[v_api(
+                implies(variant = ManageApiUser),
+                implies(variant = ManageApiUsers),
+                implies(variant = ManageApiUsersAssigned),
+                scope(to = "user:info:w", from = "user:info:w")
+            )]
             ManageApiUsersAll,
             #[v_api(scope(to = "user:token:w"))]
             CreateApiKey(newtype_uuid::TypedUuid<v_model::UserId>),
@@ -548,7 +605,12 @@ fn system_permission_tokens() -> TokenStream {
             CreateApiKeySelf,
             #[v_api(scope(to = "user:token:w", from = "user:token:w"))]
             CreateApiKeyAssigned,
-            #[v_api(scope(to = "user:token:w", from = "user:token:w"))]
+            #[v_api(
+                implies(variant = CreateApiKey),
+                implies(variant = CreateApiKeySelf),
+                implies(variant = CreateApiKeyAssigned),
+                scope(to = "user:token:w", from = "user:token:w")
+            )]
             CreateApiKeyAll,
             #[v_api(
                 contract(kind = append, variant = GetApiKeys),
@@ -566,7 +628,12 @@ fn system_permission_tokens() -> TokenStream {
                 scope(to = "user:token:r", from = "user:token:r")
             )]
             GetApiKeysAssigned,
-            #[v_api(scope(to = "user:token:r", from = "user:token:r"))]
+            #[v_api(
+                implies(variant = GetApiKey),
+                implies(variant = GetApiKeys),
+                implies(variant = GetApiKeysAssigned),
+                scope(to = "user:token:r", from = "user:token:r")
+            )]
             GetApiKeysAll,
             #[v_api(
                 contract(kind = append, variant = ManageApiKeys),
@@ -584,7 +651,12 @@ fn system_permission_tokens() -> TokenStream {
                 scope(to = "user:token:w", from = "user:token:w")
             )]
             ManageApiKeysAssigned,
-            #[v_api(scope(to = "user:token:w", from = "user:token:w"))]
+            #[v_api(
+                implies(variant = ManageApiKey),
+                implies(variant = ManageApiKeys),
+                implies(variant = ManageApiKeysAssigned),
+                scope(to = "user:token:w", from = "user:token:w")
+            )]
             ManageApiKeysAll,
             #[v_api(scope(to = "user:provider:w", from = "user:provider:w"))]
             CreateUserApiProviderLinkToken,
@@ -600,7 +672,11 @@ fn system_permission_tokens() -> TokenStream {
                 scope(to = "group:info:r", from = "group:info:r")
             )]
             GetGroupsJoined,
-            #[v_api(scope(to = "group:info:r", from = "group:info:r"))]
+            #[v_api(
+                implies(variant = GetGroup),
+                implies(variant = GetGroupsJoined),
+                scope(to = "group:info:r", from = "group:info:r")
+            )]
             GetGroupsAll,
             #[v_api(
                 contract(kind = append, variant = ManageGroups),
@@ -618,7 +694,12 @@ fn system_permission_tokens() -> TokenStream {
                 scope(to = "group:info:w", from = "group:info:w")
             )]
             ManageGroupsAssigned,
-            #[v_api(scope(to = "group:info:w", from = "group:info:w"))]
+            #[v_api(
+                implies(variant = ManageGroup),
+                implies(variant = ManageGroups),
+                implies(variant = ManageGroupsAssigned),
+                scope(to = "group:info:w", from = "group:info:w")
+            )]
             ManageGroupsAll,
             #[v_api(
                 contract(kind = append, variant = ManageGroupMemberships)
@@ -636,7 +717,12 @@ fn system_permission_tokens() -> TokenStream {
                 scope(to = "group:membership:w", from = "group:membership:w")
             )]
             ManageGroupMembershipsAssigned,
-            #[v_api(scope(to = "group:membership:w", from = "group:membership:w"))]
+            #[v_api(
+                implies(variant = ManageGroupMembership),
+                implies(variant = ManageGroupMemberships),
+                implies(variant = ManageGroupMembershipsAssigned),
+                scope(to = "group:membership:w", from = "group:membership:w")
+            )]
             ManageGroupMembershipsAll,
 
             #[v_api(scope(to = "mapper:w", from = "mapper:w"))]
@@ -659,7 +745,12 @@ fn system_permission_tokens() -> TokenStream {
                 scope(to = "mapper:w", from = "mapper:w")
             )]
             ManageMappersAssigned,
-            #[v_api(scope(to = "mapper:w", from = "mapper:w"))]
+            #[v_api(
+                implies(variant = ManageMapper),
+                implies(variant = ManageMappers),
+                implies(variant = ManageMappersAssigned),
+                scope(to = "mapper:w", from = "mapper:w")
+            )]
             ManageMappersAll,
 
             #[v_api(scope(to = "oauth:client:w", from = "oauth:client:w"))]
@@ -680,7 +771,12 @@ fn system_permission_tokens() -> TokenStream {
                 scope(to = "oauth:client:r", from = "oauth:client:r")
             )]
             GetOAuthClientsAssigned,
-            #[v_api(scope(to = "oauth:client:r", from = "oauth:client:r"))]
+            #[v_api(
+                implies(variant = GetOAuthClient),
+                implies(variant = GetOAuthClients),
+                implies(variant = GetOAuthClientsAssigned),
+                scope(to = "oauth:client:r", from = "oauth:client:r")
+            )]
             GetOAuthClientsAll,
             #[v_api(
                 contract(kind = append, variant = ManageOAuthClients),
@@ -698,7 +794,12 @@ fn system_permission_tokens() -> TokenStream {
                 scope(to = "oauth:client:w", from = "oauth:client:w")
             )]
             ManageOAuthClientsAssigned,
-            #[v_api(scope(to = "oauth:client:w", from = "oauth:client:w"))]
+            #[v_api(
+                implies(variant = ManageOAuthClient),
+                implies(variant = ManageOAuthClients),
+                implies(variant = ManageOAuthClientsAssigned),
+                scope(to = "oauth:client:w", from = "oauth:client:w")
+            )]
             ManageOAuthClientsAll,
 
             #[v_api(scope(to = "mlink:client:w", from = "mlink:client:w"))]
@@ -719,7 +820,12 @@ fn system_permission_tokens() -> TokenStream {
                 scope(to = "mlink:client:r", from = "mlink:client:r")
             )]
             GetMagicLinkClientsAssigned,
-            #[v_api(scope(to = "mlink:client:r", from = "mlink:client:r"))]
+            #[v_api(
+                implies(variant = GetMagicLinkClient),
+                implies(variant = GetMagicLinkClients),
+                implies(variant = GetMagicLinkClientsAssigned),
+                scope(to = "mlink:client:r", from = "mlink:client:r")
+            )]
             GetMagicLinkClientsAll,
             #[v_api(
                 contract(kind = append, variant = ManageMagicLinkClients),
@@ -737,7 +843,12 @@ fn system_permission_tokens() -> TokenStream {
                 scope(to = "mlink:client:w", from = "mlink:client:w")
             )]
             ManageMagicLinkClientsAssigned,
-            #[v_api(scope(to = "mlink:client:w", from = "mlink:client:w"))]
+            #[v_api(
+                implies(variant = ManageMagicLinkClient),
+                implies(variant = ManageMagicLinkClients),
+                implies(variant = ManageMagicLinkClientsAssigned),
+                scope(to = "mlink:client:w", from = "mlink:client:w")
+            )]
             ManageMagicLinkClientsAll,
 
             CreateAccessToken,
@@ -831,14 +942,23 @@ fn permission_storage_trait_tokens(
     permission_type: &Ident,
     contract_settings: Vec<(Variant, ContractSettings)>,
     expand_settings: Vec<(Variant, ExpandSettings)>,
+    implies_settings: Vec<(Variant, ImpliesSettings)>,
+    variant_field_counts: &HashMap<String, usize>,
 ) -> proc_macro2::TokenStream {
     let contract_tokens = permission_storage_contract_tokens(permission_type, contract_settings);
-    let expand_tokens = permission_storage_expand_tokens(permission_type, expand_settings);
+    let expand_tokens = permission_storage_expand_tokens(permission_type, expand_settings.clone());
+    let implies_tokens = permission_storage_implies_tokens(
+        permission_type,
+        implies_settings,
+        &expand_settings,
+        variant_field_counts,
+    );
 
     quote! {
         impl v_model::permissions::PermissionStorage for #permission_type {
             #contract_tokens
             #expand_tokens
+            #implies_tokens
         }
     }
 }
@@ -1067,6 +1187,72 @@ fn permission_storage_expand_tokens(
             }
 
             expanded.into()
+        }
+    }
+}
+
+fn permission_storage_implies_tokens(
+    permission_type: &Ident,
+    implies_settings: Vec<(Variant, ImpliesSettings)>,
+    expand_settings: &[(Variant, ExpandSettings)],
+    variant_field_counts: &HashMap<String, usize>,
+) -> proc_macro2::TokenStream {
+    let mut branches = vec![];
+
+    // From explicit implies annotations (typically on "All" variants).
+    // e.g., ManageGroupsAll implies(variant = ManageGroup) generates:
+    //   (Self::ManageGroupsAll, Self::ManageGroup(..)) => true
+    for (variant, setting) in &implies_settings {
+        let held_ident = &variant.ident;
+        let target_ident = &setting.variant;
+
+        let target_fields = variant_field_counts
+            .get(&target_ident.to_string())
+            .copied()
+            .unwrap_or(0);
+
+        let target_pattern = if target_fields > 0 {
+            quote! { #permission_type::#target_ident(..) }
+        } else {
+            quote! { #permission_type::#target_ident }
+        };
+
+        branches.push(quote! {
+            (#permission_type::#held_ident, #target_pattern) => true
+        });
+    }
+
+    // From expand(kind = iter) annotations without an external source/field.
+    // These are set variants that iterate into specific variants.
+    // e.g., ManageGroups(BTreeSet) with expand(kind = iter, variant = ManageGroup) generates:
+    //   (Self::ManageGroups(set), Self::ManageGroup(id)) => set.contains(id)
+    //   (Self::ManageGroups(held), Self::ManageGroups(target)) => target.is_subset(held)
+    for (variant, setting) in expand_settings {
+        if matches!(setting.kind, ExpandKind::Iter) && setting.source.is_none() {
+            let set_ident = &variant.ident;
+            let specific_ident = &setting.variant;
+
+            // Set(set) implies Specific(id) if set.contains(&id)
+            branches.push(quote! {
+                (#permission_type::#set_ident(held_set), #permission_type::#specific_ident(id)) => held_set.contains(id)
+            });
+
+            // Set(set1) implies Set(set2) if set2.is_subset(&set1)
+            branches.push(quote! {
+                (#permission_type::#set_ident(held_set), #permission_type::#set_ident(target_set)) => target_set.is_subset(held_set)
+            });
+        }
+    }
+
+    quote! {
+        fn implies(held: &Self, target: &Self) -> bool {
+            if held == target {
+                return true;
+            }
+            match (held, target) {
+                #(#branches,)*
+                _ => false,
+            }
         }
     }
 }

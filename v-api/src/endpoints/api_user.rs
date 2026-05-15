@@ -17,10 +17,9 @@ use tap::TapFallible;
 use tracing::instrument;
 use uuid::Uuid;
 use v_model::{
-    AccessGroupId, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserProvider, NewApiKey, NewApiUser,
-    UserId,
+    AccessGroupId, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserProvider, NewApiKey, UserId,
     permissions::{Caller, Permission, PermissionStorage, Permissions},
-    storage::{ApiUserFilter, ApiUserProviderFilter, ListPagination},
+    storage::{AccessGroupFilter, ApiUserFilter, ApiUserProviderFilter, ListPagination},
 };
 
 use crate::{
@@ -193,6 +192,7 @@ where
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 pub struct ApiUserUpdateParams<T> {
     permissions: Permissions<T>,
+    #[serde(default)]
     group_ids: BTreeSet<TypedUuid<AccessGroupId>>,
 }
 
@@ -224,9 +224,22 @@ where
     T: VAppPermission + JsonSchema + PermissionStorage,
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
+    // Resolve the full groups so that create_api_user can verify the caller
+    // is allowed to grant the permissions they carry.
+    let groups = ctx
+        .group
+        .list_groups(
+            &caller,
+            AccessGroupFilter {
+                id: Some(body.group_ids.into_iter().collect()),
+                ..Default::default()
+            },
+        )
+        .await?;
+
     let info = ctx
         .user
-        .create_api_user(&caller, body.permissions, body.group_ids)
+        .create_api_user(&caller, body.permissions, groups)
         .await?;
 
     let filter = ApiUserProviderFilter {
@@ -248,7 +261,8 @@ pub struct ApiUserPath {
     user_id: TypedUuid<UserId>,
 }
 
-/// Updates an existing API user's permissions and group memberships.
+/// Updates an existing API user's direct permissions. Group membership is managed
+/// separately via the group membership endpoints.
 ///
 /// Returns the updated user's information along with their associated providers.
 #[instrument(skip(rqctx), err(Debug))]
@@ -278,14 +292,7 @@ where
 {
     let info = ctx
         .user
-        .update_api_user(
-            &caller,
-            NewApiUser {
-                id: path.user_id,
-                permissions: body.permissions,
-                groups: body.group_ids,
-            },
-        )
+        .set_api_user_permissions(&caller, &path.user_id, body.permissions)
         .await?;
 
     let filter = ApiUserProviderFilter {
@@ -554,6 +561,103 @@ where
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct ApiUserPermissionParams<T> {
+    pub permission: T,
+}
+
+/// Adds a single permission to an API user.
+///
+/// The caller must hold the permission being added.
+/// Returns the updated user information.
+#[instrument(skip(rqctx, body), err(Debug))]
+pub async fn add_api_user_permission_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+    path: ApiUserPath,
+    body: ApiUserPermissionParams<T>,
+) -> Result<HttpResponseOk<GetUserResponse<U>>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+    U: VAppPermissionResponse + From<T> + JsonSchema,
+{
+    let (ctx, caller) = rqctx.as_ctx().await?;
+    add_api_user_permission_inner(ctx, caller, path, body).await
+}
+
+#[instrument(skip(ctx, body))]
+pub async fn add_api_user_permission_inner<T, U>(
+    ctx: &VContext<T>,
+    caller: Caller<T>,
+    path: ApiUserPath,
+    body: ApiUserPermissionParams<T>,
+) -> Result<HttpResponseOk<GetUserResponse<U>>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+    U: VAppPermissionResponse + From<T> + JsonSchema,
+{
+    let info = ctx
+        .user
+        .add_permission_to_user(&caller, &path.user_id, body.permission)
+        .await?;
+
+    let filter = ApiUserProviderFilter {
+        api_user_id: Some(vec![info.user.id]),
+        ..Default::default()
+    };
+    let providers = ctx
+        .user
+        .list_api_user_provider(&caller, filter, &ListPagination::default().limit(10))
+        .await?;
+
+    Ok(HttpResponseOk(GetUserResponse::new(info.user, providers)))
+}
+
+/// Removes a single permission from an API user.
+///
+/// The caller does not need to hold the permission being removed.
+/// Returns the updated user information.
+#[instrument(skip(rqctx, body), err(Debug))]
+pub async fn remove_api_user_permission_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+    path: ApiUserPath,
+    body: ApiUserPermissionParams<T>,
+) -> Result<HttpResponseOk<GetUserResponse<U>>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+    U: VAppPermissionResponse + From<T> + JsonSchema,
+{
+    let (ctx, caller) = rqctx.as_ctx().await?;
+    remove_api_user_permission_inner(ctx, caller, path, body).await
+}
+
+#[instrument(skip(ctx, body))]
+pub async fn remove_api_user_permission_inner<T, U>(
+    ctx: &VContext<T>,
+    caller: Caller<T>,
+    path: ApiUserPath,
+    body: ApiUserPermissionParams<T>,
+) -> Result<HttpResponseOk<GetUserResponse<U>>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+    U: VAppPermissionResponse + From<T> + JsonSchema,
+{
+    let info = ctx
+        .user
+        .remove_permission_from_user(&caller, &path.user_id, &body.permission)
+        .await?;
+
+    let filter = ApiUserProviderFilter {
+        api_user_id: Some(vec![info.user.id]),
+        ..Default::default()
+    };
+    let providers = ctx
+        .user
+        .list_api_user_provider(&caller, filter, &ListPagination::default().limit(10))
+        .await?;
+
+    Ok(HttpResponseOk(GetUserResponse::new(info.user, providers)))
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct AddGroupBody {
     group_id: TypedUuid<AccessGroupId>,
 }
@@ -775,8 +879,8 @@ mod tests {
         ApiKey, ApiUser, ApiUserContactEmail, ApiUserInfo, ApiUserProvider, NewApiUser,
         permissions::{Caller, Permissions},
         storage::{
-            ApiKeyFilter, ListPagination, MockApiKeyStore, MockApiUserContactEmailStore,
-            MockApiUserProviderStore, MockApiUserStore, StoreError,
+            ApiKeyFilter, ListPagination, MockAccessGroupStore, MockApiKeyStore,
+            MockApiUserContactEmailStore, MockApiUserProviderStore, MockApiUserStore, StoreError,
         },
     };
 
@@ -844,9 +948,15 @@ mod tests {
             .expect_list()
             .returning(|_, _| Ok(vec![]));
 
+        let mut access_group_store = MockAccessGroupStore::new();
+        access_group_store
+            .expect_list()
+            .returning(|_, _| Ok(vec![]));
+
         let mut storage = MockStorage::new();
         storage.api_user_store = Some(Arc::new(store));
         storage.api_user_provider_store = Some(Arc::new(api_user_provider_store));
+        storage.access_group_store = Some(Arc::new(access_group_store));
 
         let ctx = mock_context(Arc::new(storage)).await;
 
@@ -897,7 +1007,7 @@ mod tests {
         .await;
 
         assert!(resp.is_err());
-        assert_eq!(get_status(&resp), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
@@ -915,6 +1025,20 @@ mod tests {
         };
 
         let mut store = MockApiUserStore::new();
+        store.expect_get().returning(|id, _| {
+            Ok(Some(ApiUserInfo {
+                user: ApiUser {
+                    id: *id,
+                    permissions: Permissions::new(),
+                    groups: BTreeSet::new(),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    deleted_at: None,
+                },
+                email: None,
+                providers: vec![],
+            }))
+        });
         store
             .expect_upsert()
             .withf(move |x: &NewApiUser<VPermission>| x.id == success_id)
@@ -940,10 +1064,15 @@ mod tests {
         api_user_provider_store
             .expect_list()
             .returning(|_, _| Ok(vec![]));
+        let mut access_group_store = MockAccessGroupStore::new();
+        access_group_store
+            .expect_list()
+            .returning(|_, _| Ok(vec![]));
 
         let mut storage = MockStorage::new();
         storage.api_user_store = Some(Arc::new(store));
         storage.api_user_provider_store = Some(Arc::new(api_user_provider_store));
+        storage.access_group_store = Some(Arc::new(access_group_store));
 
         let ctx = mock_context(Arc::new(storage)).await;
 
@@ -979,7 +1108,11 @@ mod tests {
         // 2. Succeed in updating api user with direct permission
         let with_specific_permissions = Caller {
             id: user2.id,
-            permissions: vec![VPermission::ManageApiUser(success_path.user_id)].into(),
+            permissions: vec![
+                VPermission::GetApiUser(success_path.user_id),
+                VPermission::ManageApiUser(success_path.user_id),
+            ]
+            .into(),
             extensions: HashMap::default(),
         };
 
@@ -999,7 +1132,7 @@ mod tests {
         // 3. Succeed in updating api user with general permission
         let with_general_permissions = Caller {
             id: user3.id,
-            permissions: vec![VPermission::ManageApiUsersAll].into(),
+            permissions: vec![VPermission::GetApiUsersAll, VPermission::ManageApiUsersAll].into(),
             extensions: HashMap::default(),
         };
 

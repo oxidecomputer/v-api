@@ -17,12 +17,12 @@ mod macros {
 
             use v_api::endpoints::{
                 api_user::{
-                    add_api_user_to_group_op, create_api_user_op, create_api_user_token_op,
+                    add_api_user_permission_op, add_api_user_to_group_op, create_api_user_op, create_api_user_token_op,
                     delete_api_user_token_op, get_api_user_op, list_api_user_op, get_api_user_token_op, get_self_op,
-                    link_provider_op, list_api_user_tokens_op, remove_api_user_from_group_op, set_api_user_contact_email_op,
-                    list_api_users_for_group_op,
+                    link_provider_op, list_api_user_tokens_op, remove_api_user_from_group_op, remove_api_user_permission_op,
+                    set_api_user_contact_email_op, list_api_users_for_group_op,
                     update_api_user_op, AddGroupBody, ApiKeyCreateParams, ApiKeyResponse, ApiUserPath,
-                    ApiUserProviderLinkPayload, ApiUserRemoveGroupPath, ApiUserTokenPath,
+                    ApiUserPermissionParams, ApiUserProviderLinkPayload, ApiUserRemoveGroupPath, ApiUserTokenPath,
                     ApiUserUpdateParams, GetUserResponse, InitialApiKeyResponse, ApiUserEmailUpdateParams, ApiUserGroupPath
                 },
                 api_user_provider::{
@@ -442,7 +442,8 @@ mod macros {
                 create_api_user_op(&rqctx, body).await
             }
 
-            /// Update the permissions assigned to a given user
+            /// Update the permissions assigned to a given user. These replace any existing
+            /// permissions.
             #[endpoint {
                 method = POST,
                 path = "/api-user/{user_id}",
@@ -453,6 +454,32 @@ mod macros {
                 body: TypedBody<ApiUserUpdateParams<$permission_type>>,
             ) -> Result<HttpResponseOk<GetUserResponse<$permission_type>>, HttpError> {
                 update_api_user_op(&rqctx, path.into_inner(), body.into_inner()).await
+            }
+
+            /// Add a single permission to a user
+            #[endpoint {
+                method = POST,
+                path = "/api-user/{user_id}/permission",
+            }]
+            pub async fn add_api_user_permission(
+                rqctx: RequestContext<$context_type>,
+                path: Path<ApiUserPath>,
+                body: TypedBody<ApiUserPermissionParams<$permission_type>>,
+            ) -> Result<HttpResponseOk<GetUserResponse<$permission_type>>, HttpError> {
+                add_api_user_permission_op(&rqctx, path.into_inner(), body.into_inner()).await
+            }
+
+            /// Remove a single permission from a user
+            #[endpoint {
+                method = DELETE,
+                path = "/api-user/{user_id}/permission",
+            }]
+            pub async fn remove_api_user_permission(
+                rqctx: RequestContext<$context_type>,
+                path: Path<ApiUserPath>,
+                body: TypedBody<ApiUserPermissionParams<$permission_type>>,
+            ) -> Result<HttpResponseOk<GetUserResponse<$permission_type>>, HttpError> {
+                remove_api_user_permission_op(&rqctx, path.into_inner(), body.into_inner()).await
             }
 
             /// List api keys for a user
@@ -692,6 +719,10 @@ mod macros {
             $api.register(create_api_user)
                 .expect("Failed to register endpoint");
             $api.register(update_api_user)
+                .expect("Failed to register endpoint");
+            $api.register(add_api_user_permission)
+                .expect("Failed to register endpoint");
+            $api.register(remove_api_user_permission)
                 .expect("Failed to register endpoint");
             $api.register(set_api_user_contact_email)
                 .expect("Failed to register endpoint");

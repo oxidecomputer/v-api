@@ -61,6 +61,9 @@ where
                     VPermission::CreateMapper,
                     VPermission::GetMappersAll,
                     VPermission::GetOAuthClientsAll,
+                    VPermission::ManageOAuthClientsAll,
+                    VPermission::GetMagicLinkClientsAll,
+                    VPermission::ManageMagicLinkClientsAll,
                     VPermission::CreateAccessToken,
                 ]
                 .into(),
