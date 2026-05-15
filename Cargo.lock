@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "dropshot-authorization-header"
-version = "0.3.2"
+version = "0.4.0-rc.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -3524,7 +3524,7 @@ dependencies = [
 
 [[package]]
 name = "v-api"
-version = "0.3.2"
+version = "0.4.0-rc.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3573,7 +3573,7 @@ dependencies = [
 
 [[package]]
 name = "v-api-installer"
-version = "0.3.2"
+version = "0.4.0-rc.0"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -3581,7 +3581,7 @@ dependencies = [
 
 [[package]]
 name = "v-api-param"
-version = "0.3.2"
+version = "0.4.0-rc.0"
 dependencies = [
  "secrecy",
  "serde",
@@ -3592,7 +3592,7 @@ dependencies = [
 
 [[package]]
 name = "v-api-permission-derive"
-version = "0.3.2"
+version = "0.4.0-rc.0"
 dependencies = [
  "heck",
  "newtype-uuid",
@@ -3609,7 +3609,7 @@ dependencies = [
 
 [[package]]
 name = "v-model"
-version = "0.3.2"
+version = "0.4.0-rc.0"
 dependencies = [
  "async-bb8-diesel",
  "async-trait",
@@ -4267,7 +4267,7 @@ checksum = "9edde0db4769d2dc68579893f2306b26c6ecfbe0ef499b013d731b7b9247e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.3.2"
+version = "0.4.0-rc.0"
 dependencies = [
  "clap",
  "regex",
