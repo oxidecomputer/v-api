@@ -6,7 +6,7 @@ use newtype_uuid::TypedUuid;
 use oauth2::CsrfToken;
 use std::sync::Arc;
 use v_model::{
-    LoginAttempt, LoginAttemptId, LoginAttemptState, NewLoginAttempt,
+    LoginAttempt, LoginAttemptId, LoginAttemptState, NewLoginAttempt, OAuthClientId,
     storage::{ListPagination, LoginAttemptFilter, LoginAttemptStore, StoreError},
 };
 
@@ -44,14 +44,12 @@ where
         attempt: LoginAttempt,
         code: String,
     ) -> Result<LoginAttempt, StoreError> {
-        let mut attempt: NewLoginAttempt = attempt.into();
-        attempt.provider_authz_code = Some(code);
+        let mut update: NewLoginAttempt = attempt.into();
+        update.provider_authz_code = Some(code);
+        update.attempt_state = LoginAttemptState::RemoteAuthenticated;
+        update.authz_code = Some(CsrfToken::new_random().secret().to_string());
 
-        // TODO: Internal state changes to the struct
-        attempt.attempt_state = LoginAttemptState::RemoteAuthenticated;
-        attempt.authz_code = Some(CsrfToken::new_random().secret().to_string());
-
-        LoginAttemptStore::upsert(&*self.storage, attempt).await
+        LoginAttemptStore::update_if_state(&*self.storage, update, LoginAttemptState::New).await
     }
 
     pub async fn get_login_attempt(
@@ -64,10 +62,12 @@ where
     pub async fn get_login_attempt_for_code(
         &self,
         code: &str,
+        provider: &str,
     ) -> Result<Option<LoginAttempt>, StoreError> {
         let filter = LoginAttemptFilter {
             attempt_state: Some(vec![LoginAttemptState::RemoteAuthenticated]),
             authz_code: Some(vec![code.to_string()]),
+            provider: Some(vec![provider.to_string()]),
             ..Default::default()
         };
 
@@ -84,25 +84,78 @@ where
         Ok(attempts.pop())
     }
 
-    pub async fn complete_login_attempt(
+    /// Atomically claim a login attempt by transitioning it from `RemoteAuthenticated`
+    /// to `Complete`. Returns an error if the attempt has already been claimed by a
+    /// concurrent request (i.e., the state is no longer `RemoteAuthenticated`).
+    /// This must be called before exchanging the authorization code with the remote
+    /// provider to prevent the same code from being used twice (RFC 6749 §4.1.2).
+    pub async fn claim_login_attempt(
         &self,
         attempt: LoginAttempt,
     ) -> Result<LoginAttempt, StoreError> {
-        let mut attempt: NewLoginAttempt = attempt.into();
-        attempt.attempt_state = LoginAttemptState::Complete;
-        LoginAttemptStore::upsert(&*self.storage, attempt).await
+        let mut update: NewLoginAttempt = attempt.into();
+        update.attempt_state = LoginAttemptState::Complete;
+
+        LoginAttemptStore::update_if_state(
+            &*self.storage,
+            update,
+            LoginAttemptState::RemoteAuthenticated,
+        )
+        .await
+    }
+
+    /// Look up a login attempt by the v-api-issued device code and the client
+    /// id. Returns `None` if no matching attempt is found.
+    pub async fn get_login_attempt_for_device_code(
+        &self,
+        device_code: &str,
+        client_id: &TypedUuid<OAuthClientId>,
+    ) -> Result<Option<LoginAttempt>, StoreError> {
+        let filter = LoginAttemptFilter {
+            attempt_state: Some(vec![LoginAttemptState::New]),
+            client_id: Some(vec![*client_id]),
+            device_code: Some(vec![device_code.to_string()]),
+            ..Default::default()
+        };
+
+        let mut attempts = LoginAttemptStore::list(
+            &*self.storage,
+            filter,
+            &ListPagination {
+                offset: 0,
+                limit: 1,
+            },
+        )
+        .await?;
+
+        Ok(attempts.pop())
+    }
+
+    /// Atomically claim a device flow login attempt by transitioning it from `New`
+    /// to `Complete`. Device flow attempts skip the `RemoteAuthenticated` state
+    /// because the API server proxies both the authorization and token exchange.
+    pub async fn claim_device_login_attempt(
+        &self,
+        attempt: LoginAttempt,
+    ) -> Result<LoginAttempt, StoreError> {
+        let mut update: NewLoginAttempt = attempt.into();
+        update.attempt_state = LoginAttemptState::Complete;
+
+        LoginAttemptStore::update_if_state(&*self.storage, update, LoginAttemptState::New).await
     }
 
     pub async fn fail_login_attempt(
         &self,
         attempt: LoginAttempt,
+        expected_state: LoginAttemptState,
         error: Option<&str>,
         provider_error: Option<&str>,
     ) -> Result<LoginAttempt, StoreError> {
-        let mut attempt: NewLoginAttempt = attempt.into();
-        attempt.attempt_state = LoginAttemptState::Failed;
-        attempt.error = error.map(|s| s.to_string());
-        attempt.provider_error = provider_error.map(|s| s.to_string());
-        LoginAttemptStore::upsert(&*self.storage, attempt).await
+        let mut update: NewLoginAttempt = attempt.into();
+        update.attempt_state = LoginAttemptState::Failed;
+        update.error = error.map(|s| s.to_string());
+        update.provider_error = provider_error.map(|s| s.to_string());
+
+        LoginAttemptStore::update_if_state(&*self.storage, update, expected_state).await
     }
 }

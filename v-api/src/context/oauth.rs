@@ -40,15 +40,10 @@ where
     pub async fn create_oauth_client(
         &self,
         caller: &Caller<T>,
+        id: TypedUuid<OAuthClientId>,
     ) -> ResourceResult<OAuthClient, StoreError> {
         if caller.can(&VPermission::CreateOAuthClient.into()) {
-            Ok(OAuthClientStore::upsert(
-                &*self.storage,
-                NewOAuthClient {
-                    id: TypedUuid::new_v4(),
-                },
-            )
-            .await?)
+            Ok(OAuthClientStore::upsert(&*self.storage, NewOAuthClient { id }).await?)
         } else {
             resource_restricted()
         }

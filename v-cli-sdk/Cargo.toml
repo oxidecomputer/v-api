@@ -1,0 +1,24 @@
+[package]
+name = "v-cli-sdk"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["server", "http1"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+oauth2 = { workspace = true }
+owo-colors = { workspace = true }
+progenitor-client = { workspace = true }
+reqwest = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_urlencoded = { workspace = true }
+tabwriter = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "net", "sync"] }
+uuid = { workspace = true }

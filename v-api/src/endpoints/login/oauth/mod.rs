@@ -5,44 +5,48 @@
 use async_trait::async_trait;
 use http::Method;
 use hyper::{body::Bytes, header::AUTHORIZATION, header::HeaderValue};
+use newtype_uuid::TypedUuid;
 use oauth2::{
     AuthUrl, ClientId, ClientSecret, EndpointMaybeSet, EndpointNotSet, EndpointSet, RedirectUrl,
     RevocationUrl, TokenUrl, basic::BasicClient, url::ParseError,
 };
 use reqwest::Request;
 use schemars::JsonSchema;
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
 use thiserror::Error;
 use tracing::instrument;
-use v_model::OAuthClient;
+use v_model::{OAuthClient, OAuthClientId};
 
-use crate::authn::{Verify, key::RawKey};
+use crate::{
+    authn::{Verify, key::RawKey},
+    secrets::OpenApiSecretString,
+};
 
-use super::{UserInfo, UserInfoError, UserInfoProvider};
+use super::{UserInfo, UserInfoError, UserInfoProvider, is_redirect_uri_valid};
 
 pub mod client;
-pub mod code;
-pub mod device_token;
-pub mod github;
-pub mod google;
+pub mod flow;
+pub mod remote;
 
 #[derive(Debug, Error)]
 pub enum OAuthProviderError {
     #[error("Unable to instantiate invalid provider")]
     FailToCreateInvalidProvider,
+    #[error("Missing redirect URI")]
+    MissingRedirectUri,
+    #[error("Failed to parse URL")]
+    UrlParseError(#[from] ParseError),
+    #[error("Provider does not support web clients")]
+    WebClientNotSupported,
 }
 
 #[derive(Debug)]
 pub enum ClientType {
     Device,
     Web,
-}
-
-#[derive(Debug)]
-pub struct WebClientConfig {
-    prefix: String,
+    WebPkce,
 }
 
 pub type WebClient = BasicClient<
@@ -58,67 +62,47 @@ pub type WebClient = BasicClient<
     EndpointSet,
 >;
 
-pub struct OAuthPublicCredentials {
-    client_id: String,
-}
-
-pub struct OAuthPrivateCredentials {
-    client_secret: SecretString,
-}
-
 pub trait OAuthProvider: ExtractUserInfo + Debug + Send + Sync {
     fn name(&self) -> OAuthProviderName;
-    fn scopes(&self) -> Vec<&str>;
     fn initialize_headers(&self, request: &mut Request);
     fn client(&self) -> &reqwest::Client;
-    fn client_id(&self, client_type: &ClientType) -> &str;
-    fn client_secret(&self, client_type: &ClientType) -> Option<&SecretString>;
-
-    // TODO: How can user info be change to something statically checked instead of a runtime check
     fn user_info_endpoints(&self) -> Vec<&str>;
-    fn device_code_endpoint(&self) -> &str;
-    fn auth_url_endpoint(&self) -> &str;
-    fn token_exchange_content_type(&self) -> &str;
-    fn token_exchange_endpoint(&self) -> &str;
-    fn token_revocation_endpoint(&self) -> Option<&str>;
+
+    fn authz_code_flow_info(&self) -> Option<&OAuthProviderAuthorizationCodeInfo>;
+    fn authz_code_pkce_flow_info(&self) -> Option<&OAuthProviderAuthorizationCodePkceInfo>;
+    fn device_code_flow_info(&self) -> Option<&OAuthProviderDeviceInfo>;
+
+    fn expires_in(&self) -> Option<u64>;
+    fn default_scopes(&self) -> &[String];
+
+    /// Whether the remote OAuth provider supports PKCE (RFC 7636). Providers must
+    /// explicitly declare this. This controls whether v-api sends a PKCE challenge
+    /// to the remote provider during the authorization code exchange. Note: clients
+    /// calling v-api are always required to use PKCE regardless of this setting.
     fn supports_pkce(&self) -> bool;
 
-    fn provider_info(&self, public_url: &str, client_type: &ClientType) -> OAuthProviderInfo {
-        OAuthProviderInfo {
-            provider: self.name(),
-            client_id: self.client_id(client_type).to_string(),
-            auth_url_endpoint: self.auth_url_endpoint().to_string(),
-            device_code_endpoint: self.device_code_endpoint().to_string(),
-            token_endpoint: format!("{}/login/oauth/{}/device/exchange", public_url, self.name(),),
-            scopes: self
-                .scopes()
-                .into_iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>(),
+    fn as_web_client(&self) -> Result<WebClient, OAuthProviderError> {
+        match self.authz_code_flow_info() {
+            Some(info) => {
+                let client = BasicClient::new(ClientId::new(info.remote.client_id.clone()))
+                    .set_auth_uri(AuthUrl::new(info.remote.auth_url_endpoint.clone())?)
+                    .set_token_uri(TokenUrl::new(info.remote.token_endpoint.clone())?)
+                    .set_revocation_url_option(
+                        info.remote
+                            .revocation_endpoint
+                            .as_ref()
+                            .map(|url| RevocationUrl::new(url.to_string()))
+                            .transpose()?,
+                    )
+                    .set_redirect_uri(RedirectUrl::new(info.redirect_endpoint.to_string())?)
+                    .set_client_secret(ClientSecret::new(
+                        info.remote.client_secret.0.expose_secret().to_string(),
+                    ));
+
+                Ok(client)
+            }
+            None => Err(OAuthProviderError::WebClientNotSupported),
         }
-    }
-
-    fn as_web_client(&self, config: &WebClientConfig) -> Result<WebClient, ParseError> {
-        let mut client =
-            BasicClient::new(ClientId::new(self.client_id(&ClientType::Web).to_string()))
-                .set_auth_uri(AuthUrl::new(self.auth_url_endpoint().to_string())?)
-                .set_token_uri(TokenUrl::new(self.token_exchange_endpoint().to_string())?)
-                .set_revocation_url_option(
-                    self.token_revocation_endpoint()
-                        .map(|s| RevocationUrl::new(s.to_string()))
-                        .transpose()?,
-                )
-                .set_redirect_uri(RedirectUrl::new(format!(
-                    "{}/login/oauth/{}/code/callback",
-                    &config.prefix,
-                    self.name()
-                ))?);
-
-        if let Some(secret) = self.client_secret(&ClientType::Web) {
-            client = client.set_client_secret(ClientSecret::new(secret.expose_secret().to_string()))
-        }
-
-        Ok(client)
     }
 }
 
@@ -155,33 +139,100 @@ where
             );
 
             let response = self.client().execute(request).await?;
+            let status = response.status();
 
-            tracing::trace!(status = ?response.status(), "Received response from OAuth provider");
+            tracing::trace!(?status, "Received response from OAuth provider");
+
+            if !status.is_success() {
+                tracing::error!(
+                    ?status,
+                    endpoint,
+                    "User info endpoint returned non-success status"
+                );
+                return Err(UserInfoError::UnexpectedStatus {
+                    endpoint: endpoint.to_string(),
+                    status,
+                });
+            }
 
             let bytes = response.bytes().await?;
             responses.push(bytes);
         }
 
-        self.extract_user_info(&responses)
+        let mut info = self.extract_user_info(&responses)?;
+        info.idp_token = Some(token.to_string());
+        Ok(info)
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct OAuthProviderInfo {
     provider: OAuthProviderName,
     client_id: String,
-    auth_url_endpoint: String,
-    device_code_endpoint: String,
-    token_endpoint: String,
-    scopes: Vec<String>,
+    code: Option<OAuthProviderAuthorizationCodeInfo>,
+    pkce: Option<OAuthProviderAuthorizationCodePkceInfo>,
+    device: Option<OAuthProviderDeviceInfo>,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq, Hash, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct OAuthProviderAuthorizationCodeInfo {
+    auth_url_endpoint: String,
+    redirect_endpoint: String,
+    token_endpoint_content_type: String,
+    token_endpoint: String,
+    #[schemars(skip)]
+    #[serde(skip)]
+    remote: OAuthProviderAuthorizationCodeRemoteInfo,
+}
+
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct OAuthProviderAuthorizationCodeRemoteInfo {
+    client_id: String,
+    #[schemars(skip)]
+    #[serde(skip)]
+    client_secret: OpenApiSecretString,
+    auth_url_endpoint: String,
+    token_endpoint_content_type: String,
+    token_endpoint: String,
+    revocation_endpoint: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct OAuthProviderAuthorizationCodePkceInfo {
+    client_id: TypedUuid<OAuthClientId>,
+    redirect_endpoint: String,
+    proxy_port: u16,
+    web: OAuthProviderAuthorizationCodeInfo,
+}
+
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct OAuthProviderDeviceInfo {
+    client_id: TypedUuid<OAuthClientId>,
+    auth_url_endpoint: String,
+    token_endpoint: String,
+    #[schemars(skip)]
+    #[serde(skip)]
+    remote: OAuthProviderDeviceRemoteInfo,
+}
+
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct OAuthProviderDeviceRemoteInfo {
+    client_id: String,
+    #[schemars(skip)]
+    #[serde(skip)]
+    client_secret: OpenApiSecretString,
+    device_code_endpoint: String,
+    token_endpoint: String,
+    revocation_endpoint: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum OAuthProviderName {
     #[serde(rename = "github")]
     GitHub,
     Google,
+    Zendesk,
 }
 
 impl Display for OAuthProviderName {
@@ -189,6 +240,7 @@ impl Display for OAuthProviderName {
         match self {
             OAuthProviderName::GitHub => write!(f, "github"),
             OAuthProviderName::Google => write!(f, "google"),
+            OAuthProviderName::Zendesk => write!(f, "zendesk"),
         }
     }
 }
@@ -224,8 +276,9 @@ impl CheckOAuthClient for OAuthClient {
 
     fn is_redirect_uri_valid(&self, redirect_uri: &str) -> bool {
         tracing::trace!(?redirect_uri, valid_uris = ?self.redirect_uris, "Checking redirect uri against list of valid uris");
-        self.redirect_uris
-            .iter()
-            .any(|r| r.redirect_uri == redirect_uri)
+        is_redirect_uri_valid(
+            redirect_uri,
+            self.redirect_uris.iter().map(|r| r.redirect_uri.as_str()),
+        )
     }
 }

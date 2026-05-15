@@ -218,6 +218,7 @@ where
                     external_id: ExternalUserId::MagicLink(body.recipient.clone()),
                     verified_emails: vec![body.recipient],
                     display_name: None,
+                    idp_token: None,
                 },
             )
             .await?;
@@ -312,8 +313,9 @@ impl CheckMagicLinkClient for MagicLink {
 
     fn is_redirect_uri_valid(&self, redirect_uri: &str) -> bool {
         tracing::trace!(?redirect_uri, valid_uris = ?self.redirect_uris, "Checking redirect uri against list of valid uris");
-        self.redirect_uris
-            .iter()
-            .any(|r| r.redirect_uri == redirect_uri)
+        super::is_redirect_uri_valid(
+            redirect_uri,
+            self.redirect_uris.iter().map(|r| r.redirect_uri.as_str()),
+        )
     }
 }

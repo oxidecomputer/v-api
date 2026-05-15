@@ -29,7 +29,6 @@ oauth2 = { workspace = true }
 oauth2-reqwest = { workspace = true }
 newtype-uuid = { workspace = true }
 partial-struct = { workspace = true }
-percent-encoding = { workspace = true }
 rand = { workspace = true, features = ["std"] }
 reqwest = { workspace = true }
 rsa = { workspace = true, features = ["sha2"] }

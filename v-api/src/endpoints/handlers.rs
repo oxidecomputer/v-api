@@ -69,15 +69,18 @@ mod macros {
                             DeleteOAuthClientSecretPath, GetOAuthClientPath,
                             InitialOAuthClientSecretResponse,
                         },
-                        code::{
+                        flow::code::{
                             authz_code_callback_op, authz_code_exchange_op, authz_code_redirect_op,
-                            OAuthAuthzCodeExchangeBody, OAuthAuthzCodeExchangeResponse,
+                            get_public_pkce_provider_op,
+                            OAuthAuthzCodeExchangeBody, OAuthAuthzCodeExchangeResponse, OAuthAuthzCodeExchangeQuery,
                             OAuthAuthzCodeQuery, OAuthAuthzCodeReturnQuery,
                         },
-                        device_token::{
-                            exchange_device_token_op, get_device_provider_op, AccessTokenExchangeRequest,
+                        flow::device_token::{
+                            exchange_device_token_op, device_authz_op, get_device_provider_op,
+                            DeviceTokenExchangeRequest, DeviceAuthorizationRequest,
                         },
-                        OAuthProviderInfo, OAuthProviderNameParam,
+                        OAuthProviderNameParam, OAuthProviderAuthorizationCodePkceInfo,
+                        OAuthProviderDeviceInfo
                     }
                 },
                 mappers::{
@@ -259,7 +262,7 @@ mod macros {
 
             // LOGIN ENDPOINTS
 
-            // AUTHZ CODE
+            // AUTHORIZATION CODE FLOW
 
             /// Generate the remote provider login url and redirect the user
             #[endpoint {
@@ -295,15 +298,30 @@ mod macros {
             }]
             pub async fn authz_code_exchange(
                 rqctx: RequestContext<$context_type>,
+                query: Query<OAuthAuthzCodeExchangeQuery>,
                 path: Path<OAuthProviderNameParam>,
                 body: TypedBody<OAuthAuthzCodeExchangeBody>,
             ) -> Result<HttpResponseOk<OAuthAuthzCodeExchangeResponse>, HttpError> {
-                authz_code_exchange_op(&rqctx, path, body).await
+                authz_code_exchange_op(&rqctx, query, path, body).await
             }
 
-            // DEVICE CODE
+            // AUTHORIZATION CODE PKCE ONLY FLOW
 
-            /// Retrieve the metadata about an OAuth provider
+            /// Retrieve the metadata about an OAuth provider for public PKCE authorization code flow
+            #[endpoint {
+                method = GET,
+                path = "/login/oauth/{provider}/public-pkce"
+            }]
+            pub async fn get_web_pkce_provider(
+                rqctx: RequestContext<$context_type>,
+                path: Path<OAuthProviderNameParam>,
+            ) -> Result<HttpResponseOk<OAuthProviderAuthorizationCodePkceInfo>, HttpError> {
+                get_public_pkce_provider_op(&rqctx, path).await
+            }
+
+            // DEVICE CODE FLOW
+
+            /// Retrieve the metadata about an OAuth provider for device authorization flow
             #[endpoint {
                 method = GET,
                 path = "/login/oauth/{provider}/device"
@@ -311,11 +329,27 @@ mod macros {
             pub async fn get_device_provider(
                 rqctx: RequestContext<$context_type>,
                 path: Path<OAuthProviderNameParam>,
-            ) -> Result<HttpResponseOk<OAuthProviderInfo>, HttpError> {
+            ) -> Result<HttpResponseOk<OAuthProviderDeviceInfo>, HttpError> {
                 get_device_provider_op(&rqctx, path).await
             }
 
-            /// Exchange an OAuth device code request for an access token
+            /// Initiate a device authorization flow by proxying the request to the
+            /// upstream OAuth provider. Creates a login attempt and returns the
+            /// upstream device authorization response.
+            #[endpoint {
+                method = POST,
+                path = "/login/oauth/{provider}/device"
+            }]
+            pub async fn device_authz(
+                rqctx: RequestContext<$context_type>,
+                path: Path<OAuthProviderNameParam>,
+                body: TypedBody<DeviceAuthorizationRequest>,
+            ) -> Result<Response<Body>, HttpError> {
+                device_authz_op(&rqctx, path, body).await
+            }
+
+            /// Exchange an OAuth device code for an access token. The client polls
+            /// this endpoint until the user completes authorization.
             #[endpoint {
                 method = POST,
                 path = "/login/oauth/{provider}/device/exchange",
@@ -324,7 +358,7 @@ mod macros {
             pub async fn exchange_device_token(
                 rqctx: RequestContext<$context_type>,
                 path: Path<OAuthProviderNameParam>,
-                body: TypedBody<AccessTokenExchangeRequest>,
+                body: TypedBody<DeviceTokenExchangeRequest>,
             ) -> Result<Response<Body>, HttpError> {
                 exchange_device_token_op(&rqctx, path, body).await
             }
@@ -787,8 +821,12 @@ mod macros {
             $api.register(authz_code_exchange)
                 .expect("Failed to register endpoint");
 
-            // OAuth Device Login
+            // OAuth Login
+            $api.register(get_web_pkce_provider)
+                .expect("Failed to register endpoint");
             $api.register(get_device_provider)
+                .expect("Failed to register endpoint");
+            $api.register(device_authz)
                 .expect("Failed to register endpoint");
             $api.register(exchange_device_token)
                 .expect("Failed to register endpoint");
