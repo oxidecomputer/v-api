@@ -703,6 +703,8 @@ pub struct Mapper {
     pub activations: Option<i32>,
     pub max_activations: Option<i32>,
     #[partial(NewMapper(skip))]
+    pub ephemeral: bool,
+    #[partial(NewMapper(skip))]
     pub depleted_at: Option<DateTime<Utc>>,
     #[partial(NewMapper(skip))]
     pub created_at: DateTime<Utc>,
@@ -720,6 +722,8 @@ impl From<MapperModel> for Mapper {
             rule: value.rule,
             activations: value.activations,
             max_activations: value.max_activations,
+            // By definition a stored mapper is not ephemeral
+            ephemeral: false,
             depleted_at: value.depleted_at,
             created_at: value.created_at,
             updated_at: value.updated_at,

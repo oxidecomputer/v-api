@@ -958,6 +958,7 @@ where
                     rule: config.rule,
                     activations: None,
                     max_activations: None,
+                    ephemeral: true,
                     depleted_at: None,
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
