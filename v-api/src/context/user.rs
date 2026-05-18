@@ -368,6 +368,7 @@ where
     pub async fn create_api_user(
         &self,
         caller: &Caller<T>,
+        id: TypedUuid<UserId>,
         permissions: Permissions<T>,
         groups: Vec<AccessGroup<T>>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
@@ -381,7 +382,7 @@ where
             && caller.can_grant_all(&group_permissions)
         {
             let new_user = NewApiUser {
-                id: TypedUuid::new_v4(),
+                id,
                 permissions,
                 groups: groups.into_iter().map(|g| g.id).collect(),
             };

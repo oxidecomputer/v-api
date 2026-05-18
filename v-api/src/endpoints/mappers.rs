@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use dropshot::{HttpError, HttpResponseCreated, HttpResponseOk, RequestContext};
+use dropshot::{
+    ClientErrorStatusCode, HttpError, HttpResponseCreated, HttpResponseOk, RequestContext,
+};
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -16,7 +18,7 @@ use v_model::{
 use crate::{
     context::{ApiContext, VContextWithCaller},
     permissions::{VAppPermission, VPermission},
-    response::bad_request,
+    response::{bad_request, client_error},
 };
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -97,6 +99,16 @@ where
     T::AppPermissions: Permission + From<VPermission> + AsScope + PermissionStorage,
 {
     let (ctx, caller) = rqctx.as_ctx().await?;
+
+    // Ephemeral mappers cannot be deleted via the API — they are managed
+    // via service configuration.
+    if ctx.mapping.is_ephemeral(&path.mapper_id) {
+        return Err(client_error(
+            ClientErrorStatusCode::CONFLICT,
+            "Ephemeral mappers are managed via service configuration and cannot be deleted at runtime",
+        ));
+    }
+
     Ok(HttpResponseOk(
         ctx.mapping.remove_mapper(&caller, &path.mapper_id).await?,
     ))
