@@ -748,7 +748,7 @@ where
 /// Configuration for an ephemeral mapper that is loaded from service configuration.
 ///
 /// Ephemeral mappers exist only in memory for the lifetime of the process. They cannot
-/// be modified or deleted via the API. They do not support activation limits \u2014 they
+/// be modified or deleted via the API. They do not support activation limits, they
 /// fire unconditionally whenever their rule matches.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EphemeralMapperConfig {
