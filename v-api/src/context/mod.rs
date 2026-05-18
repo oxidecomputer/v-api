@@ -510,7 +510,7 @@ where
 
         let (mapped_permissions, mapped_groups) = self
             .mapping
-            .get_mapped_fields(caller, &info, &user_id)
+            .get_mapped_fields(caller, &info, user_id)
             .await
             .inner_err_into()?;
 

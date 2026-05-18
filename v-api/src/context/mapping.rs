@@ -54,7 +54,6 @@ where
         self.ephemeral_mappers = mappers;
     }
 
-    /// Returns true if the given mapper ID belongs to an ephemeral mapper.
     pub fn is_ephemeral(&self, id: &TypedUuid<MapperId>) -> bool {
         self.ephemeral_mappers.iter().any(|m| &m.id == id)
     }
@@ -78,9 +77,6 @@ where
                 &ListPagination::unlimited(),
             )
             .await?;
-
-            // Merge in ephemeral mappers. These are always included since they
-            // cannot be depleted or deleted.
             mappers.extend(self.ephemeral_mappers.iter().cloned());
 
             Ok(mappers)
@@ -117,7 +113,7 @@ where
         &self,
         caller: &Caller<T>,
         info: &UserInfo,
-        user_id: &TypedUuid<UserId>,
+        user_id: TypedUuid<UserId>,
     ) -> ResourceResult<(Permissions<T>, BTreeSet<TypedUuid<AccessGroupId>>), StoreError> {
         let mut mapped_permissions = Permissions::new();
         let mut mapped_groups = BTreeSet::new();
@@ -216,14 +212,14 @@ where
     async fn record_mapper_event(
         &self,
         mapper: &Mapper,
-        user_id: &TypedUuid<UserId>,
+        user_id: TypedUuid<UserId>,
         ephemeral: bool,
     ) -> Result<(), StoreError> {
         let event = NewMapperEvent {
             id: TypedUuid::new_v4(),
             mapper_id: mapper.id,
             mapper_name: mapper.name.clone(),
-            user_id: *user_id,
+            user_id,
             rule: mapper.rule.clone(),
             ephemeral,
         };
