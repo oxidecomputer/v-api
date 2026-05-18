@@ -173,7 +173,8 @@ where
                 };
 
                 if apply {
-                    // Record the mapper event for audit purposes
+                    // Record the mapper event for audit purposes.
+                    // TODO: This should hook into an audit log feature
                     if let Err(err) = self
                         .record_mapper_event(&mapper, user_id, is_ephemeral)
                         .await

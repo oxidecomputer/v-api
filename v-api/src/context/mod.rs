@@ -493,9 +493,9 @@ where
         // Determine the user_id upfront so we can pass it to
         // get_mapped_fields for event recording. For new users we
         // pre-generate the id; for existing users we use the known id.
-        let user_id = match api_user_providers.len() {
-            0 => TypedUuid::new_v4(),
-            1 => api_user_providers[0].user_id,
+        let (user_id, is_new_user) = match api_user_providers.len() {
+            0 => (TypedUuid::new_v4(), true),
+            1 => (api_user_providers[0].user_id, false),
             _ => {
                 tracing::error!(
                     count = api_user_providers.len(),
@@ -517,104 +517,94 @@ where
         tracing::debug!(?mapped_permissions, "Computed mapping permissions");
         tracing::debug!(?mapped_groups, "Computed mapped groups");
 
-        match api_user_providers.len() {
-            0 => {
-                tracing::info!(
-                    ?mapped_permissions,
-                    ?mapped_groups,
-                    "Did not find any existing users. Registering a new user."
-                );
+        if is_new_user {
+            tracing::info!(
+                ?mapped_permissions,
+                ?mapped_groups,
+                "Did not find any existing users. Registering a new user."
+            );
 
-                // Resolve the full groups so that create_api_user can verify
-                // the caller is allowed to grant the permissions they carry.
-                let groups = self
-                    .group
-                    .list_groups(
-                        caller,
-                        v_model::storage::AccessGroupFilter {
-                            id: Some(mapped_groups.into_iter().collect()),
-                            ..Default::default()
-                        },
-                    )
+            // Resolve the full groups so that create_api_user can verify
+            // the caller is allowed to grant the permissions they carry.
+            let groups = self
+                .group
+                .list_groups(
+                    caller,
+                    v_model::storage::AccessGroupFilter {
+                        id: Some(mapped_groups.into_iter().collect()),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .inner_err_into()?;
+
+            let user = self
+                .user
+                .create_api_user(caller, user_id, mapped_permissions, groups)
+                .await
+                .inner_err_into()?;
+
+            let user_provider = self
+                .user
+                .update_api_user_provider(
+                    caller,
+                    NewApiUserProvider {
+                        id: TypedUuid::new_v4(),
+                        user_id: user.user.id,
+                        emails: info.verified_emails,
+                        provider: info.external_id.provider().to_string(),
+                        provider_id: info.external_id.id().to_string(),
+                        display_names: info.display_name.map(|name| vec![name]).unwrap_or_default(),
+                    },
+                )
+                .await
+                .inner_err_into()?;
+
+            Ok((user, user_provider))
+        } else {
+            tracing::info!(
+                "Found an existing user provider. Ensuring mapped permissions and groups for user."
+            );
+
+            // This branch ensures that there is a 0th indexed item
+            let mut provider = api_user_providers.into_iter().nth(0).unwrap();
+
+            // Update the provider with the newest user info
+            provider.emails = info.verified_emails;
+            provider.display_names = info.display_name.map(|name| vec![name]).unwrap_or_default();
+
+            tracing::info!(?provider.id, "Updating provider for user");
+
+            let provider = self
+                .user
+                .update_api_user_provider(caller, provider.clone().into())
+                .await
+                .inner_err_into()?;
+
+            tracing::info!(?provider.id, ?provider.user_id, "Updating found user permissions and groups");
+
+            // Add mapped permissions to the existing user
+            self.user
+                .add_permissions_to_user(caller, &provider.user_id, mapped_permissions)
+                .await
+                .inner_err_into()?;
+
+            // Add mapped groups to the existing user
+            for group_id in &mapped_groups {
+                self.add_api_user_to_group(caller, &provider.user_id, group_id)
                     .await
                     .inner_err_into()?;
-
-                let user = self
-                    .user
-                    .create_api_user(caller, user_id, mapped_permissions, groups)
-                    .await
-                    .inner_err_into()?;
-
-                let user_provider = self
-                    .user
-                    .update_api_user_provider(
-                        caller,
-                        NewApiUserProvider {
-                            id: TypedUuid::new_v4(),
-                            user_id: user.user.id,
-                            emails: info.verified_emails,
-                            provider: info.external_id.provider().to_string(),
-                            provider_id: info.external_id.id().to_string(),
-                            display_names: info
-                                .display_name
-                                .map(|name| vec![name])
-                                .unwrap_or_default(),
-                        },
-                    )
-                    .await
-                    .inner_err_into()?;
-
-                Ok((user, user_provider))
             }
-            1 => {
-                tracing::info!(
-                    "Found an existing user provider. Ensuring mapped permissions and groups for user."
-                );
 
-                // This branch ensures that there is a 0th indexed item
-                let mut provider = api_user_providers.into_iter().nth(0).unwrap();
+            let updated_user = self
+                .user
+                .get_api_user(caller, &provider.user_id)
+                .await
+                .inner_err_into()?;
 
-                // Update the provider with the newest user info
-                provider.emails = info.verified_emails;
-                provider.display_names =
-                    info.display_name.map(|name| vec![name]).unwrap_or_default();
+            tracing::info!(?updated_user.user.id, "Updated user permissions and groups");
 
-                tracing::info!(?provider.id, "Updating provider for user");
-
-                let provider = self
-                    .user
-                    .update_api_user_provider(caller, provider.clone().into())
-                    .await
-                    .inner_err_into()?;
-
-                tracing::info!(?provider.id, ?provider.user_id, "Updating found user permissions and groups");
-
-                // Add mapped permissions to the existing user
-                self.user
-                    .add_permissions_to_user(caller, &provider.user_id, mapped_permissions)
-                    .await
-                    .inner_err_into()?;
-
-                // Add mapped groups to the existing user
-                for group_id in &mapped_groups {
-                    self.add_api_user_to_group(caller, &provider.user_id, group_id)
-                        .await
-                        .inner_err_into()?;
-                }
-
-                let updated_user = self
-                    .user
-                    .get_api_user(caller, &provider.user_id)
-                    .await
-                    .inner_err_into()?;
-
-                tracing::info!(?updated_user.user.id, "Updated user permissions and groups");
-
-                Ok((updated_user, provider))
-            }
-            // The multi-provider case is handled before the match above,
-            // so this arm is unreachable.
-            _ => unreachable!(),
+            Ok((updated_user, provider))
         }
     }
 
