@@ -8,8 +8,9 @@ use chrono::{TimeDelta, Utc};
 use dropshot::{ClientErrorStatusCode, HttpError, RequestContext, ServerContext};
 use futures::future::join_all;
 use jsonwebtoken::jwk::JwkSet;
-use newtype_uuid::TypedUuid;
-use serde::Serialize;
+use newtype_uuid::{GenericUuid, TypedUuid};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 #[cfg(feature = "sagas")]
 use slog::Logger;
 use std::{fmt::Debug, future::Future, path::PathBuf, sync::Arc};
@@ -23,15 +24,15 @@ use v_model::saga::{
     view::SagaExecNodeId,
 };
 use v_model::{
-    AccessGroupId, ApiUserInfo, ApiUserProvider, LinkRequest, NewApiUser, NewApiUserProvider,
-    NewLinkRequest, UserId, UserProviderId,
+    AccessGroupId, ApiUserInfo, ApiUserProvider, LinkRequest, Mapper, NewApiUser,
+    NewApiUserProvider, NewLinkRequest, UserId, UserProviderId,
     permissions::{Caller, Permission},
     storage::{
         AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore, ApiUserFilter,
         ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, LinkRequestStore,
         ListPagination, LoginAttemptStore, MagicLinkAttemptStore, MagicLinkRedirectUriStore,
-        MagicLinkSecretStore, MagicLinkStore, MapperStore, OAuthClientRedirectUriStore,
-        OAuthClientSecretStore, OAuthClientStore, StoreError,
+        MagicLinkSecretStore, MagicLinkStore, MapperEventStore, MapperStore,
+        OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore, StoreError,
         postgres::{PostgresError, PostgresStore},
     },
 };
@@ -90,6 +91,7 @@ pub trait VApiStorage<P: Send + Sync>:
     + OAuthClientRedirectUriStore
     + AccessGroupStore<P>
     + MapperStore
+    + MapperEventStore
     + LinkRequestStore
     + MagicLinkStore
     + MagicLinkSecretStore
@@ -117,6 +119,7 @@ where
         + OAuthClientRedirectUriStore
         + AccessGroupStore<P>
         + MapperStore
+        + MapperEventStore
         + LinkRequestStore
         + MagicLinkStore
         + MagicLinkSecretStore
@@ -143,6 +146,7 @@ pub trait VApiStorage<P: Send + Sync>:
     + OAuthClientRedirectUriStore
     + AccessGroupStore<P>
     + MapperStore
+    + MapperEventStore
     + LinkRequestStore
     + MagicLinkStore
     + MagicLinkSecretStore
@@ -168,6 +172,7 @@ where
         + OAuthClientRedirectUriStore
         + AccessGroupStore<P>
         + MapperStore
+        + MapperEventStore
         + LinkRequestStore
         + MagicLinkStore
         + MagicLinkSecretStore
@@ -485,122 +490,121 @@ where
             .await
             .inner_err_into()?;
 
+        // Determine the user_id upfront so we can pass it to
+        // get_mapped_fields for event recording. For new users we
+        // pre-generate the id; for existing users we use the known id.
+        let (user_id, is_new_user) = match api_user_providers.len() {
+            0 => (TypedUuid::new_v4(), true),
+            1 => (api_user_providers[0].user_id, false),
+            _ => {
+                tracing::error!(
+                    count = api_user_providers.len(),
+                    "Found multiple providers for external id"
+                );
+
+                return resource_error(ApiError::from(StoreError::InvariantFailed(
+                    "Multiple providers for external id found".to_string(),
+                )));
+            }
+        };
+
         let (mapped_permissions, mapped_groups) = self
             .mapping
-            .get_mapped_fields(caller, &info)
+            .get_mapped_fields(caller, &info, user_id)
             .await
             .inner_err_into()?;
 
         tracing::debug!(?mapped_permissions, "Computed mapping permissions");
         tracing::debug!(?mapped_groups, "Computed mapped groups");
 
-        match api_user_providers.len() {
-            0 => {
-                tracing::info!(
-                    ?mapped_permissions,
-                    ?mapped_groups,
-                    "Did not find any existing users. Registering a new user."
-                );
+        if is_new_user {
+            tracing::info!(
+                ?mapped_permissions,
+                ?mapped_groups,
+                "Did not find any existing users. Registering a new user."
+            );
 
-                // Resolve the full groups so that create_api_user can verify
-                // the caller is allowed to grant the permissions they carry.
-                let groups = self
-                    .group
-                    .list_groups(
-                        caller,
-                        v_model::storage::AccessGroupFilter {
-                            id: Some(mapped_groups.into_iter().collect()),
-                            ..Default::default()
-                        },
-                    )
+            // Resolve the full groups so that create_api_user can verify
+            // the caller is allowed to grant the permissions they carry.
+            let groups = self
+                .group
+                .list_groups(
+                    caller,
+                    v_model::storage::AccessGroupFilter {
+                        id: Some(mapped_groups.into_iter().collect()),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .inner_err_into()?;
+
+            let user = self
+                .user
+                .create_api_user(caller, user_id, mapped_permissions, groups)
+                .await
+                .inner_err_into()?;
+
+            let user_provider = self
+                .user
+                .update_api_user_provider(
+                    caller,
+                    NewApiUserProvider {
+                        id: TypedUuid::new_v4(),
+                        user_id: user.user.id,
+                        emails: info.verified_emails,
+                        provider: info.external_id.provider().to_string(),
+                        provider_id: info.external_id.id().to_string(),
+                        display_names: info.display_name.map(|name| vec![name]).unwrap_or_default(),
+                    },
+                )
+                .await
+                .inner_err_into()?;
+
+            Ok((user, user_provider))
+        } else {
+            tracing::info!(
+                "Found an existing user provider. Ensuring mapped permissions and groups for user."
+            );
+
+            // This branch ensures that there is a 0th indexed item
+            let mut provider = api_user_providers.into_iter().nth(0).unwrap();
+
+            // Update the provider with the newest user info
+            provider.emails = info.verified_emails;
+            provider.display_names = info.display_name.map(|name| vec![name]).unwrap_or_default();
+
+            tracing::info!(?provider.id, "Updating provider for user");
+
+            let provider = self
+                .user
+                .update_api_user_provider(caller, provider.clone().into())
+                .await
+                .inner_err_into()?;
+
+            tracing::info!(?provider.id, ?provider.user_id, "Updating found user permissions and groups");
+
+            // Add mapped permissions to the existing user
+            self.user
+                .add_permissions_to_user(caller, &provider.user_id, mapped_permissions)
+                .await
+                .inner_err_into()?;
+
+            // Add mapped groups to the existing user
+            for group_id in &mapped_groups {
+                self.add_api_user_to_group(caller, &provider.user_id, group_id)
                     .await
                     .inner_err_into()?;
-
-                let user = self
-                    .user
-                    .create_api_user(caller, mapped_permissions, groups)
-                    .await
-                    .inner_err_into()?;
-
-                let user_provider = self
-                    .user
-                    .update_api_user_provider(
-                        caller,
-                        NewApiUserProvider {
-                            id: TypedUuid::new_v4(),
-                            user_id: user.user.id,
-                            emails: info.verified_emails,
-                            provider: info.external_id.provider().to_string(),
-                            provider_id: info.external_id.id().to_string(),
-                            display_names: info
-                                .display_name
-                                .map(|name| vec![name])
-                                .unwrap_or_default(),
-                        },
-                    )
-                    .await
-                    .inner_err_into()?;
-
-                Ok((user, user_provider))
             }
-            1 => {
-                tracing::info!(
-                    "Found an existing user provider. Ensuring mapped permissions and groups for user."
-                );
 
-                // This branch ensures that there is a 0th indexed item
-                let mut provider = api_user_providers.into_iter().nth(0).unwrap();
+            let updated_user = self
+                .user
+                .get_api_user(caller, &provider.user_id)
+                .await
+                .inner_err_into()?;
 
-                // Update the provider with the newest user info
-                provider.emails = info.verified_emails;
-                provider.display_names =
-                    info.display_name.map(|name| vec![name]).unwrap_or_default();
+            tracing::info!(?updated_user.user.id, "Updated user permissions and groups");
 
-                tracing::info!(?provider.id, "Updating provider for user");
-
-                let provider = self
-                    .user
-                    .update_api_user_provider(caller, provider.clone().into())
-                    .await
-                    .inner_err_into()?;
-
-                tracing::info!(?provider.id, ?provider.user_id, "Updating found user permissions and groups");
-
-                // Add mapped permissions to the existing user
-                self.user
-                    .add_permissions_to_user(caller, &provider.user_id, mapped_permissions)
-                    .await
-                    .inner_err_into()?;
-
-                // Add mapped groups to the existing user
-                for group_id in &mapped_groups {
-                    self.add_api_user_to_group(caller, &provider.user_id, group_id)
-                        .await
-                        .inner_err_into()?;
-                }
-
-                let updated_user = self
-                    .user
-                    .get_api_user(caller, &provider.user_id)
-                    .await
-                    .inner_err_into()?;
-
-                tracing::info!(?updated_user.user.id, "Updated user permissions and groups");
-
-                Ok((updated_user, provider))
-            }
-            _ => {
-                // If we found more than one provider, then we have encountered an inconsistency in
-                // our database.
-                tracing::error!(
-                    count = api_user_providers.len(),
-                    "Found multiple providers for external id"
-                );
-
-                resource_error(ApiError::from(StoreError::InvariantFailed(
-                    "Multiple providers for external id found".to_string(),
-                )))
-            }
+            Ok((updated_user, provider))
         }
     }
 
@@ -741,6 +745,19 @@ where
     }
 }
 
+/// Configuration for an ephemeral mapper that is loaded from service configuration.
+///
+/// Ephemeral mappers exist only in memory for the lifetime of the process. They cannot
+/// be modified or deleted via the API. They do not support activation limits, they
+/// fire unconditionally whenever their rule matches.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EphemeralMapperConfig {
+    /// Human-readable name for this mapper
+    pub name: String,
+    /// The mapping rule as a JSON value (same format as dynamic mapper rules)
+    pub rule: Value,
+}
+
 #[derive(Debug, Error)]
 pub enum VContextBuilderError {
     #[error("Conflicting configuration, only one of {0} and {1} can be set")]
@@ -761,6 +778,7 @@ pub struct VContextBuilder<T> {
     storage: Option<Arc<dyn VApiStorage<T>>>,
     storage_url: Option<String>,
     keys: Option<Vec<AsymmetricKey>>,
+    mappers: Vec<EphemeralMapperConfig>,
     #[cfg(feature = "sagas")]
     saga: Option<(TypedUuid<SagaExecNodeId>, Option<Logger>)>,
 }
@@ -787,6 +805,7 @@ where
             storage: None,
             storage_url: None,
             keys: None,
+            mappers: Vec::new(),
             #[cfg(feature = "sagas")]
             saga: None,
         }
@@ -824,6 +843,11 @@ where
 
     pub fn with_keys(mut self, keys: Vec<AsymmetricKey>) -> Self {
         self.keys = Some(keys);
+        self
+    }
+
+    pub fn with_mappers(mut self, mappers: Vec<EphemeralMapperConfig>) -> Self {
+        self.mappers = mappers;
         self
     }
 
@@ -909,6 +933,38 @@ where
             auth_ctx.builtin_registration_user(),
             group_ctx.clone(),
         ))));
+
+        // Convert ephemeral mapper configs into Mapper structs with deterministic IDs
+        let ephemeral_mappers: Vec<Mapper> = self
+            .mappers
+            .into_iter()
+            .map(|config| {
+                // Generate a deterministic UUID v5 from the mapper name so that
+                // IDs are stable across process restarts
+                let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, config.name.as_bytes());
+                Mapper {
+                    id: TypedUuid::from_untyped_uuid(id),
+                    name: config.name,
+                    rule: config.rule,
+                    activations: None,
+                    max_activations: None,
+                    ephemeral: true,
+                    depleted_at: None,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    deleted_at: None,
+                }
+            })
+            .collect();
+
+        if !ephemeral_mappers.is_empty() {
+            tracing::info!(
+                count = ephemeral_mappers.len(),
+                "Loaded ephemeral mappers from configuration"
+            );
+        }
+
+        mapping_ctx.set_ephemeral_mappers(ephemeral_mappers);
 
         #[cfg(feature = "sagas")]
         let saga = if let Some((node_id, logger)) = self.saga {
@@ -1233,14 +1289,14 @@ pub(crate) mod test_mocks {
             AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore,
             ApiUserProviderStore, ApiUserStore, LinkRequestStore, ListPagination,
             LoginAttemptStore, MagicLinkAttemptFilter, MagicLinkAttemptStore, MagicLinkFilter,
-            MagicLinkRedirectUriStore, MagicLinkSecretStore, MagicLinkStore, MapperStore,
-            MockAccessGroupStore, MockAccessTokenStore, MockApiKeyStore,
+            MagicLinkRedirectUriStore, MagicLinkSecretStore, MagicLinkStore, MapperEventStore,
+            MapperStore, MockAccessGroupStore, MockAccessTokenStore, MockApiKeyStore,
             MockApiUserContactEmailStore, MockApiUserProviderStore, MockApiUserStore,
             MockLinkRequestStore, MockLoginAttemptStore, MockMagicLinkAttemptStore,
             MockMagicLinkRedirectUriStore, MockMagicLinkSecretStore, MockMagicLinkStore,
-            MockMapperStore, MockOAuthClientRedirectUriStore, MockOAuthClientSecretStore,
-            MockOAuthClientStore, OAuthClientRedirectUriStore, OAuthClientSecretStore,
-            OAuthClientStore, StoreError,
+            MockMapperEventStore, MockMapperStore, MockOAuthClientRedirectUriStore,
+            MockOAuthClientSecretStore, MockOAuthClientStore, OAuthClientRedirectUriStore,
+            OAuthClientSecretStore, OAuthClientStore, StoreError,
         },
     };
 
@@ -1302,6 +1358,7 @@ pub(crate) mod test_mocks {
         pub oauth_client_redirect_uri_store: Option<Arc<MockOAuthClientRedirectUriStore>>,
         pub access_group_store: Option<Arc<MockAccessGroupStore<VPermission>>>,
         pub mapper_store: Option<Arc<MockMapperStore>>,
+        pub mapper_event_store: Option<Arc<MockMapperEventStore>>,
         pub link_request_store: Option<Arc<MockLinkRequestStore>>,
         pub magic_link_store: Option<Arc<MockMagicLinkStore>>,
         pub magic_link_secret_store: Option<Arc<MockMagicLinkSecretStore>>,
@@ -1327,6 +1384,7 @@ pub(crate) mod test_mocks {
                 oauth_client_redirect_uri_store: None,
                 access_group_store: None,
                 mapper_store: None,
+                mapper_event_store: None,
                 link_request_store: None,
                 magic_link_store: None,
                 magic_link_secret_store: None,
@@ -1786,6 +1844,32 @@ pub(crate) mod test_mocks {
             id: &TypedUuid<MapperId>,
         ) -> Result<Option<v_model::Mapper>, v_model::storage::StoreError> {
             self.mapper_store.as_ref().unwrap().delete(id).await
+        }
+    }
+
+    #[async_trait]
+    impl MapperEventStore for MockStorage {
+        async fn record(
+            &self,
+            event: &v_model::NewMapperEvent,
+        ) -> Result<v_model::MapperEvent, v_model::storage::StoreError> {
+            self.mapper_event_store
+                .as_ref()
+                .unwrap()
+                .record(event)
+                .await
+        }
+
+        async fn list(
+            &self,
+            filter: v_model::storage::MapperEventFilter,
+            pagination: &ListPagination,
+        ) -> Result<Vec<v_model::MapperEvent>, v_model::storage::StoreError> {
+            self.mapper_event_store
+                .as_ref()
+                .unwrap()
+                .list(filter, pagination)
+                .await
         }
     }
 

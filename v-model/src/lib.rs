@@ -6,8 +6,8 @@ use chrono::{DateTime, Utc};
 use db::{
     AccessGroupModel, ApiKeyModel, ApiUserAccessTokenModel, ApiUserContactEmailModel, ApiUserModel,
     ApiUserProviderModel, LinkRequestModel, LoginAttemptModel, MagicLinkAttemptModel,
-    MagicLinkModel, MagicLinkRedirectUriModel, MagicLinkSecretModel, MapperModel, OAuthClientModel,
-    OAuthClientRedirectUriModel, OAuthClientSecretModel,
+    MagicLinkModel, MagicLinkRedirectUriModel, MagicLinkSecretModel, MapperEventModel, MapperModel,
+    OAuthClientModel, OAuthClientRedirectUriModel, OAuthClientSecretModel,
 };
 use newtype_uuid::{GenericUuid, TypedUuid, TypedUuidKind, TypedUuidTag};
 use partial_struct::partial;
@@ -703,6 +703,8 @@ pub struct Mapper {
     pub activations: Option<i32>,
     pub max_activations: Option<i32>,
     #[partial(NewMapper(skip))]
+    pub ephemeral: bool,
+    #[partial(NewMapper(skip))]
     pub depleted_at: Option<DateTime<Utc>>,
     #[partial(NewMapper(skip))]
     pub created_at: DateTime<Utc>,
@@ -720,10 +722,65 @@ impl From<MapperModel> for Mapper {
             rule: value.rule,
             activations: value.activations,
             max_activations: value.max_activations,
+            // By definition a stored mapper is not ephemeral
+            ephemeral: false,
             depleted_at: value.depleted_at,
             created_at: value.created_at,
             updated_at: value.updated_at,
             deleted_at: value.deleted_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MapperSource {
+    /// Created via the API, persisted in the database, supports activation limits
+    Dynamic,
+    /// Loaded from service configuration, in-memory only, no activation limits
+    Ephemeral,
+}
+
+#[derive(JsonSchema)]
+pub enum MapperEventId {}
+impl TypedUuidKind for MapperEventId {
+    fn tag() -> TypedUuidTag {
+        const TAG: TypedUuidTag = TypedUuidTag::new("mapper-event");
+        TAG
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MapperEvent {
+    pub id: TypedUuid<MapperEventId>,
+    pub mapper_id: TypedUuid<MapperId>,
+    pub mapper_name: String,
+    pub user_id: TypedUuid<UserId>,
+    pub rule: Value,
+    pub ephemeral: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewMapperEvent {
+    pub id: TypedUuid<MapperEventId>,
+    pub mapper_id: TypedUuid<MapperId>,
+    pub mapper_name: String,
+    pub user_id: TypedUuid<UserId>,
+    pub rule: Value,
+    pub ephemeral: bool,
+}
+
+impl From<MapperEventModel> for MapperEvent {
+    fn from(value: MapperEventModel) -> Self {
+        MapperEvent {
+            id: TypedUuid::from_untyped_uuid(value.id),
+            mapper_id: TypedUuid::from_untyped_uuid(value.mapper_id),
+            mapper_name: value.mapper_name,
+            user_id: TypedUuid::from_untyped_uuid(value.user_id),
+            rule: value.rule,
+            ephemeral: value.ephemeral,
+            created_at: value.created_at,
         }
     }
 }

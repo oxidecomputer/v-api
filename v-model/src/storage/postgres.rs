@@ -20,24 +20,25 @@ use crate::{
     ApiUserContactEmail, ApiUserInfo, ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt,
     LoginAttemptId, MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId,
     MagicLinkRedirectUri, MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, Mapper,
-    MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser, NewApiUserContactEmail,
-    NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMagicLink, NewMagicLinkAttempt,
-    NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, NewOAuthClient,
-    NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
+    MapperEvent, MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
+    NewApiUserContactEmail, NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMagicLink,
+    NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, NewMapperEvent,
+    NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
     OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId,
     UserContactEmailId, UserId, UserProviderId,
     db::{
         AccessGroupModel, ApiKeyModel, ApiUserAccessTokenModel, ApiUserContactEmailModel,
         ApiUserModel, ApiUserProviderModel, LinkRequestModel, LoginAttemptModel,
         MagicLinkAttemptModel, MagicLinkModel, MagicLinkRedirectUriModel, MagicLinkSecretModel,
-        MapperModel, OAuthClientModel, OAuthClientRedirectUriModel, OAuthClientSecretModel,
+        MapperEventModel, MapperModel, OAuthClientModel, OAuthClientRedirectUriModel,
+        OAuthClientSecretModel,
     },
     permissions::Permission,
     schema::{
         access_groups, api_key, api_user, api_user_access_token, api_user_contact_email,
         api_user_provider, link_request, login_attempt, magic_link_attempt, magic_link_client,
-        magic_link_client_redirect_uri, magic_link_client_secret, mapper, oauth_client,
-        oauth_client_redirect_uri, oauth_client_secret,
+        magic_link_client_redirect_uri, magic_link_client_secret, mapper, mapper_event,
+        oauth_client, oauth_client_redirect_uri, oauth_client_secret,
     },
     schema_ext::MagicLinkAttemptState,
     storage::{LinkRequestFilter, LinkRequestStore, StoreError},
@@ -48,8 +49,9 @@ use super::{
     ApiKeyStore, ApiUserContactEmailFilter, ApiUserContactEmailStore, ApiUserFilter,
     ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, ListPagination, LoginAttemptFilter,
     LoginAttemptStore, MagicLinkAttemptFilter, MagicLinkAttemptStore, MagicLinkFilter,
-    MagicLinkRedirectUriStore, MagicLinkSecretStore, MagicLinkStore, MapperFilter, MapperStore,
-    OAuthClientFilter, OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore,
+    MagicLinkRedirectUriStore, MagicLinkSecretStore, MagicLinkStore, MapperEventFilter,
+    MapperEventStore, MapperFilter, MapperStore, OAuthClientFilter, OAuthClientRedirectUriStore,
+    OAuthClientSecretStore, OAuthClientStore,
 };
 
 pub type DbPool = Pool<ConnectionManager<PgConnection>>;
@@ -1504,6 +1506,70 @@ impl MapperStore for PostgresStore {
             .await?;
 
         MapperStore::get(self, id, false, true).await
+    }
+}
+
+#[async_trait]
+impl MapperEventStore for PostgresStore {
+    #[instrument(skip(self), err(Debug))]
+    async fn record(&self, event: &NewMapperEvent) -> Result<MapperEvent, StoreError> {
+        tracing::trace!("Recording mapper event");
+
+        let model: MapperEventModel = insert_into(mapper_event::dsl::mapper_event)
+            .values((
+                mapper_event::id.eq(event.id.into_untyped_uuid()),
+                mapper_event::mapper_id.eq(event.mapper_id.into_untyped_uuid()),
+                mapper_event::mapper_name.eq(event.mapper_name.clone()),
+                mapper_event::user_id.eq(event.user_id.into_untyped_uuid()),
+                mapper_event::rule.eq(event.rule.clone()),
+                mapper_event::ephemeral.eq(event.ephemeral),
+            ))
+            .get_result_async(&*self.pool.get().await?)
+            .await?;
+
+        Ok(model.into())
+    }
+
+    #[instrument(skip(self), err(Debug))]
+    async fn list(
+        &self,
+        filter: MapperEventFilter,
+        pagination: &ListPagination,
+    ) -> Result<Vec<MapperEvent>, StoreError> {
+        tracing::trace!("Listing mapper events");
+
+        let mut query = mapper_event::dsl::mapper_event.into_boxed();
+
+        let MapperEventFilter {
+            id,
+            mapper_id,
+            ephemeral,
+        } = filter;
+
+        if let Some(id) = id {
+            query = query
+                .filter(mapper_event::id.eq_any(id.into_iter().map(|id| id.into_untyped_uuid())));
+        }
+
+        if let Some(mapper_id) = mapper_id {
+            query = query.filter(
+                mapper_event::mapper_id
+                    .eq_any(mapper_id.into_iter().map(|id| id.into_untyped_uuid())),
+            );
+        }
+
+        if let Some(ephemeral) = ephemeral {
+            query = query.filter(mapper_event::ephemeral.eq(ephemeral));
+        }
+
+        let results = query
+            .offset(pagination.offset)
+            .limit(pagination.limit)
+            .order(mapper_event::created_at.desc())
+            .get_results_async::<MapperEventModel>(&*self.pool.get().await?)
+            .await?;
+
+        Ok(results.into_iter().map(|model| model.into()).collect())
     }
 }
 

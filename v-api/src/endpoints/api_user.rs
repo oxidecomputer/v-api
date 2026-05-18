@@ -239,7 +239,7 @@ where
 
     let info = ctx
         .user
-        .create_api_user(&caller, body.permissions, groups)
+        .create_api_user(&caller, TypedUuid::new_v4(), body.permissions, groups)
         .await?;
 
     let filter = ApiUserProviderFilter {
