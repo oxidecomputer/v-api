@@ -148,7 +148,7 @@ where
 
                 let apply = if !permissions.is_empty() || !groups.is_empty() {
                     if is_ephemeral {
-                        // Ephemeral mappers always apply — no activation gating
+                        // Ephemeral mappers always apply - no activation gating
                         true
                     } else if mapper.max_activations.is_some() {
                         // Dynamic mappers with activation limits need to consume an activation
