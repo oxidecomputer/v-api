@@ -45,7 +45,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tracing = { workspace = true }
 url = { workspace = true }
-uuid = { workspace = true, features = ["v4", "serde"]  }
+uuid = { workspace = true, features = ["v4", "v5", "serde"]  }
 v-api-param = { path = "../v-api-param" }
 v-api-permission-derive = { path = "../v-api-permission-derive" }
 v-model = { path = "../v-model" }

@@ -172,6 +172,18 @@ diesel::table! {
 }
 
 diesel::table! {
+    mapper_event (id) {
+        id -> Uuid,
+        mapper_id -> Uuid,
+        mapper_name -> Varchar,
+        user_id -> Uuid,
+        rule -> Jsonb,
+        ephemeral -> Bool,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     mapper (id) {
         id -> Uuid,
         name -> Varchar,
@@ -265,6 +277,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     magic_link_client_redirect_uri,
     magic_link_client_secret,
     mapper,
+    mapper_event,
     oauth_client,
     oauth_client_redirect_uri,
     oauth_client_secret,

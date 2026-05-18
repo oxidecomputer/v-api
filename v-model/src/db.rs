@@ -13,8 +13,8 @@ use crate::{
     schema::{
         access_groups, api_key, api_user, api_user_access_token, api_user_contact_email,
         api_user_provider, link_request, login_attempt, magic_link_attempt, magic_link_client,
-        magic_link_client_redirect_uri, magic_link_client_secret, mapper, oauth_client,
-        oauth_client_redirect_uri, oauth_client_secret,
+        magic_link_client_redirect_uri, magic_link_client_secret, mapper, mapper_event,
+        oauth_client, oauth_client_redirect_uri, oauth_client_secret,
     },
     schema_ext::{LoginAttemptState, MagicLinkAttemptState},
 };
@@ -200,6 +200,18 @@ pub struct MapperModel {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
+#[diesel(table_name = mapper_event)]
+pub struct MapperEventModel {
+    pub id: Uuid,
+    pub mapper_id: Uuid,
+    pub mapper_name: String,
+    pub user_id: Uuid,
+    pub rule: Value,
+    pub ephemeral: bool,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]

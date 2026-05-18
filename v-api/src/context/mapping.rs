@@ -6,9 +6,9 @@ use newtype_uuid::TypedUuid;
 use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc};
 use v_model::{
-    AccessGroupId, Mapper, MapperId, NewMapper, Permissions,
+    AccessGroupId, Mapper, MapperId, NewMapper, NewMapperEvent, Permissions, UserId,
     permissions::Caller,
-    storage::{ListPagination, MapperFilter, MapperStore, StoreError},
+    storage::{ListPagination, MapperEventStore, MapperFilter, MapperStore, StoreError},
 };
 
 use crate::{
@@ -22,6 +22,7 @@ use crate::{
 pub struct MappingContext<T> {
     engine: Option<Arc<dyn MappingEngine<T>>>,
     storage: Arc<dyn VApiStorage<T>>,
+    ephemeral_mappers: Vec<Mapper>,
 }
 
 impl<T> MappingContext<T>
@@ -32,6 +33,7 @@ where
         Self {
             engine: None,
             storage,
+            ephemeral_mappers: Vec::new(),
         }
     }
 
@@ -48,6 +50,15 @@ where
         previous
     }
 
+    pub fn set_ephemeral_mappers(&mut self, mappers: Vec<Mapper>) {
+        self.ephemeral_mappers = mappers;
+    }
+
+    /// Returns true if the given mapper ID belongs to an ephemeral mapper.
+    pub fn is_ephemeral(&self, id: &TypedUuid<MapperId>) -> bool {
+        self.ephemeral_mappers.iter().any(|m| &m.id == id)
+    }
+
     pub fn validate(&self, value: &Value) -> bool {
         match &self.engine {
             Some(engine) => engine.validate_mapping_data(value),
@@ -61,12 +72,18 @@ where
         included_depleted: bool,
     ) -> ResourceResult<Vec<Mapper>, StoreError> {
         if caller.can(&VPermission::GetMappersAll.into()) {
-            Ok(MapperStore::list(
+            let mut mappers = MapperStore::list(
                 &*self.storage,
                 MapperFilter::default().depleted(included_depleted),
                 &ListPagination::unlimited(),
             )
-            .await?)
+            .await?;
+
+            // Merge in ephemeral mappers. These are always included since they
+            // cannot be depleted or deleted.
+            mappers.extend(self.ephemeral_mappers.iter().cloned());
+
+            Ok(mappers)
         } else {
             resource_restricted()
         }
@@ -100,6 +117,7 @@ where
         &self,
         caller: &Caller<T>,
         info: &UserInfo,
+        user_id: &TypedUuid<UserId>,
     ) -> ResourceResult<(Permissions<T>, BTreeSet<TypedUuid<AccessGroupId>>), StoreError> {
         let mut mapped_permissions = Permissions::new();
         let mut mapped_groups = BTreeSet::new();
@@ -111,10 +129,10 @@ where
             // instead handle mappers that become depleted before we can evaluate them at evaluation
             // time.
             for mapper in self.get_mappers(caller, false).await? {
-                tracing::trace!(?mapper.name, "Attempt to run mapper");
+                let is_ephemeral = self.is_ephemeral(&mapper.id);
+                tracing::trace!(?mapper.name, is_ephemeral, "Attempt to run mapper");
 
                 // Try to transform this mapper into a mapping
-                // let mappings = self.mapping_fns.iter().filter_map(|mapping_fn| mapping_fn(mapper.clone()).ok()).nth(0);
                 let mapping = engine.create_mapping(mapper.clone());
 
                 let (mut permissions, mut groups) = match mapping {
@@ -127,31 +145,31 @@ where
                     }
                     Err(err) => {
                         // Errors here can be expected. They are reported, but not acted upon
-                        tracing::info!(?err, "Not mapping was found for mapper");
+                        tracing::info!(?err, "No mapping was found for mapper");
                         (Permissions::new(), BTreeSet::default())
                     }
                 };
 
-                // If a rule is set to apply a permission or group to a user, then the rule needs to be
-                // checked for usage. If it does not have an activation limit then nothing is needed.
-                // If it does have a limit then we need to attempt to consume an activation. If the
-                // consumption works then we add the permissions. If they fail then we do not, but we
-                // do not fail the entire mapping process
                 let apply = if !permissions.is_empty() || !groups.is_empty() {
-                    if mapper.max_activations.is_some() {
+                    if is_ephemeral {
+                        // Ephemeral mappers always apply — no activation gating
+                        true
+                    } else if mapper.max_activations.is_some() {
+                        // Dynamic mappers with activation limits need to consume an activation
                         match self.consume_mapping_activation(&mapper).await {
                             Ok(_) => true,
                             Err(err) => {
                                 // TODO: Inspect the error. We expect to see a conflict error, and
                                 // should is expected to be seen. Other errors are problematic.
-                                tracing::warn!(
+                                tracing::info!(
                                     ?err,
-                                    "Login may have attempted to use depleted mapper. This may be ok if it is an isolated occurrence, but should occur repeatedly."
+                                    "Login may have attempted to use depleted mapper."
                                 );
                                 false
                             }
                         }
                     } else {
+                        // Dynamic mappers without activation limits always apply
                         true
                     }
                 } else {
@@ -159,6 +177,18 @@ where
                 };
 
                 if apply {
+                    // Record the mapper event for audit purposes
+                    if let Err(err) = self
+                        .record_mapper_event(&mapper, user_id, is_ephemeral)
+                        .await
+                    {
+                        tracing::warn!(
+                            ?err,
+                            mapper_name = ?mapper.name,
+                            "Failed to record mapper event"
+                        );
+                    }
+
                     mapped_permissions.append(&mut permissions);
                     mapped_groups.append(&mut groups);
                 }
@@ -179,6 +209,26 @@ where
         update.activations = activations;
 
         MapperStore::upsert(&*self.storage, &update)
+            .await
+            .map(|_| ())
+    }
+
+    async fn record_mapper_event(
+        &self,
+        mapper: &Mapper,
+        user_id: &TypedUuid<UserId>,
+        ephemeral: bool,
+    ) -> Result<(), StoreError> {
+        let event = NewMapperEvent {
+            id: TypedUuid::new_v4(),
+            mapper_id: mapper.id,
+            mapper_name: mapper.name.clone(),
+            user_id: *user_id,
+            rule: mapper.rule.clone(),
+            ephemeral,
+        };
+
+        MapperEventStore::record(&*self.storage, &event)
             .await
             .map(|_| ())
     }
