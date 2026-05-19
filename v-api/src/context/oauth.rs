@@ -4,6 +4,8 @@
 
 use newtype_uuid::TypedUuid;
 use std::sync::Arc;
+use thiserror::Error;
+use url::Url;
 use v_model::{
     NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
     OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId,
@@ -17,8 +19,18 @@ use v_model::{
 use crate::{
     VApiStorage,
     permissions::{VAppPermission, VPermission},
-    response::{OptionalResource, ResourceResult, resource_restricted},
+    response::{OptionalResource, ResourceError, ResourceResult, resource_restricted},
 };
+
+#[derive(Debug, Error)]
+pub enum OAuthError {
+    #[error("Invalid redirect URI")]
+    RedirectUriIsNotAUri,
+    #[error("Redirect URIs cannot contain fragments")]
+    RedirectUriContainsFragment,
+    #[error("Storage layer error")]
+    StoreError(#[from] StoreError),
+}
 
 #[derive(Clone)]
 pub struct OAuthContext<T> {
@@ -41,7 +53,7 @@ where
         &self,
         caller: &Caller<T>,
         id: TypedUuid<OAuthClientId>,
-    ) -> ResourceResult<OAuthClient, StoreError> {
+    ) -> ResourceResult<OAuthClient, OAuthError> {
         if caller.can(&VPermission::CreateOAuthClient.into()) {
             Ok(OAuthClientStore::upsert(&*self.storage, NewOAuthClient { id }).await?)
         } else {
@@ -53,7 +65,7 @@ where
         &self,
         caller: &Caller<T>,
         id: &TypedUuid<OAuthClientId>,
-    ) -> ResourceResult<OAuthClient, StoreError> {
+    ) -> ResourceResult<OAuthClient, OAuthError> {
         if caller.can(&VPermission::GetOAuthClient(*id).into()) {
             OAuthClientStore::get(&*self.storage, id, false)
                 .await
@@ -66,7 +78,7 @@ where
     pub async fn list_oauth_clients(
         &self,
         caller: &Caller<T>,
-    ) -> ResourceResult<Vec<OAuthClient>, StoreError> {
+    ) -> ResourceResult<Vec<OAuthClient>, OAuthError> {
         let mut clients = OAuthClientStore::list(
             &*self.storage,
             OAuthClientFilter {
@@ -88,7 +100,7 @@ where
         id: &TypedUuid<OAuthSecretId>,
         client_id: &TypedUuid<OAuthClientId>,
         secret: &str,
-    ) -> ResourceResult<OAuthClientSecret, StoreError> {
+    ) -> ResourceResult<OAuthClientSecret, OAuthError> {
         if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
             Ok(OAuthClientSecretStore::upsert(
                 &*self.storage,
@@ -109,7 +121,7 @@ where
         caller: &Caller<T>,
         id: &TypedUuid<OAuthSecretId>,
         client_id: &TypedUuid<OAuthClientId>,
-    ) -> ResourceResult<OAuthClientSecret, StoreError> {
+    ) -> ResourceResult<OAuthClientSecret, OAuthError> {
         if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
             OAuthClientSecretStore::delete(&*self.storage, id)
                 .await
@@ -124,7 +136,18 @@ where
         caller: &Caller<T>,
         client_id: &TypedUuid<OAuthClientId>,
         uri: &str,
-    ) -> ResourceResult<OAuthClientRedirectUri, StoreError> {
+    ) -> ResourceResult<OAuthClientRedirectUri, OAuthError> {
+        // Validate that the redirect URI is a well-formed URL before storing it.
+        // Per RFC 6749 §3.1.2, redirect URIs must be absolute URIs and must not
+        // include a fragment component.
+        let parsed = Url::parse(uri)
+            .map_err(|_| ResourceError::InternalError(OAuthError::RedirectUriIsNotAUri))?;
+        if parsed.fragment().is_some() {
+            return Err(ResourceError::InternalError(
+                OAuthError::RedirectUriContainsFragment,
+            ));
+        }
+
         if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
             Ok(OAuthClientRedirectUriStore::upsert(
                 &*self.storage,
@@ -145,7 +168,7 @@ where
         caller: &Caller<T>,
         id: &TypedUuid<OAuthRedirectUriId>,
         client_id: &TypedUuid<OAuthClientId>,
-    ) -> ResourceResult<OAuthClientRedirectUri, StoreError> {
+    ) -> ResourceResult<OAuthClientRedirectUri, OAuthError> {
         if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
             OAuthClientRedirectUriStore::delete(&*self.storage, id)
                 .await

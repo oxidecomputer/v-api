@@ -8,7 +8,6 @@ use newtype_uuid::{GenericUuid, TypedUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
-use url::Url;
 use v_model::{
     OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId,
     OAuthSecretId,
@@ -18,10 +17,11 @@ use v_model::{
 use crate::{
     VContext,
     authn::key::RawKey,
-    context::{ApiContext, VContextWithCaller},
+    context::{ApiContext, VContextWithCaller, oauth::OAuthError},
     permissions::{VAppPermission, VPermission},
+    response::{ResourceError, bad_request},
     secrets::OpenApiSecretString,
-    util::response::{bad_request, to_internal_error},
+    util::response::to_internal_error,
 };
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -196,21 +196,17 @@ where
     let path = path.into_inner();
     let body = body.into_inner();
 
-    // Validate that the redirect URI is a well-formed URL before storing it.
-    // Per RFC 6749 §3.1.2, redirect URIs must be absolute URIs and must not
-    // include a fragment component.
-    let parsed = Url::parse(&body.redirect_uri)
-        .map_err(|_| bad_request("Invalid redirect URI: not a valid URL"))?;
-    if parsed.fragment().is_some() {
-        return Err(bad_request(
-            "Invalid redirect URI: must not contain a fragment",
-        ));
-    }
-
     Ok(HttpResponseOk(
         ctx.oauth
             .add_oauth_redirect_uri(&caller, &path.client_id, &body.redirect_uri)
-            .await?,
+            .await
+            .map_err(|err| match err {
+                ResourceError::InternalError(OAuthError::RedirectUriIsNotAUri)
+                | ResourceError::InternalError(OAuthError::RedirectUriContainsFragment) => {
+                    bad_request("Invalid redirect URI")
+                }
+                err => err.into(),
+            })?,
     ))
 }
 
