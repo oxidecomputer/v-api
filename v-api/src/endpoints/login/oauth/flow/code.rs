@@ -70,6 +70,7 @@ fn build_login_attempt_cookie<'a>(
     cookie
 }
 
+// RFC 6749 §5.2 shaped error
 #[derive(Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq)]
 struct OAuthError {
     error: OAuthErrorCode,
@@ -79,6 +80,17 @@ struct OAuthError {
     error_uri: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     state: Option<String>,
+}
+
+impl OAuthError {
+    pub fn new(error: OAuthErrorCode, error_description: Option<&str>) -> Self {
+        Self {
+            error,
+            error_description: error_description.map(|s| s.to_string()),
+            error_uri: None,
+            state: None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq)]
@@ -134,12 +146,10 @@ fn validate_response_type(response_type: &str) -> Result<(), OAuthError> {
     if response_type == "code" {
         Ok(())
     } else {
-        Err(OAuthError {
-            error: OAuthErrorCode::UnsupportedResponseType,
-            error_description: Some("Only response_type=code is supported".to_string()),
-            error_uri: None,
-            state: None,
-        })
+        Err(OAuthError::new(
+            OAuthErrorCode::UnsupportedResponseType,
+            Some("Only response_type=code is supported"),
+        ))
     }
 }
 
@@ -161,32 +171,22 @@ where
             tracing::error!(?err, "Failed to lookup OAuth client");
 
             match err {
-                ResourceError::DoesNotExist => OAuthError {
-                    error: OAuthErrorCode::InvalidClient,
-                    error_description: Some("Unknown client id".to_string()),
-                    error_uri: None,
-                    state: None,
-                },
+                ResourceError::DoesNotExist => {
+                    OAuthError::new(OAuthErrorCode::InvalidClient, Some("Unknown client id"))
+                }
                 // Given that the builtin caller should have access to all OAuth clients, any other
                 // error is considered an internal error
-                _ => OAuthError {
-                    error: OAuthErrorCode::ServerError,
-                    error_description: None,
-                    error_uri: None,
-                    state: None,
-                },
+                _ => OAuthError::new(OAuthErrorCode::ServerError, None),
             }
         })?;
 
     if client.is_redirect_uri_valid(redirect_uri) {
         Ok(client)
     } else {
-        Err(OAuthError {
-            error: OAuthErrorCode::InvalidRequest,
-            error_description: Some("Invalid redirect uri".to_string()),
-            error_uri: None,
-            state: None,
-        })
+        Err(OAuthError::new(
+            OAuthErrorCode::InvalidRequest,
+            Some("Invalid redirect uri"),
+        ))
     }
 }
 
@@ -238,15 +238,10 @@ where
 
     // Validate the client's PKCE challenge method. Only S256 is supported.
     if query.code_challenge_method != "S256" {
-        return Err(OAuthError {
-            error: OAuthErrorCode::InvalidRequest,
-            error_description: Some(
-                "Unsupported code_challenge_method. Only S256 is supported.".to_string(),
-            ),
-            error_uri: None,
-            state: None,
-        }
-        .into());
+        Err(OAuthError::new(
+            OAuthErrorCode::InvalidRequest,
+            Some("Unsupported code_challenge_method. Only S256 is supported."),
+        ))?;
     }
 
     // Validate the PKCE code challenge. For S256, this must be a base64url-no-pad
@@ -258,16 +253,12 @@ where
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
     {
-        return Err(OAuthError {
-            error: OAuthErrorCode::InvalidRequest,
-            error_description: Some(
-                "Invalid code_challenge. Must be a base64url-encoded SHA256 hash (43 characters)."
-                    .to_string(),
+        Err(OAuthError::new(
+            OAuthErrorCode::InvalidRequest,
+            Some(
+                "Invalid code_challenge. Must be a base64url-encoded SHA256 hash (43 characters).",
             ),
-            error_uri: None,
-            state: None,
-        }
-        .into());
+        ))?;
     }
 
     // Find the configured provider for the requested remote backend. We should always have a valid
@@ -283,13 +274,10 @@ where
     let scope = query.scope.unwrap_or_else(|| DEFAULT_SCOPE.to_string());
     if let Err(err) = VPermission::from_scope_arg(&scope) {
         tracing::warn!(?err, ?scope, "Client submitted an invalid scope");
-        return Err(OAuthError {
-            error: OAuthErrorCode::InvalidScope,
-            error_description: Some(format!("Invalid scope: {}", scope)),
-            error_uri: None,
-            state: None,
-        }
-        .into());
+        Err(OAuthError::new(
+            OAuthErrorCode::InvalidScope,
+            Some(format!("Invalid scope: {}", scope).as_str()),
+        ))?;
     }
 
     // Construct a new login attempt with the minimum required values
@@ -705,12 +693,7 @@ where
         .get_login_attempt_for_code(&body.code, &provider.name().to_string())
         .await
         .map_err(to_internal_error)?
-        .ok_or(OAuthError {
-            error: OAuthErrorCode::InvalidGrant,
-            error_description: None,
-            error_uri: None,
-            state: None,
-        })?;
+        .ok_or(OAuthError::new(OAuthErrorCode::InvalidGrant, None))?;
 
     // Verify that the login attempt is valid and matches the submitted client credentials
     verify_login_attempt(
@@ -738,12 +721,10 @@ where
                 ?attempt_id,
                 "Failed to claim login attempt (may have been consumed by a concurrent request)"
             );
-            OAuthError {
-                error: OAuthErrorCode::InvalidGrant,
-                error_description: Some("Authorization code has already been used".to_string()),
-                error_uri: None,
-                state: None,
-            }
+            OAuthError::new(
+                OAuthErrorCode::InvalidGrant,
+                Some("Authorization code has already been used"),
+            )
         })?;
 
     tracing::debug!("Claimed login attempt");
@@ -782,12 +763,7 @@ where
 
     // Verify that we received the expected grant type
     if grant_type != "authorization_code" {
-        return Err(OAuthError {
-            error: OAuthErrorCode::UnsupportedGrantType,
-            error_description: None,
-            error_uri: None,
-            state: None,
-        });
+        Err(OAuthError::new(OAuthErrorCode::UnsupportedGrantType, None))?;
     }
 
     tracing::debug!(grant_type, "Verified grant type");
@@ -799,23 +775,19 @@ where
         let client_secret = RawKey::try_from(client_secret).map_err(|err| {
             tracing::warn!(?err, "Failed to parse OAuth client secret");
 
-            OAuthError {
-                error: OAuthErrorCode::InvalidRequest,
-                error_description: Some("Malformed client secret".to_string()),
-                error_uri: None,
-                state: None,
-            }
+            OAuthError::new(
+                OAuthErrorCode::InvalidRequest,
+                Some("Malformed client secret"),
+            )
         })?;
 
         tracing::debug!("Constructed client secret");
 
         if !client.is_secret_valid(&client_secret, ctx) {
-            Err(OAuthError {
-                error: OAuthErrorCode::InvalidClient,
-                error_description: Some("Invalid client secret".to_string()),
-                error_uri: None,
-                state: None,
-            })
+            Err(OAuthError::new(
+                OAuthErrorCode::InvalidClient,
+                Some("Invalid client secret"),
+            ))
         } else {
             tracing::debug!("Verified client secret validity");
 
@@ -824,12 +796,10 @@ where
     } else if provider.authz_code_pkce_flow_info().is_some() {
         Ok(())
     } else {
-        Err(OAuthError {
-            error: OAuthErrorCode::InvalidRequest,
-            error_description: Some("Client secret required".to_string()),
-            error_uri: None,
-            state: None,
-        })
+        Err(OAuthError::new(
+            OAuthErrorCode::InvalidRequest,
+            Some("Client secret required"),
+        ))
     }
 }
 
@@ -841,40 +811,30 @@ fn verify_login_attempt(
     pkce_verifier: &str,
 ) -> Result<(), OAuthError> {
     if attempt.provider != provider {
-        Err(OAuthError {
-            error: OAuthErrorCode::InvalidGrant,
-            error_description: Some("Provider mismatch".to_string()),
-            error_uri: None,
-            state: None,
-        })
+        Err(OAuthError::new(
+            OAuthErrorCode::InvalidGrant,
+            Some("Provider mismatch"),
+        ))
     } else if attempt.client_id != client_id {
-        Err(OAuthError {
-            error: OAuthErrorCode::InvalidGrant,
-            error_description: Some("Invalid client id".to_string()),
-            error_uri: None,
-            state: None,
-        })
+        Err(OAuthError::new(
+            OAuthErrorCode::InvalidGrant,
+            Some("Invalid client id"),
+        ))
     } else if attempt.redirect_uri.as_deref() != Some(redirect_uri) {
-        Err(OAuthError {
-            error: OAuthErrorCode::InvalidGrant,
-            error_description: Some("Invalid redirect uri".to_string()),
-            error_uri: None,
-            state: None,
-        })
+        Err(OAuthError::new(
+            OAuthErrorCode::InvalidGrant,
+            Some("Invalid redirect uri"),
+        ))
     } else if attempt.attempt_state != LoginAttemptState::RemoteAuthenticated {
-        Err(OAuthError {
-            error: OAuthErrorCode::InvalidGrant,
-            error_description: Some("Grant is in an invalid state".to_string()),
-            error_uri: None,
-            state: None,
-        })
+        Err(OAuthError::new(
+            OAuthErrorCode::InvalidGrant,
+            Some("Grant is in an invalid state"),
+        ))
     } else if attempt.expires_at.map(|t| t <= Utc::now()).unwrap_or(true) {
-        Err(OAuthError {
-            error: OAuthErrorCode::InvalidGrant,
-            error_description: Some("Grant has expired".to_string()),
-            error_uri: None,
-            state: None,
-        })
+        Err(OAuthError::new(
+            OAuthErrorCode::InvalidGrant,
+            Some("Grant has expired"),
+        ))
     } else {
         match attempt.pkce_challenge.as_deref() {
             Some(challenge) => {
@@ -886,22 +846,18 @@ fn verify_login_attempt(
                 if challenge == computed_challenge {
                     Ok(())
                 } else {
-                    Err(OAuthError {
-                        error: OAuthErrorCode::InvalidGrant,
-                        error_description: Some("Invalid pkce verifier".to_string()),
-                        error_uri: None,
-                        state: None,
-                    })
+                    Err(OAuthError::new(
+                        OAuthErrorCode::InvalidGrant,
+                        Some("Invalid pkce verifier"),
+                    ))
                 }
             }
             // PKCE is mandatory for all authorization code flows. A missing challenge
             // means the login attempt was not properly initialized.
-            None => Err(OAuthError {
-                error: OAuthErrorCode::InvalidGrant,
-                error_description: Some("Login attempt is missing a PKCE challenge".to_string()),
-                error_uri: None,
-                state: None,
-            }),
+            None => Err(OAuthError::new(
+                OAuthErrorCode::InvalidGrant,
+                Some("Login attempt is missing a PKCE challenge"),
+            )),
         }
     }
 }
