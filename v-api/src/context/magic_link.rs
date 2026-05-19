@@ -32,9 +32,18 @@ use crate::{
         OptionalResource, ResourceError, ResourceErrorInner, ResourceResult, resource_error,
         resource_restricted,
     },
+    util::{RedirectUrlError, parse_redirect_url},
 };
 
 use super::VApiStorage;
+
+#[derive(Debug, Error)]
+pub enum MagicLinkError {
+    #[error("Invalid redirect URI")]
+    RedirectUri(#[from] RedirectUrlError),
+    #[error("Storage layer error")]
+    StoreError(#[from] StoreError),
+}
 
 #[derive(Debug, Error)]
 pub enum MagicLinkSendError {
@@ -202,14 +211,16 @@ where
         caller: &Caller<T>,
         client_id: &TypedUuid<MagicLinkId>,
         uri: &str,
-    ) -> ResourceResult<MagicLinkRedirectUri, StoreError> {
+    ) -> ResourceResult<MagicLinkRedirectUri, MagicLinkError> {
+        let redirect_url = parse_redirect_url(&uri)
+            .map_err(|err| ResourceError::InternalError(MagicLinkError::RedirectUri(err)))?;
         if caller.can(&VPermission::ManageMagicLinkClient(*client_id).into()) {
             Ok(MagicLinkRedirectUriStore::upsert(
                 &*self.storage,
                 NewMagicLinkRedirectUri {
                     id: TypedUuid::new_v4(),
                     magic_link_client_id: *client_id,
-                    redirect_uri: uri.to_string(),
+                    redirect_uri: redirect_url.to_string(),
                 },
             )
             .await?)

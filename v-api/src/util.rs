@@ -8,8 +8,27 @@ use google_cloudkms1::{
     hyper_util::client::legacy::{Client, connect::HttpConnector},
     hyper_util::rt::TokioExecutor,
 };
+use thiserror::Error;
+use url::Url;
 
 use crate::authn::CloudKmsError;
+
+#[derive(Debug, Error)]
+pub enum RedirectUrlError {
+    #[error("Invalid uri")]
+    InvalidUrl,
+    #[error("Uri cannot contain fragment")]
+    ContainsFragment,
+}
+
+pub fn parse_redirect_url(uri: &str) -> Result<Url, RedirectUrlError> {
+    let parsed = Url::parse(uri).map_err(|_| RedirectUrlError::InvalidUrl)?;
+    if parsed.fragment().is_some() {
+        return Err(RedirectUrlError::ContainsFragment);
+    }
+
+    Ok(parsed)
+}
 
 pub mod request {
     use cookie::Cookie;

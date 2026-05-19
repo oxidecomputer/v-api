@@ -5,7 +5,6 @@
 use newtype_uuid::TypedUuid;
 use std::sync::Arc;
 use thiserror::Error;
-use url::Url;
 use v_model::{
     NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
     OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId,
@@ -20,14 +19,13 @@ use crate::{
     VApiStorage,
     permissions::{VAppPermission, VPermission},
     response::{OptionalResource, ResourceError, ResourceResult, resource_restricted},
+    util::{RedirectUrlError, parse_redirect_url},
 };
 
 #[derive(Debug, Error)]
 pub enum OAuthError {
     #[error("Invalid redirect URI")]
-    RedirectUriIsNotAUri,
-    #[error("Redirect URIs cannot contain fragments")]
-    RedirectUriContainsFragment,
+    RedirectUri(#[from] RedirectUrlError),
     #[error("Storage layer error")]
     StoreError(#[from] StoreError),
 }
@@ -140,13 +138,8 @@ where
         // Validate that the redirect URI is a well-formed URL before storing it.
         // Per RFC 6749 §3.1.2, redirect URIs must be absolute URIs and must not
         // include a fragment component.
-        let parsed = Url::parse(uri)
-            .map_err(|_| ResourceError::InternalError(OAuthError::RedirectUriIsNotAUri))?;
-        if parsed.fragment().is_some() {
-            return Err(ResourceError::InternalError(
-                OAuthError::RedirectUriContainsFragment,
-            ));
-        }
+        let redirect_url = parse_redirect_url(uri)
+            .map_err(|e| ResourceError::InternalError(OAuthError::RedirectUri(e)))?;
 
         if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
             Ok(OAuthClientRedirectUriStore::upsert(
@@ -154,7 +147,7 @@ where
                 NewOAuthClientRedirectUri {
                     id: TypedUuid::new_v4(),
                     oauth_client_id: *client_id,
-                    redirect_uri: uri.to_string(),
+                    redirect_uri: redirect_url.to_string(),
                 },
             )
             .await?)

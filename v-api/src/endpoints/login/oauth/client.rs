@@ -201,8 +201,7 @@ where
             .add_oauth_redirect_uri(&caller, &path.client_id, &body.redirect_uri)
             .await
             .map_err(|err| match err {
-                ResourceError::InternalError(OAuthError::RedirectUriIsNotAUri)
-                | ResourceError::InternalError(OAuthError::RedirectUriContainsFragment) => {
+                ResourceError::InternalError(OAuthError::RedirectUri(_)) => {
                     bad_request("Invalid redirect URI")
                 }
                 err => err.into(),
