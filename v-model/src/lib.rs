@@ -22,6 +22,7 @@ use std::{
 use thiserror::Error;
 
 pub mod db;
+pub mod migrations;
 pub mod permissions;
 #[cfg(feature = "sagas")]
 pub mod saga;
