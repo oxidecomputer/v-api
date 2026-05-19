@@ -85,10 +85,10 @@ pub struct DeviceAuthorizationResponse {
     pub verification_uri_complete: Option<Url>,
     /// Lifetime in seconds of the device_code and user_code.
     #[serde(default)]
-    pub expires_in: Option<i64>,
+    pub expires_in: Option<u32>,
     /// Minimum polling interval in seconds (default 5 per RFC 8628 §3.5).
     #[serde(default)]
-    pub interval: Option<i64>,
+    pub interval: Option<u32>,
 }
 
 /// Body sent to the upstream provider's device authorization endpoint.
@@ -201,7 +201,8 @@ where
 
     // Set expiration from upstream response or default to 10 minutes
     let expires_in_secs = device_authz.expires_in.unwrap_or(600);
-    attempt.expires_at = Some(Utc::now().add(TimeDelta::try_seconds(expires_in_secs).unwrap()));
+    attempt.expires_at =
+        Some(Utc::now().add(TimeDelta::try_seconds(expires_in_secs as i64).unwrap()));
 
     // Store the upstream device_code privately — the caller never sees this.
     attempt.provider_device_code = Some(device_authz.device_code.clone());
