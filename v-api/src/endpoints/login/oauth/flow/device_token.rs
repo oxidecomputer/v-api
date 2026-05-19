@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use std::ops::Add;
 use tap::TapFallible;
 use tracing::instrument;
+use url::Url;
 use v_model::{
     NewLoginAttempt, OAuthClientId,
     permissions::{AsScope, PermissionStorage},
@@ -78,10 +79,10 @@ pub struct DeviceAuthorizationResponse {
     /// The end-user verification code displayed to the user.
     pub user_code: String,
     /// The end-user verification URI on the authorization server.
-    pub verification_uri: String,
+    pub verification_uri: Url,
     /// Optional verification URI that includes the user_code.
     #[serde(default)]
-    pub verification_uri_complete: Option<String>,
+    pub verification_uri_complete: Option<Url>,
     /// Lifetime in seconds of the device_code and user_code.
     #[serde(default)]
     pub expires_in: Option<i64>,
