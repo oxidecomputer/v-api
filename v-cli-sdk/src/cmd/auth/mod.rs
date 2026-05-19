@@ -12,7 +12,7 @@ pub mod login;
 pub mod oauth;
 pub mod proxy;
 
-// Authenticate against the Meetings API
+/// Authenticate against the API
 #[derive(Parser, Debug)]
 #[clap(name = "auth")]
 pub struct Auth<P>
