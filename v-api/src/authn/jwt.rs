@@ -117,6 +117,7 @@ where
         let mut validation = Validation::new(algorithm?);
         validation.set_audience(&[ctx.public_url()]);
         validation.set_issuer(&[ctx.public_url()]);
+        validation.validate_nbf = true;
 
         let data = decode(token, &key, &validation).map_err(JwtError::Decode)?;
 
