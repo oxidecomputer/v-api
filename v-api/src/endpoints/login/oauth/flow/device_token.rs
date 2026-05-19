@@ -312,8 +312,7 @@ where
         ));
     }
 
-    // Look up the login attempt by the v-api-issued device code (stored in
-    // authz_code) and client_id.
+    // Look up the login attempt by the v-api-issued device code and client_id.
     let attempt = ctx
         .login
         .get_login_attempt_for_device_code(&body.device_code, &body.client_id)
