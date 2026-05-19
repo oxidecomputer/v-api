@@ -212,7 +212,7 @@ where
         client_id: &TypedUuid<MagicLinkId>,
         uri: &str,
     ) -> ResourceResult<MagicLinkRedirectUri, MagicLinkError> {
-        let redirect_url = parse_redirect_url(&uri)
+        let redirect_url = parse_redirect_url(uri)
             .map_err(|err| ResourceError::InternalError(MagicLinkError::RedirectUri(err)))?;
         if caller.can(&VPermission::ManageMagicLinkClient(*client_id).into()) {
             Ok(MagicLinkRedirectUriStore::upsert(
