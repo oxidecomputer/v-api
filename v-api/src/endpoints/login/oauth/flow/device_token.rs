@@ -239,8 +239,6 @@ where
         .body(serde_json::to_vec(&client_response).unwrap().into())?)
 }
 
-// ─── Device Token Exchange (Step 2) ─────────────────────────────────────────
-
 /// Request body for the device token exchange. The client polls this endpoint
 /// with the device_code received from the authorization step.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -248,7 +246,6 @@ pub struct DeviceTokenExchangeRequest {
     pub client_id: TypedUuid<OAuthClientId>,
     pub device_code: String,
     pub grant_type: String,
-    pub pkce_verifier: Option<String>,
 }
 
 /// Body sent to the upstream provider's token endpoint during device code exchange.
