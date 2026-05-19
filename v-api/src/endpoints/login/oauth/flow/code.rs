@@ -538,12 +538,11 @@ where
                 .await
                 .map_err(to_internal_error)?
         }
-        (code, error) => {
+        // If the remote provider returned an error than we can not accept the authorization
+        // flow. We are intentionally dropping the code here as we do not get debugging value in
+        // keeping it, but are accepting risk of holding an unused authorization code.
+        (_code, error) => {
             tracing::info!(?attempt.id, ?error, "Received an error response from the remote server");
-
-            // Store the provider return error for future debugging, but if an error has been
-            // returned or there is a missing code, then we can not report a successful process
-            attempt.provider_authz_code = code;
 
             // When a user has explicitly denied access we want to forward that error message
             // onwards to the upstream requester. All other errors should be opaque to the
