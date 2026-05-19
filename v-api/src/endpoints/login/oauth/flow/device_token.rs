@@ -334,8 +334,11 @@ where
         ));
     }
 
-    // Check expiration
-    if attempt.expires_at.map(|t| t <= Utc::now()).unwrap_or(false) {
+    // Check expiration - An attempt without an expiration is by default
+    // expired.
+    // TODO: Change expires_at to be non-optional. A login attempt should always
+    // have an expiration.
+    if attempt.expires_at.map(|t| t <= Utc::now()).unwrap_or(true) {
         return Ok(error_response(
             StatusCode::BAD_REQUEST,
             "expired_token",
