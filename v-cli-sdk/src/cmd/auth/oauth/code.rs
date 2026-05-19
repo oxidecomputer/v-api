@@ -115,7 +115,7 @@ impl CodeOAuth {
         T: CliOAuthAdapter + Send + Sync + 'static,
     {
         let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
-        let (auth_url, _csrf_state) = self.authorize_url(pkce_challenge);
+        let (auth_url, csrf_state) = self.authorize_url(pkce_challenge);
 
         println!(
             "Open the following URL in your browser to authenticate:\n\n  {}\n",
@@ -148,20 +148,42 @@ impl CodeOAuth {
                         let token_tx = Arc::clone(&callback_token_tx);
 
                         Box::pin(async move {
-                            let code = request
+                            let query_params: Vec<(&str, &str)> = request
                                 .uri()
                                 .query()
-                                .and_then(|q: &str| {
+                                .map(|q: &str| {
                                     q.split('&')
                                         .filter_map(|pair: &str| pair.split_once('='))
-                                        .find(|(key, _): &(&str, &str)| *key == "code")
-                                        .map(|(_, value): (&str, &str)| value.to_string())
+                                        .collect()
                                 })
+                                .unwrap_or_default();
+
+                            let code = query_params
+                                .iter()
+                                .find(|(key, _)| *key == "code")
+                                .map(|(_, value)| value.to_string())
                                 .ok_or_else(|| {
                                     anyhow::anyhow!(
                                         "Missing 'code' query parameter in callback request"
                                     )
                                 })?;
+
+                            let state = query_params
+                                .iter()
+                                .find(|(key, _)| *key == "state")
+                                .map(|(_, value)| value.to_string())
+                                .ok_or_else(|| {
+                                    anyhow::anyhow!(
+                                        "Missing 'state' query parameter in callback request"
+                                    )
+                                })?;
+
+                            if &state != csrf_state.secret() {
+                                anyhow::bail!(
+                                    "CSRF state mismatch: the callback 'state' parameter \
+                                     does not match the value sent in the authorization request"
+                                );
+                            }
 
                             // Forward the redirect request to the API server.
                             let token = adapter
