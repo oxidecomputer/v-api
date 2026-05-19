@@ -75,7 +75,7 @@ where
     OAuth {
         #[command(subcommand)]
         provider: SupportedProviders,
-        /// Additionally retrieve a the underlying IdP token. This token is not stored. Remote mode
+        /// Additionally retrieve a the underlying IdP token. This token is not stored. An IdP token
         /// should be used when you need to authenticate to the underlying system frontend by the API
         #[arg(long, default_value = "false")]
         request_idp_token: bool,
