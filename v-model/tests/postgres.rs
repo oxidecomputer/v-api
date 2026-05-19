@@ -15,9 +15,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::ops::{Add, Sub};
 use uuid::Uuid;
-use v_api_installer::run_migrations;
 use v_model::{
     NewApiKey, NewApiUser, NewMagicLink, NewMagicLinkAttempt, UserId,
+    migrations::run_migrations,
     schema_ext::MagicLinkAttemptState,
     storage::{
         ApiKeyFilter, ApiKeyStore, ApiUserFilter, ApiUserStore, ListPagination,

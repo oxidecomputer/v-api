@@ -3,5 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 fn main() {
-    println!("cargo:rerun-if-changed=../v-model/migrations");
+    println!("cargo:rerun-if-changed=migrations");
+    println!("cargo:rerun-if-changed=src/saga/migrations");
 }

@@ -16,6 +16,7 @@ async-trait = { workspace = true }
 bb8 = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 diesel = { workspace = true, features = ["chrono", "uuid", "serde_json"] }
+diesel_migrations = { workspace = true, features = ["postgres"] }
 mockall = { workspace = true, optional = true }
 newtype-uuid = { workspace = true }
 partial-struct = { workspace = true }
@@ -28,6 +29,4 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"]  }
 
 [dev-dependencies]
-diesel_migrations = { version = "2.3.2", features = ["postgres"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
-v-api-installer = { path = "../v-api-installer" }

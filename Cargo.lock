@@ -3573,14 +3573,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "v-api-installer"
-version = "0.4.0-alpha.0"
-dependencies = [
- "diesel",
- "diesel_migrations",
-]
-
-[[package]]
 name = "v-api-param"
 version = "0.4.0-alpha.0"
 dependencies = [
@@ -3629,7 +3621,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
- "v-api-installer",
 ]
 
 [[package]]

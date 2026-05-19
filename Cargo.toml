@@ -1,7 +1,6 @@
 [workspace]
 members = [
   "v-api",
-  "v-api-installer",
   "v-api-param",
   "v-api-permission-derive",
   "v-model",
