@@ -379,7 +379,6 @@ fn oauth_redirect_response(
     Ok(redirect)
 }
 
-// TODO: Determine if 401 empty responses are correct here
 fn verify_csrf(
     request: &RequestInfo,
     query: &OAuthAuthzCodeReturnQuery,
@@ -392,39 +391,39 @@ fn verify_csrf(
         .as_ref()
         .ok_or_else(|| {
             tracing::warn!("OAuth callback is missing a state parameter");
-            unauthorized()
+            bad_request("Invalid or missing OAuth state parameter")
         })?
         .parse()
         .map_err(|err| {
             tracing::warn!(?err, "Failed to parse state");
-            unauthorized()
+            bad_request("Invalid or missing OAuth state parameter")
         })?;
 
     // The client must present the attempt cookie at a minimum. Without it we are unable to lookup a
     // login attempt to match against. Without the cookie to verify the state parameter we can not
-    // determine a redirect uri so we instead report unauthorized
+    // determine a redirect uri so we instead report a bad request
     let attempt_cookie = request
         .cookie(LOGIN_ATTEMPT_COOKIE)
         .ok_or_else(|| {
             tracing::warn!("OAuth callback is missing a login state cookie");
-            unauthorized()
+            bad_request("Invalid or missing OAuth state parameter")
         })?
         .value()
         .parse()
         .map_err(|err| {
             tracing::warn!(?err, "Failed to parse state cookie");
-            unauthorized()
+            bad_request("Invalid or missing OAuth state parameter")
         })?;
 
     // Verify that the attempt_id returned from the state matches the expected client value. If they
-    // do not match we can not lookup a redirect uri so we instead return unauthorized
+    // do not match we can not lookup a redirect uri so we instead return a bad request
     if attempt_id != attempt_cookie {
         tracing::warn!(
             ?attempt_id,
             ?attempt_cookie,
             "OAuth state does not match expected cookie value"
         );
-        Err(unauthorized())
+        Err(bad_request("Invalid or missing OAuth state parameter"))
     } else {
         Ok(attempt_id)
     }
@@ -1234,7 +1233,7 @@ mod tests {
             error: None,
         };
         assert_eq!(
-            StatusCode::UNAUTHORIZED,
+            StatusCode::BAD_REQUEST,
             verify_csrf(&with_valid_cookie, &query)
                 .unwrap_err()
                 .status_code
@@ -1255,7 +1254,7 @@ mod tests {
             error: None,
         };
         assert_eq!(
-            StatusCode::UNAUTHORIZED,
+            StatusCode::BAD_REQUEST,
             verify_csrf(&with_invalid_cookie, &query)
                 .unwrap_err()
                 .status_code
@@ -1272,7 +1271,7 @@ mod tests {
             error: None,
         };
         assert_eq!(
-            StatusCode::UNAUTHORIZED,
+            StatusCode::BAD_REQUEST,
             verify_csrf(&with_missing_cookie, &query)
                 .unwrap_err()
                 .status_code
