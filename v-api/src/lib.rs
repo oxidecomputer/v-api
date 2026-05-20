@@ -14,9 +14,9 @@ mod secrets;
 mod util;
 
 pub use context::{
-    ApiContext, BasePermissions, CallerExtension, EphemeralMapperConfig, ExtensionError,
-    GroupContext, LinkContext, LoginContext, MagicLinkContext, MagicLinkMessage, MagicLinkTarget,
-    MappingContext, OAuthContext, UserContext, VApiStorage, VContext, VContextBuilder,
+    ApiContext, BasePermissions, CallerExtension, ExtensionError, GroupContext, LinkContext,
+    LoginContext, MagicLinkContext, MagicLinkMessage, MagicLinkTarget, MappingContext,
+    OAuthContext, PresetMapperConfig, UserContext, VApiStorage, VContext, VContextBuilder,
     VContextBuilderError, VContextError, VContextWithCaller, auth::SecretContext,
 };
 pub use util::response;

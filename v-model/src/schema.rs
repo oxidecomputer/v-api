@@ -175,7 +175,7 @@ diesel::table! {
         mapper_name -> Varchar,
         user_id -> Uuid,
         rule -> Jsonb,
-        ephemeral -> Bool,
+        preset -> Bool,
         created_at -> Timestamptz,
     }
 }

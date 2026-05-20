@@ -1522,7 +1522,7 @@ impl MapperEventStore for PostgresStore {
                 mapper_event::mapper_name.eq(event.mapper_name.clone()),
                 mapper_event::user_id.eq(event.user_id.into_untyped_uuid()),
                 mapper_event::rule.eq(event.rule.clone()),
-                mapper_event::ephemeral.eq(event.ephemeral),
+                mapper_event::preset.eq(event.preset),
             ))
             .get_result_async(&*self.pool.get().await?)
             .await?;
@@ -1543,7 +1543,7 @@ impl MapperEventStore for PostgresStore {
         let MapperEventFilter {
             id,
             mapper_id,
-            ephemeral,
+            preset,
         } = filter;
 
         if let Some(id) = id {
@@ -1558,8 +1558,8 @@ impl MapperEventStore for PostgresStore {
             );
         }
 
-        if let Some(ephemeral) = ephemeral {
-            query = query.filter(mapper_event::ephemeral.eq(ephemeral));
+        if let Some(preset) = preset {
+            query = query.filter(mapper_event::preset.eq(preset));
         }
 
         let results = query

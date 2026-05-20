@@ -481,7 +481,7 @@ pub trait MapperStore {
 pub struct MapperEventFilter {
     pub id: Option<Vec<TypedUuid<MapperEventId>>>,
     pub mapper_id: Option<Vec<TypedUuid<MapperId>>>,
-    pub ephemeral: Option<bool>,
+    pub preset: Option<bool>,
 }
 
 impl MapperEventFilter {
@@ -490,8 +490,8 @@ impl MapperEventFilter {
         self
     }
 
-    pub fn ephemeral(mut self, ephemeral: Option<bool>) -> Self {
-        self.ephemeral = ephemeral;
+    pub fn preset(mut self, preset: Option<bool>) -> Self {
+        self.preset = preset;
         self
     }
 }

@@ -22,7 +22,7 @@ use crate::{
 pub struct MappingContext<T> {
     engine: Option<Arc<dyn MappingEngine<T>>>,
     storage: Arc<dyn VApiStorage<T>>,
-    ephemeral_mappers: Vec<Mapper>,
+    preset_mappers: Vec<Mapper>,
 }
 
 impl<T> MappingContext<T>
@@ -33,7 +33,7 @@ where
         Self {
             engine: None,
             storage,
-            ephemeral_mappers: Vec::new(),
+            preset_mappers: Vec::new(),
         }
     }
 
@@ -50,12 +50,12 @@ where
         previous
     }
 
-    pub fn set_ephemeral_mappers(&mut self, mappers: Vec<Mapper>) {
-        self.ephemeral_mappers = mappers;
+    pub fn set_preset_mappers(&mut self, mappers: Vec<Mapper>) {
+        self.preset_mappers = mappers;
     }
 
-    pub fn is_ephemeral(&self, id: &TypedUuid<MapperId>) -> bool {
-        self.ephemeral_mappers.iter().any(|m| &m.id == id)
+    pub fn is_preset(&self, id: &TypedUuid<MapperId>) -> bool {
+        self.preset_mappers.iter().any(|m| &m.id == id)
     }
 
     pub fn validate(&self, value: &Value) -> bool {
@@ -77,7 +77,7 @@ where
                 &ListPagination::unlimited(),
             )
             .await?;
-            mappers.extend(self.ephemeral_mappers.iter().cloned());
+            mappers.extend(self.preset_mappers.iter().cloned());
 
             Ok(mappers)
         } else {
@@ -125,8 +125,8 @@ where
             // instead handle mappers that become depleted before we can evaluate them at evaluation
             // time.
             for mapper in self.get_mappers(caller, false).await? {
-                let is_ephemeral = self.is_ephemeral(&mapper.id);
-                tracing::trace!(?mapper.name, is_ephemeral, "Attempt to run mapper");
+                let is_preset = self.is_preset(&mapper.id);
+                tracing::trace!(?mapper.name, is_preset, "Attempt to run mapper");
 
                 // Try to transform this mapper into a mapping
                 let mapping = engine.create_mapping(mapper.clone());
@@ -147,8 +147,8 @@ where
                 };
 
                 let apply = if !permissions.is_empty() || !groups.is_empty() {
-                    if is_ephemeral {
-                        // Ephemeral mappers always apply - no activation gating
+                    if is_preset {
+                        // Preset mappers always apply - no activation gating
                         true
                     } else if mapper.max_activations.is_some() {
                         // Dynamic mappers with activation limits need to consume an activation
@@ -175,10 +175,7 @@ where
                 if apply {
                     // Record the mapper event for audit purposes.
                     // TODO: This should hook into an audit log feature
-                    if let Err(err) = self
-                        .record_mapper_event(&mapper, user_id, is_ephemeral)
-                        .await
-                    {
+                    if let Err(err) = self.record_mapper_event(&mapper, user_id, is_preset).await {
                         tracing::warn!(
                             ?err,
                             mapper_name = ?mapper.name,
@@ -214,7 +211,7 @@ where
         &self,
         mapper: &Mapper,
         user_id: TypedUuid<UserId>,
-        ephemeral: bool,
+        preset: bool,
     ) -> Result<(), StoreError> {
         let event = NewMapperEvent {
             id: TypedUuid::new_v4(),
@@ -222,7 +219,7 @@ where
             mapper_name: mapper.name.clone(),
             user_id,
             rule: mapper.rule.clone(),
-            ephemeral,
+            preset,
         };
 
         MapperEventStore::record(&*self.storage, &event)

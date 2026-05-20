@@ -207,7 +207,7 @@ pub struct MapperEventModel {
     pub mapper_name: String,
     pub user_id: Uuid,
     pub rule: Value,
-    pub ephemeral: bool,
+    pub preset: bool,
     pub created_at: DateTime<Utc>,
 }
 
