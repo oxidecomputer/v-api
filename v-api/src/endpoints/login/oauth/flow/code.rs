@@ -141,6 +141,25 @@ pub struct OAuthAuthzCodeRedirectHeaders {
     location: String,
 }
 
+/// Validate the PKCE code challenge. For S256, this must be a base64url-no-pad
+/// encoding of a SHA256 hash, which is always exactly 43 characters of [A-Za-z0-9_-]
+/// (RFC 7636 §4.2).
+fn validate_code_challenge(code_challenge: &str) -> Result<(), OAuthError> {
+    if !BASE64_URL_SAFE_NO_PAD
+        .decode(code_challenge)
+        .is_ok_and(|bytes| bytes.len() == 32)
+    {
+        Err(OAuthError::new(
+            OAuthErrorCode::InvalidRequest,
+            Some(
+                "Invalid code_challenge. Must be a base64url-encoded SHA256 hash (43 characters).",
+            ),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 /// Validate that response_type is "code" per RFC 6749 §4.1.1.
 fn validate_response_type(response_type: &str) -> Result<(), OAuthError> {
     if response_type == "code" {
@@ -244,22 +263,8 @@ where
         ))?;
     }
 
-    // Validate the PKCE code challenge. For S256, this must be a base64url-no-pad
-    // encoding of a SHA256 hash, which is always exactly 43 characters of [A-Za-z0-9_-]
-    // (RFC 7636 §4.2).
-    if query.code_challenge.len() != 43
-        || !query
-            .code_challenge
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-    {
-        Err(OAuthError::new(
-            OAuthErrorCode::InvalidRequest,
-            Some(
-                "Invalid code_challenge. Must be a base64url-encoded SHA256 hash (43 characters).",
-            ),
-        ))?;
-    }
+    // Validate the PKCE code challenge (RFC 7636 §4.2).
+    validate_code_challenge(&query.code_challenge)?;
 
     // Find the configured provider for the requested remote backend. We should always have a valid
     // provider value, so if this fails then a 500 is returned
@@ -2152,6 +2157,29 @@ mod tests {
         assert!(super::validate_response_type("code ").is_err());
         assert!(super::validate_response_type("token").is_err());
         assert!(super::validate_response_type("code token").is_err());
+    }
+
+    #[test]
+    fn test_code_challenge_rejects_invalid_base64() {
+        // Contains characters not valid in base64url (e.g. `!` and `@`)
+        let err = super::validate_code_challenge("not!valid@base64").unwrap_err();
+        assert_eq!(err.error, OAuthErrorCode::InvalidRequest);
+    }
+
+    #[test]
+    fn test_code_challenge_rejects_incorrect_length() {
+        use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
+        // Valid base64url but decodes to 16 bytes instead of the required 32
+        let short = BASE64_URL_SAFE_NO_PAD.encode([0u8; 16]);
+        let err = super::validate_code_challenge(&short).unwrap_err();
+        assert_eq!(err.error, OAuthErrorCode::InvalidRequest);
+    }
+
+    #[test]
+    fn test_code_challenge_accepts_valid_input() {
+        use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
+        let short = BASE64_URL_SAFE_NO_PAD.encode([0u8; 32]);
+        assert!(super::validate_code_challenge(&short).is_ok());
     }
 
     /// Create a mock context and ApiUserInfo for `filter_idp_token` tests.
