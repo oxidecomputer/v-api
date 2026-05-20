@@ -51,6 +51,7 @@ where
             VPermission::GetApiKeysAll.into(),
             VPermission::CreateGroup.into(),
             VPermission::GetGroupsAll.into(),
+            VPermission::ManageGroupMembershipsAll.into(),
             VPermission::CreateMapper.into(),
             VPermission::GetMappersAll.into(),
             VPermission::GetOAuthClientsAll.into(),
