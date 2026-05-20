@@ -6,7 +6,7 @@ use newtype_uuid::TypedUuid;
 use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc};
 use v_model::{
-    AccessGroupId, Mapper, MapperId, NewMapper, NewMapperEvent, Permissions, UserId,
+    AccessGroupId, Mapper, MapperId, MapperSource, NewMapper, NewMapperEvent, Permissions, UserId,
     permissions::Caller,
     storage::{ListPagination, MapperEventStore, MapperFilter, MapperStore, StoreError},
 };
@@ -125,7 +125,7 @@ where
             // instead handle mappers that become depleted before we can evaluate them at evaluation
             // time.
             for mapper in self.get_mappers(caller, false).await? {
-                let is_preset = self.is_preset(&mapper.id);
+                let is_preset = mapper.source == MapperSource::Preset;
                 tracing::trace!(?mapper.name, is_preset, "Attempt to run mapper");
 
                 // Try to transform this mapper into a mapping
@@ -175,7 +175,7 @@ where
                 if apply {
                     // Record the mapper event for audit purposes.
                     // TODO: This should hook into an audit log feature
-                    if let Err(err) = self.record_mapper_event(&mapper, user_id, is_preset).await {
+                    if let Err(err) = self.record_mapper_event(&mapper, user_id).await {
                         tracing::warn!(
                             ?err,
                             mapper_name = ?mapper.name,
@@ -211,7 +211,6 @@ where
         &self,
         mapper: &Mapper,
         user_id: TypedUuid<UserId>,
-        preset: bool,
     ) -> Result<(), StoreError> {
         let event = NewMapperEvent {
             id: TypedUuid::new_v4(),
@@ -219,7 +218,7 @@ where
             mapper_name: mapper.name.clone(),
             user_id,
             rule: mapper.rule.clone(),
-            preset,
+            source: mapper.source,
         };
 
         MapperEventStore::record(&*self.storage, &event)

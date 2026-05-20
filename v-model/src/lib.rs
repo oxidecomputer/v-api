@@ -31,7 +31,7 @@ pub mod storage;
 
 pub use {
     permissions::{ArcMap, Permissions},
-    schema_ext::LoginAttemptState,
+    schema_ext::{LoginAttemptState, MapperSource},
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -703,7 +703,7 @@ pub struct Mapper {
     pub activations: Option<i32>,
     pub max_activations: Option<i32>,
     #[partial(NewMapper(skip))]
-    pub preset: bool,
+    pub source: MapperSource,
     #[partial(NewMapper(skip))]
     pub depleted_at: Option<DateTime<Utc>>,
     #[partial(NewMapper(skip))]
@@ -722,23 +722,14 @@ impl From<MapperModel> for Mapper {
             rule: value.rule,
             activations: value.activations,
             max_activations: value.max_activations,
-            // By definition a stored mapper is not a preset
-            preset: false,
+            // By definition a stored mapper is dynamic
+            source: MapperSource::Dynamic,
             depleted_at: value.depleted_at,
             created_at: value.created_at,
             updated_at: value.updated_at,
             deleted_at: value.deleted_at,
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum MapperSource {
-    /// Created via the API, persisted in the database, supports activation limits
-    Dynamic,
-    /// Loaded from service configuration, in-memory only, no activation limits
-    Preset,
 }
 
 #[derive(JsonSchema)]
@@ -757,7 +748,7 @@ pub struct MapperEvent {
     pub mapper_name: String,
     pub user_id: TypedUuid<UserId>,
     pub rule: Value,
-    pub preset: bool,
+    pub source: MapperSource,
     pub created_at: DateTime<Utc>,
 }
 
@@ -768,7 +759,7 @@ pub struct NewMapperEvent {
     pub mapper_name: String,
     pub user_id: TypedUuid<UserId>,
     pub rule: Value,
-    pub preset: bool,
+    pub source: MapperSource,
 }
 
 impl From<MapperEventModel> for MapperEvent {
@@ -779,7 +770,7 @@ impl From<MapperEventModel> for MapperEvent {
             mapper_name: value.mapper_name,
             user_id: TypedUuid::from_untyped_uuid(value.user_id),
             rule: value.rule,
-            preset: value.preset,
+            source: value.source,
             created_at: value.created_at,
         }
     }

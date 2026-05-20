@@ -20,10 +20,10 @@ use crate::{
     ApiUserInfo, ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt, LoginAttemptId,
     MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri,
     MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, Mapper, MapperEvent, MapperEventId,
-    MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser, NewApiUserContactEmail,
-    NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMagicLink, NewMagicLinkAttempt,
-    NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, NewMapperEvent, NewOAuthClient,
-    NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
+    MapperId, MapperSource, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
+    NewApiUserContactEmail, NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMagicLink,
+    NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, NewMapperEvent,
+    NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
     OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId,
     UserContactEmailId, UserId, UserProviderId,
     schema_ext::{LoginAttemptState, MagicLinkAttemptState},
@@ -481,7 +481,7 @@ pub trait MapperStore {
 pub struct MapperEventFilter {
     pub id: Option<Vec<TypedUuid<MapperEventId>>>,
     pub mapper_id: Option<Vec<TypedUuid<MapperId>>>,
-    pub preset: Option<bool>,
+    pub source: Option<MapperSource>,
 }
 
 impl MapperEventFilter {
@@ -490,8 +490,8 @@ impl MapperEventFilter {
         self
     }
 
-    pub fn preset(mut self, preset: Option<bool>) -> Self {
-        self.preset = preset;
+    pub fn source(mut self, source: Option<MapperSource>) -> Self {
+        self.source = source;
         self
     }
 }

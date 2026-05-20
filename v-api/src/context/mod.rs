@@ -24,7 +24,7 @@ use v_model::saga::{
     view::SagaExecNodeId,
 };
 use v_model::{
-    AccessGroupId, ApiUserInfo, ApiUserProvider, LinkRequest, Mapper, NewApiUser,
+    AccessGroupId, ApiUserInfo, ApiUserProvider, LinkRequest, Mapper, MapperSource, NewApiUser,
     NewApiUserProvider, NewLinkRequest, UserId, UserProviderId,
     permissions::{Caller, Permission},
     storage::{
@@ -952,7 +952,7 @@ where
                     rule: config.rule,
                     activations: None,
                     max_activations: None,
-                    preset: true,
+                    source: MapperSource::Preset,
                     depleted_at: None,
                     created_at: Utc::now(),
                     updated_at: Utc::now(),

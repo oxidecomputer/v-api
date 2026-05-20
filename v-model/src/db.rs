@@ -16,6 +16,7 @@ use crate::{
         magic_link_client_redirect_uri, magic_link_client_secret, mapper, mapper_event,
         oauth_client, oauth_client_redirect_uri, oauth_client_secret,
     },
+    schema_ext::MapperSource,
     schema_ext::{LoginAttemptState, MagicLinkAttemptState},
 };
 
@@ -207,7 +208,7 @@ pub struct MapperEventModel {
     pub mapper_name: String,
     pub user_id: Uuid,
     pub rule: Value,
-    pub preset: bool,
+    pub source: MapperSource,
     pub created_at: DateTime<Utc>,
 }
 
