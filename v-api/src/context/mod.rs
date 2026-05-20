@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 #[cfg(feature = "sagas")]
 use slog::Logger;
-use std::{fmt::Debug, future::Future, path::PathBuf, sync::Arc};
+use std::{collections::BTreeSet, fmt::Debug, future::Future, path::PathBuf, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
 use user::{RegisteredAccessToken, UserContextError};
@@ -762,6 +762,10 @@ pub struct EphemeralMapperConfig {
 pub enum VContextBuilderError {
     #[error("Conflicting configuration, only one of {0} and {1} can be set")]
     ConfigConflict(String, String),
+    #[error("Duplicate mapper rule")]
+    DuplicateMapperRule(String),
+    #[error("Invalid mapper rule")]
+    InvalidMapperRule(String),
     #[error("{0} must be set to build a VContext")]
     MissingRequiredConfiguration(String),
     #[error("Failed to connect to storage")]
@@ -962,9 +966,37 @@ where
                 count = ephemeral_mappers.len(),
                 "Loaded ephemeral mappers from configuration"
             );
-        }
 
-        mapping_ctx.set_ephemeral_mappers(ephemeral_mappers);
+            // Validate all ephemeral mappers before setting them
+            for mapper in &ephemeral_mappers {
+                if !mapping_ctx.validate(&mapper.rule) {
+                    return Err(VContextBuilderError::InvalidMapperRule(
+                        mapper.name.to_string(),
+                    ));
+                }
+            }
+
+            // Ensure that we do not have any duplicate ephemeral mappers
+            let (_, duplicates) = ephemeral_mappers.iter().map(|m| &m.name).fold(
+                (BTreeSet::default(), BTreeSet::default()),
+                |(mut names, mut duplicates), name| {
+                    if names.contains(&name) {
+                        duplicates.insert(name);
+                    } else {
+                        names.insert(name);
+                    }
+                    (names, duplicates)
+                },
+            );
+
+            if !duplicates.is_empty() {
+                return Err(VContextBuilderError::DuplicateMapperRule(
+                    duplicates.first().unwrap().to_string(),
+                ));
+            }
+
+            mapping_ctx.set_ephemeral_mappers(ephemeral_mappers);
+        }
 
         #[cfg(feature = "sagas")]
         let saga = if let Some((node_id, logger)) = self.saga {
@@ -989,13 +1021,6 @@ where
             #[cfg(feature = "sagas")]
             saga,
         })
-
-        // VContext::<T>::new(public_url, param_path, storage, jwt, keys)
-        //     .await
-        //     .map_err(|err| {
-        //         tracing::error!(?err, "Failed to construct VContext");
-        //         VContextBuilderError::VContext(err)
-        //     })
     }
 }
 
