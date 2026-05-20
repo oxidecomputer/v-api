@@ -148,35 +148,25 @@ impl CodeOAuth {
                         let token_tx = Arc::clone(&callback_token_tx);
 
                         Box::pin(async move {
-                            let query_params: Vec<(&str, &str)> = request
-                                .uri()
-                                .query()
-                                .map(|q: &str| {
-                                    q.split('&')
-                                        .filter_map(|pair: &str| pair.split_once('='))
-                                        .collect()
-                                })
-                                .unwrap_or_default();
+                            #[derive(serde::Deserialize)]
+                            struct CallbackQuery {
+                                code: Option<String>,
+                                state: Option<String>,
+                            }
 
-                            let code = query_params
-                                .iter()
-                                .find(|(key, _)| *key == "code")
-                                .map(|(_, value)| value.to_string())
-                                .ok_or_else(|| {
-                                    anyhow::anyhow!(
-                                        "Missing 'code' query parameter in callback request"
-                                    )
-                                })?;
-
-                            let state = query_params
-                                .iter()
-                                .find(|(key, _)| *key == "state")
-                                .map(|(_, value)| value.to_string())
-                                .ok_or_else(|| {
-                                    anyhow::anyhow!(
-                                        "Missing 'state' query parameter in callback request"
-                                    )
-                                })?;
+                            let query_params: CallbackQuery = serde_urlencoded::from_str(
+                                request.uri().query().unwrap_or_default(),
+                            )?;
+                            let code = query_params.code.ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "Missing 'code' query parameter in callback request"
+                                )
+                            })?;
+                            let state = query_params.state.ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "Missing 'state' query parameter in callback request"
+                                )
+                            })?;
 
                             if &state != csrf_state.secret() {
                                 anyhow::bail!(
