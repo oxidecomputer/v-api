@@ -70,7 +70,7 @@ pub use magic_link::{MagicLinkContext, MagicLinkMessage, MagicLinkTarget};
 pub mod mapping;
 pub use mapping::MappingContext;
 pub mod oauth;
-pub use oauth::OAuthContext;
+pub use oauth::{OAuthContext, OAuthError};
 #[cfg(feature = "sagas")]
 pub mod saga;
 #[cfg(feature = "sagas")]

@@ -17,7 +17,7 @@ pub use context::{
     ApiContext, BasePermissions, CallerExtension, EphemeralMapperConfig, ExtensionError,
     GroupContext, LinkContext, LoginContext, MagicLinkContext, MagicLinkMessage, MagicLinkTarget,
     MappingContext, OAuthContext, UserContext, VApiStorage, VContext, VContextBuilder,
-    VContextBuilderError, VContextError, VContextWithCaller, auth::SecretContext,
+    VContextBuilderError, VContextError, VContextWithCaller, auth::SecretContext, OAuthError
 };
 pub use util::response;
 
