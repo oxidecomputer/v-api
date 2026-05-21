@@ -2218,7 +2218,7 @@ mod tests {
         let (ctx, info) =
             mock_should_provide_idp_token_ctx(vec![VPermission::RetrieveRemoteAccessToken]).await;
         let result = should_provide_idp_token(&ctx, true, &info).await;
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
     }
 
     #[tokio::test]
@@ -2228,7 +2228,7 @@ mod tests {
 
         // Even with the permission, if not requested the token is not returned
         let result = should_provide_idp_token(&ctx, false, &info).await;
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
     }
 
     #[tokio::test]
@@ -2236,14 +2236,14 @@ mod tests {
         // User has some permissions but not RetrieveRemoteAccessToken
         let (ctx, info) = mock_should_provide_idp_token_ctx(vec![VPermission::CreateApiUser]).await;
         let result = should_provide_idp_token(&ctx, true, &info).await;
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
     }
 
     #[tokio::test]
     async fn test_should_provide_idp_token_returns_false_when_no_permissions() {
         let (ctx, info) = mock_should_provide_idp_token_ctx(vec![]).await;
         let result = should_provide_idp_token(&ctx, true, &info).await;
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
     }
 
     /// Set up mock storage for `complete_exchange` tests. The registered user will
