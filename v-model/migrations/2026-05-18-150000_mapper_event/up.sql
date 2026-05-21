@@ -4,6 +4,9 @@ CREATE TABLE mapper_event (
   mapper_name VARCHAR NOT NULL,
   user_id UUID NOT NULL,
   rule JSONB NOT NULL,
+<<<<<<< HEAD
   ephemeral BOOLEAN NOT NULL DEFAULT false,
+=======
+>>>>>>> main
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

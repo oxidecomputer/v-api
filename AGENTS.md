@@ -10,7 +10,6 @@
 ## Crates
 
 - `v-api` - Dropshot endpoint, context, authentication, and authorization framework for the v-api service.
-- `v-api-installer` - Embedded Diesel migration runner for installing the v-model Postgres schema.
 - `v-api-param` - Configuration parameter helpers for inline strings or file-backed secret values.
 - `v-api-permission-derive` - Procedural macro for deriving v-api permission traits on application enums.
 - `v-model` - Shared data models, Diesel schema, migrations, storage traits, and Postgres implementations.

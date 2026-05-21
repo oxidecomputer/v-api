@@ -100,12 +100,12 @@ where
 {
     let (ctx, caller) = rqctx.as_ctx().await?;
 
-    // Ephemeral mappers cannot be deleted via the API — they are managed
+    // Preset mappers cannot be deleted via the API — they are managed
     // via service configuration.
-    if ctx.mapping.is_ephemeral(&path.mapper_id) {
+    if ctx.mapping.is_preset(&path.mapper_id) {
         return Err(client_error(
             ClientErrorStatusCode::CONFLICT,
-            "Ephemeral mappers are managed via service configuration and cannot be deleted at runtime",
+            "Preset mappers are managed via service configuration and cannot be deleted at runtime",
         ));
     }
 

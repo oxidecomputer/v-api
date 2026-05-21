@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 #[cfg(feature = "sagas")]
 use slog::Logger;
-use std::{fmt::Debug, future::Future, path::PathBuf, sync::Arc};
+use std::{collections::BTreeSet, fmt::Debug, future::Future, path::PathBuf, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
 use user::{RegisteredAccessToken, UserContextError};
@@ -24,7 +24,7 @@ use v_model::saga::{
     view::SagaExecNodeId,
 };
 use v_model::{
-    AccessGroupId, ApiUserInfo, ApiUserProvider, LinkRequest, Mapper, NewApiUser,
+    AccessGroupId, ApiUserInfo, ApiUserProvider, LinkRequest, Mapper, MapperSource, NewApiUser,
     NewApiUserProvider, NewLinkRequest, UserId, UserProviderId,
     permissions::{Caller, Permission},
     storage::{
@@ -745,13 +745,13 @@ where
     }
 }
 
-/// Configuration for an ephemeral mapper that is loaded from service configuration.
+/// Configuration for a preset mapper that is loaded from service configuration.
 ///
-/// Ephemeral mappers exist only in memory for the lifetime of the process. They cannot
+/// Preset mappers exist only in memory for the lifetime of the process. They cannot
 /// be modified or deleted via the API. They do not support activation limits, they
 /// fire unconditionally whenever their rule matches.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EphemeralMapperConfig {
+pub struct PresetMapperConfig {
     /// Human-readable name for this mapper
     pub name: String,
     /// The mapping rule as a JSON value (same format as dynamic mapper rules)
@@ -762,6 +762,10 @@ pub struct EphemeralMapperConfig {
 pub enum VContextBuilderError {
     #[error("Conflicting configuration, only one of {0} and {1} can be set")]
     ConfigConflict(String, String),
+    #[error("Duplicate mapper rule")]
+    DuplicateMapperRule(String),
+    #[error("Invalid mapper rule")]
+    InvalidMapperRule(String),
     #[error("{0} must be set to build a VContext")]
     MissingRequiredConfiguration(String),
     #[error("Failed to connect to storage")]
@@ -778,7 +782,7 @@ pub struct VContextBuilder<T> {
     storage: Option<Arc<dyn VApiStorage<T>>>,
     storage_url: Option<String>,
     keys: Option<Vec<AsymmetricKey>>,
-    mappers: Vec<EphemeralMapperConfig>,
+    mappers: Vec<PresetMapperConfig>,
     #[cfg(feature = "sagas")]
     saga: Option<(TypedUuid<SagaExecNodeId>, Option<Logger>)>,
     additional_builtin_permissions: Vec<T>,
@@ -848,7 +852,7 @@ where
         self
     }
 
-    pub fn with_mappers(mut self, mappers: Vec<EphemeralMapperConfig>) -> Self {
+    pub fn with_mappers(mut self, mappers: Vec<PresetMapperConfig>) -> Self {
         self.mappers = mappers;
         self
     }
@@ -948,8 +952,8 @@ where
             group_ctx.clone(),
         ))));
 
-        // Convert ephemeral mapper configs into Mapper structs with deterministic IDs
-        let ephemeral_mappers: Vec<Mapper> = self
+        // Convert preset mapper configs into Mapper structs with deterministic IDs
+        let preset_mappers: Vec<Mapper> = self
             .mappers
             .into_iter()
             .map(|config| {
@@ -962,7 +966,7 @@ where
                     rule: config.rule,
                     activations: None,
                     max_activations: None,
-                    ephemeral: true,
+                    source: MapperSource::Preset,
                     depleted_at: None,
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
@@ -971,14 +975,42 @@ where
             })
             .collect();
 
-        if !ephemeral_mappers.is_empty() {
+        if !preset_mappers.is_empty() {
             tracing::info!(
-                count = ephemeral_mappers.len(),
-                "Loaded ephemeral mappers from configuration"
+                count = preset_mappers.len(),
+                "Loaded preset mappers from configuration"
             );
-        }
 
-        mapping_ctx.set_ephemeral_mappers(ephemeral_mappers);
+            // Validate all preset mappers before setting them
+            for mapper in &preset_mappers {
+                if !mapping_ctx.validate(&mapper.rule) {
+                    return Err(VContextBuilderError::InvalidMapperRule(
+                        mapper.name.to_string(),
+                    ));
+                }
+            }
+
+            // Ensure that we do not have any duplicate preset mappers
+            let (_, duplicates) = preset_mappers.iter().map(|m| &m.name).fold(
+                (BTreeSet::default(), BTreeSet::default()),
+                |(mut names, mut duplicates), name| {
+                    if names.contains(&name) {
+                        duplicates.insert(name);
+                    } else {
+                        names.insert(name);
+                    }
+                    (names, duplicates)
+                },
+            );
+
+            if !duplicates.is_empty() {
+                return Err(VContextBuilderError::DuplicateMapperRule(
+                    duplicates.first().unwrap().to_string(),
+                ));
+            }
+
+            mapping_ctx.set_preset_mappers(preset_mappers);
+        }
 
         #[cfg(feature = "sagas")]
         let saga = if let Some((node_id, logger)) = self.saga {
@@ -1003,13 +1035,6 @@ where
             #[cfg(feature = "sagas")]
             saga,
         })
-
-        // VContext::<T>::new(public_url, param_path, storage, jwt, keys)
-        //     .await
-        //     .map_err(|err| {
-        //         tracing::error!(?err, "Failed to construct VContext");
-        //         VContextBuilderError::VContext(err)
-        //     })
     }
 }
 

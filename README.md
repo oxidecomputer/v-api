@@ -14,7 +14,7 @@ The crate assumes that the hosting application is using a Postgres database or c
 connection to one. Want a different backend? Please contribute, it will be gladly welcome.
 
 The `v-model` crate contains [diesel](https://diesel.rs/) migrations for initializing the necessary
-tables in a database. `v-model-installer` exposes embedded migrations via [diesel_migrations](https://docs.rs/diesel_migrations/latest/diesel_migrations/).
+tables in a database. `v-model` exposes embedded migrations via [diesel_migrations](https://docs.rs/diesel_migrations/latest/diesel_migrations/).
 
 To add the endpoints in to the hosting server:
 

@@ -131,3 +131,44 @@ impl Display for MagicLinkAttemptState {
         }
     }
 }
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, FromSqlRow, AsExpression, Serialize, Deserialize, JsonSchema,
+)]
+#[diesel(sql_type = diesel::sql_types::Varchar)]
+#[serde(rename_all = "snake_case")]
+pub enum MapperSource {
+    /// Created via the API, persisted in the database, supports activation limits
+    Dynamic,
+    /// Loaded from service configuration, in-memory only, no activation limits
+    Preset,
+}
+
+impl ToSql<diesel::sql_types::Varchar, Pg> for MapperSource {
+    fn to_sql(&self, out: &mut Output<Pg>) -> serialize::Result {
+        match *self {
+            MapperSource::Dynamic => out.write_all(b"dynamic")?,
+            MapperSource::Preset => out.write_all(b"preset")?,
+        }
+        Ok(IsNull::No)
+    }
+}
+
+impl FromSql<diesel::sql_types::Varchar, Pg> for MapperSource {
+    fn from_sql(bytes: <Pg as Backend>::RawValue<'_>) -> deserialize::Result<Self> {
+        match bytes.as_bytes() {
+            b"dynamic" => Ok(MapperSource::Dynamic),
+            b"preset" => Ok(MapperSource::Preset),
+            x => Err(format!("Unrecognized MapperSource variant {:?}", x).into()),
+        }
+    }
+}
+
+impl Display for MapperSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MapperSource::Dynamic => write!(f, "dynamic"),
+            MapperSource::Preset => write!(f, "preset"),
+        }
+    }
+}
