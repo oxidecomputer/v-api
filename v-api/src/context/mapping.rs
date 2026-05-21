@@ -6,7 +6,8 @@ use newtype_uuid::TypedUuid;
 use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc};
 use v_model::{
-    AccessGroupId, Mapper, MapperId, MapperSource, NewMapper, NewMapperEvent, Permissions, UserId,
+    AccessGroupId, Mapper, MapperEvent, MapperId, MapperSource, NewMapper, NewMapperEvent,
+    Permissions, UserId,
     permissions::Caller,
     storage::{ListPagination, MapperEventStore, MapperFilter, MapperStore, StoreError},
 };
@@ -211,7 +212,7 @@ where
         &self,
         mapper: &Mapper,
         user_id: TypedUuid<UserId>,
-    ) -> Result<(), StoreError> {
+    ) -> Result<MapperEvent, StoreError> {
         let event = NewMapperEvent {
             id: TypedUuid::new_v4(),
             mapper_id: mapper.id,
@@ -221,8 +222,6 @@ where
             source: mapper.source,
         };
 
-        MapperEventStore::record(&*self.storage, &event)
-            .await
-            .map(|_| ())
+        MapperEventStore::record(&*self.storage, &event).await
     }
 }
