@@ -19,12 +19,13 @@ use crate::{
     AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail,
     ApiUserInfo, ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt, LoginAttemptId,
     MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri,
-    MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, Mapper, MapperId, NewAccessGroup,
-    NewAccessToken, NewApiKey, NewApiUser, NewApiUserContactEmail, NewApiUserProvider,
-    NewLinkRequest, NewLoginAttempt, NewMagicLink, NewMagicLinkAttempt, NewMagicLinkRedirectUri,
-    NewMagicLinkSecret, NewMapper, NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret,
-    OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId,
-    OAuthSecretId, UserContactEmailId, UserId, UserProviderId,
+    MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, Mapper, MapperEvent, MapperEventId,
+    MapperId, MapperSource, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
+    NewApiUserContactEmail, NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMagicLink,
+    NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, NewMapperEvent,
+    NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
+    OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId,
+    UserContactEmailId, UserId, UserProviderId,
     schema_ext::{LoginAttemptState, MagicLinkAttemptState},
 };
 
@@ -474,6 +475,36 @@ pub trait MapperStore {
     ) -> Result<Vec<Mapper>, StoreError>;
     async fn upsert(&self, new_mapper: &NewMapper) -> Result<Mapper, StoreError>;
     async fn delete(&self, id: &TypedUuid<MapperId>) -> Result<Option<Mapper>, StoreError>;
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct MapperEventFilter {
+    pub id: Option<Vec<TypedUuid<MapperEventId>>>,
+    pub mapper_id: Option<Vec<TypedUuid<MapperId>>>,
+    pub source: Option<MapperSource>,
+}
+
+impl MapperEventFilter {
+    pub fn mapper_id(mut self, mapper_id: Option<Vec<TypedUuid<MapperId>>>) -> Self {
+        self.mapper_id = mapper_id;
+        self
+    }
+
+    pub fn source(mut self, source: Option<MapperSource>) -> Self {
+        self.source = source;
+        self
+    }
+}
+
+#[cfg_attr(feature = "mock", automock)]
+#[async_trait]
+pub trait MapperEventStore {
+    async fn record(&self, event: &NewMapperEvent) -> Result<MapperEvent, StoreError>;
+    async fn list(
+        &self,
+        filter: MapperEventFilter,
+        pagination: &ListPagination,
+    ) -> Result<Vec<MapperEvent>, StoreError>;
 }
 
 #[derive(Debug, Default, PartialEq)]

@@ -6,8 +6,8 @@ use chrono::{DateTime, Utc};
 use db::{
     AccessGroupModel, ApiKeyModel, ApiUserAccessTokenModel, ApiUserContactEmailModel, ApiUserModel,
     ApiUserProviderModel, LinkRequestModel, LoginAttemptModel, MagicLinkAttemptModel,
-    MagicLinkModel, MagicLinkRedirectUriModel, MagicLinkSecretModel, MapperModel, OAuthClientModel,
-    OAuthClientRedirectUriModel, OAuthClientSecretModel,
+    MagicLinkModel, MagicLinkRedirectUriModel, MagicLinkSecretModel, MapperEventModel, MapperModel,
+    OAuthClientModel, OAuthClientRedirectUriModel, OAuthClientSecretModel,
 };
 use newtype_uuid::{GenericUuid, TypedUuid, TypedUuidKind, TypedUuidTag};
 use partial_struct::partial;
@@ -32,7 +32,7 @@ pub mod storage;
 
 pub use {
     permissions::{ArcMap, Permissions},
-    schema_ext::LoginAttemptState,
+    schema_ext::{LoginAttemptState, MapperSource},
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -704,6 +704,8 @@ pub struct Mapper {
     pub activations: Option<i32>,
     pub max_activations: Option<i32>,
     #[partial(NewMapper(skip))]
+    pub source: MapperSource,
+    #[partial(NewMapper(skip))]
     pub depleted_at: Option<DateTime<Utc>>,
     #[partial(NewMapper(skip))]
     pub created_at: DateTime<Utc>,
@@ -721,10 +723,56 @@ impl From<MapperModel> for Mapper {
             rule: value.rule,
             activations: value.activations,
             max_activations: value.max_activations,
+            // By definition a stored mapper is dynamic
+            source: MapperSource::Dynamic,
             depleted_at: value.depleted_at,
             created_at: value.created_at,
             updated_at: value.updated_at,
             deleted_at: value.deleted_at,
+        }
+    }
+}
+
+#[derive(JsonSchema)]
+pub enum MapperEventId {}
+impl TypedUuidKind for MapperEventId {
+    fn tag() -> TypedUuidTag {
+        const TAG: TypedUuidTag = TypedUuidTag::new("mapper-event");
+        TAG
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MapperEvent {
+    pub id: TypedUuid<MapperEventId>,
+    pub mapper_id: TypedUuid<MapperId>,
+    pub mapper_name: String,
+    pub user_id: TypedUuid<UserId>,
+    pub rule: Value,
+    pub source: MapperSource,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewMapperEvent {
+    pub id: TypedUuid<MapperEventId>,
+    pub mapper_id: TypedUuid<MapperId>,
+    pub mapper_name: String,
+    pub user_id: TypedUuid<UserId>,
+    pub rule: Value,
+    pub source: MapperSource,
+}
+
+impl From<MapperEventModel> for MapperEvent {
+    fn from(value: MapperEventModel) -> Self {
+        MapperEvent {
+            id: TypedUuid::from_untyped_uuid(value.id),
+            mapper_id: TypedUuid::from_untyped_uuid(value.mapper_id),
+            mapper_name: value.mapper_name,
+            user_id: TypedUuid::from_untyped_uuid(value.user_id),
+            rule: value.rule,
+            source: value.source,
+            created_at: value.created_at,
         }
     }
 }
