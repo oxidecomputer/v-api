@@ -71,7 +71,7 @@ where
             },
             registration_caller: Caller {
                 id: "00000000-0000-4000-8000-000000000001".parse().unwrap(),
-                permissions: additional_permissions.into(),
+                permissions: registration_caller_additional_permissions.into(),
                 extensions: HashMap::default(),
             },
             jwt: JwtContext {
