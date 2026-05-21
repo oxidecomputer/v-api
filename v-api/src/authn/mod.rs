@@ -287,20 +287,21 @@ impl Signer {
                         if response.verified_digest_crc32c != Some(true) {
                             Err(Box::new(CloudKmsError::DigestCrc32cNotVerified))
                         } else {
-                            let signature = response
+                            response
                                 .signature
-                                .ok_or_else(|| Box::new(CloudKmsError::MissingSignature))?;
-
-                            // Verify the CRC32C of the returned signature to detect corruption
-                            // in transit
-                            if let Some(expected_crc) = response.signature_crc32c {
-                                let actual_crc = crc32c(&signature);
-                                if actual_crc as i64 != expected_crc {
-                                    return Err(Box::new(CloudKmsError::CorruptedSignature).into());
-                                }
-                            }
-
-                            Ok(signature)
+                                .ok_or_else(|| Box::new(CloudKmsError::MissingSignature))
+                                .and_then(|signature| {
+                                    // Verify the CRC32C of the returned signature to detect
+                                    // corruption in transit
+                                    match response.signature_crc32c {
+                                        Some(expected_crc)
+                                            if crc32c(&signature) as i64 != expected_crc =>
+                                        {
+                                            Err(Box::new(CloudKmsError::CorruptedSignature))
+                                        }
+                                        _ => Ok(signature),
+                                    }
+                                })
                         }
                     }
                     Err(google_cloudkms1::Error::JsonDecodeError(body, _)) => {
