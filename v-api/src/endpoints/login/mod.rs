@@ -5,6 +5,7 @@
 use async_trait::async_trait;
 use dropshot::HttpError;
 use schemars::JsonSchema;
+use secrecy::SecretString;
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{self, Visitor},
@@ -186,12 +187,12 @@ impl<'de> Deserialize<'de> for ExternalUserId {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize)]
 pub struct UserInfo {
     pub external_id: ExternalUserId,
     pub verified_emails: Vec<String>,
     pub display_name: Option<String>,
-    pub idp_token: Option<String>,
+    pub idp_token: Option<SecretString>,
 }
 
 #[derive(Debug, Error)]

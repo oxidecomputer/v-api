@@ -12,7 +12,7 @@ use oauth2::{
 };
 use reqwest::Request;
 use schemars::JsonSchema;
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
 use thiserror::Error;
@@ -160,7 +160,7 @@ where
         }
 
         let mut info = self.extract_user_info(&responses)?;
-        info.idp_token = Some(token.to_string());
+        info.idp_token = Some(SecretString::from(token));
         Ok(info)
     }
 }

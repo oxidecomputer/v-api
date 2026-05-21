@@ -935,7 +935,7 @@ mod tests {
     use mockall::predicate::eq;
     use newtype_uuid::TypedUuid;
     use oauth2::PkceCodeChallenge;
-    use secrecy::SecretString;
+    use secrecy::{SecretBox, SecretString};
     use uuid::Uuid;
     use v_model::{
         AccessToken, ApiUser, ApiUserInfo, ApiUserProvider, LoginAttempt, NewApiUser,
@@ -957,16 +957,20 @@ mod tests {
             ExternalUserId, UserInfo,
             oauth::{
                 OAuthProviderName,
-                flow::code::{
-                    LOGIN_ATTEMPT_COOKIE, OAuthAuthzCodeReturnQuery, OAuthError, OAuthErrorCode,
-                    authz_code_callback_op_inner, verify_csrf, verify_login_attempt,
+                flow::{
+                    code::{
+                        LOGIN_ATTEMPT_COOKIE, OAuthAuthzCodeReturnQuery, OAuthError,
+                        OAuthErrorCode, authz_code_callback_op_inner, verify_csrf,
+                        verify_login_attempt,
+                    },
+                    should_provide_idp_token,
                 },
             },
         },
         permissions::VPermission,
     };
 
-    use super::super::{complete_exchange, filter_idp_token};
+    use super::super::complete_exchange;
     use super::{authorize_code_exchange, get_oauth_client, oauth_redirect_response};
 
     /// A minimal no-op `OAuthProvider` for unit tests that need to pass a
@@ -2181,8 +2185,8 @@ mod tests {
         assert!(super::validate_code_challenge(&short).is_ok());
     }
 
-    /// Create a mock context and ApiUserInfo for `filter_idp_token` tests.
-    async fn mock_filter_idp_token_ctx(
+    /// Create a mock context and ApiUserInfo for `should_provide_idp_token` tests.
+    async fn mock_should_provide_idp_token_ctx(
         user_permissions: Vec<VPermission>,
     ) -> (VContext<VPermission>, ApiUserInfo<VPermission>) {
         let mut access_group_store = MockAccessGroupStore::new();
@@ -2210,53 +2214,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_filter_idp_token_returns_token_when_requested_and_permitted() {
+    async fn test_should_provide_idp_token_returns_true_when_requested_and_permitted() {
         let (ctx, info) =
-            mock_filter_idp_token_ctx(vec![VPermission::RetrieveRemoteAccessToken]).await;
-        let token = Some("idp-token-value".to_string());
-
-        let result = filter_idp_token(&ctx, token, true, &info).await;
-        assert_eq!(result, Some("idp-token-value".to_string()));
+            mock_should_provide_idp_token_ctx(vec![VPermission::RetrieveRemoteAccessToken]).await;
+        let result = should_provide_idp_token(&ctx, true, &info).await;
+        assert_eq!(result.unwrap(), true);
     }
 
     #[tokio::test]
-    async fn test_filter_idp_token_returns_none_when_not_requested() {
+    async fn test_should_provide_idp_token_returns_false_when_not_requested() {
         let (ctx, info) =
-            mock_filter_idp_token_ctx(vec![VPermission::RetrieveRemoteAccessToken]).await;
-        let token = Some("idp-token-value".to_string());
+            mock_should_provide_idp_token_ctx(vec![VPermission::RetrieveRemoteAccessToken]).await;
 
         // Even with the permission, if not requested the token is not returned
-        let result = filter_idp_token(&ctx, token, false, &info).await;
-        assert_eq!(result, None);
+        let result = should_provide_idp_token(&ctx, false, &info).await;
+        assert_eq!(result.unwrap(), false);
     }
 
     #[tokio::test]
-    async fn test_filter_idp_token_returns_none_when_permission_missing() {
+    async fn test_should_provide_idp_token_returns_false_when_permission_missing() {
         // User has some permissions but not RetrieveRemoteAccessToken
-        let (ctx, info) = mock_filter_idp_token_ctx(vec![VPermission::CreateApiUser]).await;
-        let token = Some("idp-token-value".to_string());
-
-        let result = filter_idp_token(&ctx, token, true, &info).await;
-        assert_eq!(result, None);
+        let (ctx, info) = mock_should_provide_idp_token_ctx(vec![VPermission::CreateApiUser]).await;
+        let result = should_provide_idp_token(&ctx, true, &info).await;
+        assert_eq!(result.unwrap(), false);
     }
 
     #[tokio::test]
-    async fn test_filter_idp_token_returns_none_when_no_permissions() {
-        let (ctx, info) = mock_filter_idp_token_ctx(vec![]).await;
-        let token = Some("idp-token-value".to_string());
-
-        let result = filter_idp_token(&ctx, token, true, &info).await;
-        assert_eq!(result, None);
-    }
-
-    #[tokio::test]
-    async fn test_filter_idp_token_returns_none_when_token_is_none() {
-        let (ctx, info) =
-            mock_filter_idp_token_ctx(vec![VPermission::RetrieveRemoteAccessToken]).await;
-
-        // Token was None (e.g. revoked upstream) — should stay None regardless of permission
-        let result = filter_idp_token(&ctx, None, true, &info).await;
-        assert_eq!(result, None);
+    async fn test_should_provide_idp_token_returns_false_when_no_permissions() {
+        let (ctx, info) = mock_should_provide_idp_token_ctx(vec![]).await;
+        let result = should_provide_idp_token(&ctx, true, &info).await;
+        assert_eq!(result.unwrap(), false);
     }
 
     /// Set up mock storage for `complete_exchange` tests. The registered user will
@@ -2338,7 +2325,7 @@ mod tests {
             external_id: ExternalUserId::Google("test-google-id".to_string()),
             verified_emails: vec!["user@example.com".to_string()],
             display_name: Some("Test User".to_string()),
-            idp_token: Some("secret-upstream-token".to_string()),
+            idp_token: Some(SecretBox::from("secret-upstream-token")),
         }
     }
 

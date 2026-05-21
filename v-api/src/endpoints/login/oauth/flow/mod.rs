@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use dropshot::{HttpError, HttpResponseOk};
+use secrecy::ExposeSecret;
 use v_model::{LoginAttempt, permissions::PermissionStorage};
 
 use super::OAuthProvider;
@@ -19,7 +20,7 @@ pub use code::OAuthAuthzCodeExchangeResponse;
 
 pub(crate) async fn complete_exchange<T>(
     ctx: &VContext<T>,
-    info: UserInfo,
+    mut info: UserInfo,
     provider: &dyn OAuthProvider,
     attempt: &LoginAttempt,
     request_idp_token: bool,
@@ -28,7 +29,7 @@ pub(crate) async fn complete_exchange<T>(
 where
     T: VAppPermission + PermissionStorage,
 {
-    let idp_token = info.idp_token.clone();
+    let idp_token = info.idp_token.take();
 
     // Register this user as an API user if needed
     let (api_user_info, api_user_provider) = ctx
@@ -38,15 +39,14 @@ where
     // Only return the IdP token if the caller requested it AND the user has permission.
     // We must resolve the full caller (including group permissions) rather than checking
     // only the directly assigned user permissions.
-    let idp_token = filter_idp_token(ctx, idp_token, request_idp_token, &api_user_info).await;
+    let provide_idp_token =
+        should_provide_idp_token(ctx, request_idp_token, &api_user_info).await?;
 
     // Revoke the upstream access token whenever it will NOT be returned to the caller.
     // This covers the cases where the token was never requested, where the user lacks
     // the RetrieveRemoteAccessToken permission, and where the provider did not return
     // a token at all.
-    if idp_token.is_none()
-        && let Some(upstream) = upstream_token
-    {
+    if !provide_idp_token && let Some(upstream) = upstream_token {
         revoke_upstream_token(provider, &upstream).await;
     }
 
@@ -72,51 +72,51 @@ where
         access_token: token.signed_token,
         expires_in: token.expires_in,
         scope: attempt.scope.clone(),
-        idp_token,
+        idp_token: if provide_idp_token {
+            idp_token.map(|s| s.expose_secret().to_string())
+        } else {
+            None
+        },
     }))
 }
 
-/// Filter the IdP token based on whether it was requested and whether the user has
-/// the `RetrieveRemoteAccessToken` permission (including permissions inherited from
-/// groups). Returns `None` if either condition is not met.
-pub(crate) async fn filter_idp_token<T>(
+/// Determine if a user is allowed to retrieve the IdP token based on whether it was
+/// requested and whether the user has the `RetrieveRemoteAccessToken` permission
+pub(crate) async fn should_provide_idp_token<T>(
     ctx: &VContext<T>,
-    idp_token: Option<String>,
     requested: bool,
     api_user_info: &v_model::ApiUserInfo<T>,
-) -> Option<String>
+) -> Result<bool, HttpError>
 where
     T: VAppPermission + PermissionStorage,
 {
-    if !requested {
-        return None;
-    }
+    if requested {
+        // Resolve the caller so that group-inherited permissions are included in the
+        // permission check, not just directly-assigned user permissions.
+        let caller = ctx
+            .user
+            .resolve_caller(api_user_info, crate::context::BasePermissions::Full)
+            .await
+            .map_err(|err| {
+                HttpError::for_internal_error(format!(
+                    "Failed to resolve caller permissions for IdP token check: {}",
+                    err
+                ))
+            })?;
 
-    // Resolve the caller so that group-inherited permissions are included in the
-    // permission check, not just directly-assigned user permissions.
-    let caller = match ctx
-        .user
-        .resolve_caller(api_user_info, crate::context::BasePermissions::Full)
-        .await
-    {
-        Ok(caller) => caller,
-        Err(err) => {
-            tracing::warn!(
-                ?err,
-                "Failed to resolve caller permissions for IdP token check"
+        if caller
+            .permissions
+            .can(&VPermission::RetrieveRemoteAccessToken.into())
+        {
+            Ok(true)
+        } else {
+            tracing::info!(
+                "User requested IdP token but lacks RetrieveRemoteAccessToken permission"
             );
-            return None;
+            Ok(false)
         }
-    };
-
-    if caller
-        .permissions
-        .can(&VPermission::RetrieveRemoteAccessToken.into())
-    {
-        idp_token
     } else {
-        tracing::info!("User requested IdP token but lacks RetrieveRemoteAccessToken permission");
-        None
+        Ok(false)
     }
 }
 

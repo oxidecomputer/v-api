@@ -53,6 +53,10 @@ impl CodeOAuth {
     where
         T: CliOAuthProviderInfo,
     {
+        let redirect_uri = provider
+            .redirect_endpoint()
+            .ok_or_else(|| anyhow::anyhow!("OAuth code flow provider must define a redirect url"))?
+            .to_string();
         let client = BasicClient::new(ClientId::new(provider.client_id().to_string()))
             .set_auth_uri(AuthUrl::new(
                 provider
@@ -64,20 +68,13 @@ impl CodeOAuth {
             )?)
             .set_auth_type(AuthType::RequestBody)
             .set_token_uri(TokenUrl::new(provider.token_endpoint().to_string())?)
-            .set_redirect_uri(RedirectUrl::new(
-                provider
-                    .redirect_endpoint()
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("OAuth code flow provider must define a redirect url")
-                    })?
-                    .to_string(),
-            )?);
+            .set_redirect_uri(RedirectUrl::new(redirect_uri.clone())?);
 
         Ok(Self {
             provider: provider.provider(),
             client,
             client_id: provider.client_id(),
-            redirect_uri: provider.redirect_endpoint().unwrap_or_default().to_string(),
+            redirect_uri,
             scopes: provider.scopes().iter().map(|s| s.to_string()).collect(),
             port: provider.public_pkce_port().ok_or_else(|| {
                 anyhow::anyhow!("OAuth code flow provider must define a public proxy port")
