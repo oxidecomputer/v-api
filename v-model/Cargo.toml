@@ -26,6 +26,7 @@ serde_json = { workspace = true }
 steno = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+url = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"]  }
 
 [dev-dependencies]

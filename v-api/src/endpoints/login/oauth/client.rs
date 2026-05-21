@@ -17,8 +17,9 @@ use v_model::{
 use crate::{
     VContext,
     authn::key::RawKey,
-    context::{ApiContext, VContextWithCaller},
+    context::{ApiContext, VContextWithCaller, oauth::OAuthError},
     permissions::{VAppPermission, VPermission},
+    response::{ResourceError, bad_request},
     secrets::OpenApiSecretString,
     util::response::to_internal_error,
 };
@@ -54,7 +55,10 @@ where
     T: VAppPermission + From<VPermission> + PermissionStorage,
 {
     // Create the new client
-    let client = ctx.oauth.create_oauth_client(&caller).await?;
+    let client = ctx
+        .oauth
+        .create_oauth_client(&caller, TypedUuid::new_v4())
+        .await?;
 
     // Give the caller permission to perform actions on the client they just created.
     // This uses the registration caller which has sufficient privileges to grant these
@@ -191,10 +195,17 @@ where
     let (ctx, caller) = rqctx.as_ctx().await?;
     let path = path.into_inner();
     let body = body.into_inner();
+
     Ok(HttpResponseOk(
         ctx.oauth
             .add_oauth_redirect_uri(&caller, &path.client_id, &body.redirect_uri)
-            .await?,
+            .await
+            .map_err(|err| match err {
+                ResourceError::InternalError(OAuthError::RedirectUri(_)) => {
+                    bad_request("Invalid redirect URI")
+                }
+                err => err.into(),
+            })?,
     ))
 }
 

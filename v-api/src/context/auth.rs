@@ -40,9 +40,29 @@ where
         jwks: JwkSet,
         signers: Vec<Signer>,
         verifiers: Vec<Verifier>,
+        // The registration caller must have all of the permissions that it can possibly grant to
+        // other users. v-api does not support a concept of a super user with unrestricted
+        // permissions. End users should pass in a Vec of their additional supported permissions.
+        mut registration_caller_additional_permissions: Vec<T>,
     ) -> Result<Self, AppError> {
         let signers = signers.into_iter().map(Arc::new).collect::<Vec<_>>();
         let verifiers = verifiers.into_iter().map(Arc::new).collect::<Vec<_>>();
+        registration_caller_additional_permissions.extend_from_slice(&[
+            VPermission::CreateApiUser.into(),
+            VPermission::GetApiUsersAll.into(),
+            VPermission::ManageApiUsersAll.into(),
+            VPermission::GetApiKeysAll.into(),
+            VPermission::CreateGroup.into(),
+            VPermission::GetGroupsAll.into(),
+            VPermission::ManageGroupMembershipsAll.into(),
+            VPermission::CreateMapper.into(),
+            VPermission::GetMappersAll.into(),
+            VPermission::GetOAuthClientsAll.into(),
+            VPermission::ManageOAuthClientsAll.into(),
+            VPermission::GetMagicLinkClientsAll.into(),
+            VPermission::ManageMagicLinkClientsAll.into(),
+            VPermission::CreateAccessToken.into(),
+        ]);
         Ok(Self {
             unauthenticated_caller: Caller {
                 id: "00000000-0000-4000-8000-000000000000".parse().unwrap(),
@@ -51,22 +71,7 @@ where
             },
             registration_caller: Caller {
                 id: "00000000-0000-4000-8000-000000000001".parse().unwrap(),
-                permissions: vec![
-                    VPermission::CreateApiUser,
-                    VPermission::GetApiUsersAll,
-                    VPermission::ManageApiUsersAll,
-                    VPermission::GetApiKeysAll,
-                    VPermission::CreateGroup,
-                    VPermission::GetGroupsAll,
-                    VPermission::CreateMapper,
-                    VPermission::GetMappersAll,
-                    VPermission::GetOAuthClientsAll,
-                    VPermission::ManageOAuthClientsAll,
-                    VPermission::GetMagicLinkClientsAll,
-                    VPermission::ManageMagicLinkClientsAll,
-                    VPermission::CreateAccessToken,
-                ]
-                .into(),
+                permissions: registration_caller_additional_permissions.into(),
                 extensions: HashMap::default(),
             },
             jwt: JwtContext {
@@ -218,6 +223,7 @@ mod tests {
                 wrong_verifier.resolve_verifier(None).await.unwrap(),
                 verifier.resolve_verifier(None).await.unwrap(),
             ],
+            vec![],
         )
         .unwrap();
 

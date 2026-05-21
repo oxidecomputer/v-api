@@ -4,6 +4,7 @@
 
 use newtype_uuid::TypedUuid;
 use std::sync::Arc;
+use thiserror::Error;
 use v_model::{
     NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
     OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId,
@@ -17,8 +18,17 @@ use v_model::{
 use crate::{
     VApiStorage,
     permissions::{VAppPermission, VPermission},
-    response::{OptionalResource, ResourceResult, resource_restricted},
+    response::{OptionalResource, ResourceError, ResourceResult, resource_restricted},
+    util::{RedirectUrlError, parse_redirect_url},
 };
+
+#[derive(Debug, Error)]
+pub enum OAuthError {
+    #[error("Invalid redirect URI")]
+    RedirectUri(#[from] RedirectUrlError),
+    #[error("Storage layer error")]
+    StoreError(#[from] StoreError),
+}
 
 #[derive(Clone)]
 pub struct OAuthContext<T> {
@@ -40,15 +50,10 @@ where
     pub async fn create_oauth_client(
         &self,
         caller: &Caller<T>,
-    ) -> ResourceResult<OAuthClient, StoreError> {
+        id: TypedUuid<OAuthClientId>,
+    ) -> ResourceResult<OAuthClient, OAuthError> {
         if caller.can(&VPermission::CreateOAuthClient.into()) {
-            Ok(OAuthClientStore::upsert(
-                &*self.storage,
-                NewOAuthClient {
-                    id: TypedUuid::new_v4(),
-                },
-            )
-            .await?)
+            Ok(OAuthClientStore::upsert(&*self.storage, NewOAuthClient { id }).await?)
         } else {
             resource_restricted()
         }
@@ -58,7 +63,7 @@ where
         &self,
         caller: &Caller<T>,
         id: &TypedUuid<OAuthClientId>,
-    ) -> ResourceResult<OAuthClient, StoreError> {
+    ) -> ResourceResult<OAuthClient, OAuthError> {
         if caller.can(&VPermission::GetOAuthClient(*id).into()) {
             OAuthClientStore::get(&*self.storage, id, false)
                 .await
@@ -71,7 +76,7 @@ where
     pub async fn list_oauth_clients(
         &self,
         caller: &Caller<T>,
-    ) -> ResourceResult<Vec<OAuthClient>, StoreError> {
+    ) -> ResourceResult<Vec<OAuthClient>, OAuthError> {
         let mut clients = OAuthClientStore::list(
             &*self.storage,
             OAuthClientFilter {
@@ -93,7 +98,7 @@ where
         id: &TypedUuid<OAuthSecretId>,
         client_id: &TypedUuid<OAuthClientId>,
         secret: &str,
-    ) -> ResourceResult<OAuthClientSecret, StoreError> {
+    ) -> ResourceResult<OAuthClientSecret, OAuthError> {
         if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
             Ok(OAuthClientSecretStore::upsert(
                 &*self.storage,
@@ -114,7 +119,7 @@ where
         caller: &Caller<T>,
         id: &TypedUuid<OAuthSecretId>,
         client_id: &TypedUuid<OAuthClientId>,
-    ) -> ResourceResult<OAuthClientSecret, StoreError> {
+    ) -> ResourceResult<OAuthClientSecret, OAuthError> {
         if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
             OAuthClientSecretStore::delete(&*self.storage, id)
                 .await
@@ -129,14 +134,20 @@ where
         caller: &Caller<T>,
         client_id: &TypedUuid<OAuthClientId>,
         uri: &str,
-    ) -> ResourceResult<OAuthClientRedirectUri, StoreError> {
+    ) -> ResourceResult<OAuthClientRedirectUri, OAuthError> {
+        // Validate that the redirect URI is a well-formed URL before storing it.
+        // Per RFC 6749 §3.1.2, redirect URIs must be absolute URIs and must not
+        // include a fragment component.
+        let redirect_url = parse_redirect_url(uri)
+            .map_err(|e| ResourceError::InternalError(OAuthError::RedirectUri(e)))?;
+
         if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
             Ok(OAuthClientRedirectUriStore::upsert(
                 &*self.storage,
                 NewOAuthClientRedirectUri {
                     id: TypedUuid::new_v4(),
                     oauth_client_id: *client_id,
-                    redirect_uri: uri.to_string(),
+                    redirect_uri: redirect_url.to_string(),
                 },
             )
             .await?)
@@ -150,7 +161,7 @@ where
         caller: &Caller<T>,
         id: &TypedUuid<OAuthRedirectUriId>,
         client_id: &TypedUuid<OAuthClientId>,
-    ) -> ResourceResult<OAuthClientRedirectUri, StoreError> {
+    ) -> ResourceResult<OAuthClientRedirectUri, OAuthError> {
         if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
             OAuthClientRedirectUriStore::delete(&*self.storage, id)
                 .await

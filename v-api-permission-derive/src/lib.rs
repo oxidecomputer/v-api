@@ -496,6 +496,7 @@ fn from_system_permission_tokens(
                         VPermission::ManageMagicLinkClientsAll => Self::ManageMagicLinkClientsAll,
 
                         VPermission::CreateAccessToken => Self::CreateAccessToken,
+                        VPermission::RetrieveRemoteAccessToken => Self::RetrieveRemoteAccessToken,
 
                         #saga_permission_from_tokens
 
@@ -852,6 +853,7 @@ fn system_permission_tokens() -> TokenStream {
             ManageMagicLinkClientsAll,
 
             CreateAccessToken,
+            RetrieveRemoteAccessToken,
 
             #saga_permission_tokens
 

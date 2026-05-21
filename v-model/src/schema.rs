@@ -103,7 +103,7 @@ diesel::table! {
         id -> Uuid,
         attempt_state -> AttemptState,
         client_id -> Uuid,
-        redirect_uri -> Varchar,
+        redirect_uri -> Nullable<Varchar>,
         state -> Nullable<Varchar>,
         pkce_challenge -> Nullable<Varchar>,
         pkce_challenge_method -> Nullable<Varchar>,
@@ -117,6 +117,9 @@ diesel::table! {
         provider_error -> Nullable<Varchar>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
+        grant_type -> Varchar,
+        device_code -> Nullable<Varchar>,
+        provider_device_code -> Nullable<Varchar>,
     }
 }
 

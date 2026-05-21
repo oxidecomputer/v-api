@@ -174,6 +174,8 @@ pub enum CloudKmsError {
     ClientError(#[from] google_cloudkms1::Error),
     #[error("Signature received failed CRC check")]
     CorruptedSignature,
+    #[error("CloudKMS did not verify the digest CRC32C sent with the request")]
+    DigestCrc32cNotVerified,
     #[error("Failed to decode signature: {0}")]
     FailedToDecodeSignature(#[from] base64::DecodeError),
     #[error("Failed to deserialize response: {0}")]
@@ -280,9 +282,27 @@ impl Signer {
                 let signature = match response {
                     Ok((_, response)) => {
                         tracing::info!("Library deserialization succeeded");
-                        response
-                            .signature
-                            .ok_or_else(|| Box::new(CloudKmsError::MissingSignature))
+
+                        // Google should always be verifying our input
+                        if response.verified_digest_crc32c != Some(true) {
+                            Err(Box::new(CloudKmsError::DigestCrc32cNotVerified))
+                        } else {
+                            response
+                                .signature
+                                .ok_or_else(|| Box::new(CloudKmsError::MissingSignature))
+                                .and_then(|signature| {
+                                    // Verify the CRC32C of the returned signature to detect
+                                    // corruption in transit
+                                    match response.signature_crc32c {
+                                        Some(expected_crc)
+                                            if crc32c(&signature) as i64 != expected_crc =>
+                                        {
+                                            Err(Box::new(CloudKmsError::CorruptedSignature))
+                                        }
+                                        _ => Ok(signature),
+                                    }
+                                })
+                        }
                     }
                     Err(google_cloudkms1::Error::JsonDecodeError(body, _)) => {
                         tracing::info!("Using fallback deserialization");

@@ -17,10 +17,11 @@ use v_model::{
 use crate::{
     VContext,
     authn::key::RawKey,
-    context::{ApiContext, VContextWithCaller},
+    context::{ApiContext, VContextWithCaller, magic_link::MagicLinkError},
     permissions::{VAppPermission, VPermission},
+    response::ResourceError,
     secrets::OpenApiSecretString,
-    util::response::to_internal_error,
+    util::response::{bad_request, to_internal_error},
 };
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -195,10 +196,17 @@ where
     let (ctx, caller) = rqctx.as_ctx().await?;
     let path = path.into_inner();
     let body = body.into_inner();
+
     Ok(HttpResponseOk(
         ctx.magic_link
             .add_magic_link_redirect_uri(&caller, &path.client_id, &body.redirect_uri)
-            .await?,
+            .await
+            .map_err(|err| match err {
+                ResourceError::InternalError(MagicLinkError::RedirectUri(_)) => {
+                    bad_request("Invalid redirect URI")
+                }
+                err => err.into(),
+            })?,
     ))
 }
 

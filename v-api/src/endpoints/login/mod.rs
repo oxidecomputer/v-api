@@ -5,6 +5,7 @@
 use async_trait::async_trait;
 use dropshot::HttpError;
 use schemars::JsonSchema;
+use secrecy::SecretString;
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{self, Visitor},
@@ -60,6 +61,7 @@ impl From<LoginError> for HttpError {
 pub enum ExternalUserId {
     GitHub(String),
     Google(String),
+    Zendesk(String),
     #[cfg(feature = "local-dev")]
     Local(String),
     MagicLink(String),
@@ -70,6 +72,7 @@ impl ExternalUserId {
         match self {
             Self::GitHub(id) => id,
             Self::Google(id) => id,
+            Self::Zendesk(id) => id,
             #[cfg(feature = "local-dev")]
             Self::Local(id) => id,
             Self::MagicLink(id) => id,
@@ -80,6 +83,7 @@ impl ExternalUserId {
         match self {
             Self::GitHub(_) => "github",
             Self::Google(_) => "google",
+            Self::Zendesk(_) => "zendesk",
             #[cfg(feature = "local-dev")]
             Self::Local(_) => "local",
             Self::MagicLink(_) => "magic-link",
@@ -103,6 +107,7 @@ impl Serialize for ExternalUserId {
         match self {
             ExternalUserId::GitHub(id) => serializer.serialize_str(&format!("github-{}", id)),
             ExternalUserId::Google(id) => serializer.serialize_str(&format!("google-{}", id)),
+            ExternalUserId::Zendesk(id) => serializer.serialize_str(&format!("zendesk-{}", id)),
             #[cfg(feature = "local-dev")]
             ExternalUserId::Local(id) => serializer.serialize_str(&format!("local-{}", id)),
             ExternalUserId::MagicLink(id) => {
@@ -142,6 +147,12 @@ impl<'de> Deserialize<'de> for ExternalUserId {
                     } else {
                         Err(de::Error::custom(ExternalUserIdDeserializeError::Empty))
                     }
+                } else if let Some(("", id)) = value.split_once("zendesk-") {
+                    if !id.is_empty() {
+                        Ok(ExternalUserId::Zendesk(id.to_string()))
+                    } else {
+                        Err(de::Error::custom(ExternalUserIdDeserializeError::Empty))
+                    }
                 } else if let Some(("", id)) = value.split_once("local-") {
                     #[cfg(feature = "local-dev")]
                     {
@@ -176,11 +187,12 @@ impl<'de> Deserialize<'de> for ExternalUserId {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize)]
 pub struct UserInfo {
     pub external_id: ExternalUserId,
     pub verified_emails: Vec<String>,
     pub display_name: Option<String>,
+    pub idp_token: Option<SecretString>,
 }
 
 #[derive(Debug, Error)]
@@ -191,11 +203,77 @@ pub enum UserInfoError {
     Deserialize(#[from] serde_json::Error),
     #[error("Failed to create user info request {0}")]
     Http(#[from] http::Error),
+    #[error("User account is locked")]
+    Locked,
     #[error("User information is missing")]
     MissingUserInfoData(String),
+    #[error("User info endpoint returned HTTP {status} for {endpoint}")]
+    UnexpectedStatus {
+        endpoint: String,
+        status: http::StatusCode,
+    },
 }
 
 #[async_trait]
 pub trait UserInfoProvider {
     async fn get_user_info(&self, token: &str) -> Result<UserInfo, UserInfoError>;
+}
+
+/// Compare a candidate redirect URI against a list of registered redirect URIs using strict
+/// string comparison. Structural validation of redirect URIs should be performed at registration
+/// time before they are stored in the database.
+pub fn is_redirect_uri_valid<'a>(
+    redirect_uri: &str,
+    registered_uris: impl Iterator<Item = &'a str>,
+) -> bool {
+    registered_uris
+        .into_iter()
+        .any(|registered| registered == redirect_uri)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_redirect_uri_valid;
+
+    #[test]
+    fn test_redirect_uri_exact_match() {
+        assert!(is_redirect_uri_valid(
+            "https://example.com/callback",
+            ["https://example.com/callback"].iter().copied(),
+        ));
+    }
+
+    #[test]
+    fn test_redirect_uri_rejects_different_string() {
+        assert!(!is_redirect_uri_valid(
+            "https://evil.com/callback",
+            ["https://example.com/callback"].iter().copied(),
+        ));
+    }
+
+    #[test]
+    fn test_redirect_uri_rejects_trailing_slash_difference() {
+        assert!(!is_redirect_uri_valid(
+            "https://example.com/callback/",
+            ["https://example.com/callback"].iter().copied(),
+        ));
+    }
+
+    #[test]
+    fn test_redirect_uri_matches_from_multiple_registered() {
+        assert!(is_redirect_uri_valid(
+            "https://example.com/callback",
+            ["https://other.com/callback", "https://example.com/callback",]
+                .iter()
+                .copied(),
+        ));
+    }
+
+    #[test]
+    fn test_redirect_uri_rejects_no_registered() {
+        assert!(!is_redirect_uri_valid(
+            "https://example.com/callback",
+            std::iter::empty(),
+        ));
+    }
 }
