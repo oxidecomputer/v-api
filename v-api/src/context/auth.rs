@@ -40,11 +40,14 @@ where
         jwks: JwkSet,
         signers: Vec<Signer>,
         verifiers: Vec<Verifier>,
-        mut additional_permissions: Vec<T>,
+        // The registration caller must have all of the permissions that it can possibly grant to
+        // other users. v-api does not support a concept of a super user with unrestricted
+        // permissions. End users should pass in a Vec of their additional supported permissions.
+        mut registration_caller_additional_permissions: Vec<T>,
     ) -> Result<Self, AppError> {
         let signers = signers.into_iter().map(Arc::new).collect::<Vec<_>>();
         let verifiers = verifiers.into_iter().map(Arc::new).collect::<Vec<_>>();
-        additional_permissions.extend_from_slice(&[
+        registration_caller_additional_permissions.extend_from_slice(&[
             VPermission::CreateApiUser.into(),
             VPermission::GetApiUsersAll.into(),
             VPermission::ManageApiUsersAll.into(),
