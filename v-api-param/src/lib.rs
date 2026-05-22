@@ -22,7 +22,7 @@
 
 use secrecy::SecretString;
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -54,7 +54,7 @@ impl StringParam {
     ///
     /// For inline values, returns the value directly.
     /// For path-based values, reads the file contents and trims trailing whitespace.
-    pub fn resolve(&self, base: Option<PathBuf>) -> Result<SecretString, ParamResolutionError> {
+    pub fn resolve(&self, base: Option<&Path>) -> Result<SecretString, ParamResolutionError> {
         match self {
             StringParam::Inline(value) => Ok(value.clone()),
             StringParam::FromPath { path } => {
@@ -123,7 +123,7 @@ mod tests {
         let base_path = std::env::temp_dir();
 
         assert_eq!(
-            param.resolve(Some(base_path)).unwrap().expose_secret(),
+            param.resolve(Some(&base_path)).unwrap().expose_secret(),
             "file-param"
         );
     }
