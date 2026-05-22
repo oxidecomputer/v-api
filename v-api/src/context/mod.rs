@@ -919,16 +919,16 @@ where
         let jwks = JwkSet {
             keys: keys
                 .iter()
-                .filter_map(|key| key.resolve_jwk(param_path.clone()).ok())
+                .filter_map(|key| key.resolve_jwk(param_path.as_deref()).ok())
                 .collect::<Vec<_>>(),
         };
         let signers = keys
             .iter()
-            .filter_map(|key| key.resolve_signer(param_path.clone()).ok())
+            .filter_map(|key| key.resolve_signer(param_path.as_deref()).ok())
             .collect::<Vec<_>>();
         let verifiers = join_all(
             keys.iter()
-                .map(|key| key.resolve_verifier(param_path.clone())),
+                .map(|key| key.resolve_verifier(param_path.as_deref())),
         )
         .await
         .into_iter()

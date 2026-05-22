@@ -21,7 +21,7 @@ use serde::{
     Deserialize, Deserializer,
     de::{self, Visitor},
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 use v_api_param::{ParamResolutionError, StringParam};
 use v_model::OAuthClientId;
@@ -196,18 +196,10 @@ pub struct OAuthWebProxyConfig {
 impl OAuthConfig {
     pub fn resolve(
         &self,
-        base: Option<PathBuf>,
+        base: Option<&Path>,
     ) -> Result<ResolvedOAuthConfig, ParamResolutionError> {
-        let device = self
-            .device
-            .as_ref()
-            .map(|d| d.resolve(base.clone()))
-            .transpose()?;
-        let web = self
-            .web
-            .as_ref()
-            .map(|w| w.resolve(base.clone()))
-            .transpose()?;
+        let device = self.device.as_ref().map(|d| d.resolve(base)).transpose()?;
+        let web = self.web.as_ref().map(|w| w.resolve(base)).transpose()?;
         let proxy_web = self
             .proxy_web
             .as_ref()
@@ -223,7 +215,7 @@ impl OAuthConfig {
 impl OAuthDeviceConfig {
     pub fn resolve(
         &self,
-        base: Option<PathBuf>,
+        base: Option<&Path>,
     ) -> Result<ResolvedOAuthDeviceConfig, ParamResolutionError> {
         let remote_client_secret = self.remote_client_secret.resolve(base)?;
         Ok(ResolvedOAuthDeviceConfig {
@@ -236,7 +228,7 @@ impl OAuthDeviceConfig {
 impl OAuthWebConfig {
     pub fn resolve(
         &self,
-        base: Option<PathBuf>,
+        base: Option<&Path>,
     ) -> Result<ResolvedOAuthWebConfig, ParamResolutionError> {
         let remote_client_secret = self.remote_client_secret.resolve(base)?;
         Ok(ResolvedOAuthWebConfig {
@@ -248,7 +240,7 @@ impl OAuthWebConfig {
 impl OAuthWebProxyConfig {
     pub fn resolve(
         &self,
-        _base: Option<PathBuf>,
+        _base: Option<&Path>,
     ) -> Result<ResolvedOAuthWebProxyConfig, ParamResolutionError> {
         Ok(ResolvedOAuthWebProxyConfig {
             client_id: self.client_id,
@@ -259,7 +251,7 @@ impl OAuthWebProxyConfig {
 }
 
 impl AsymmetricKey {
-    pub fn resolve_signer(&self, path: Option<PathBuf>) -> Result<Signer, SigningKeyError> {
+    pub fn resolve_signer(&self, path: Option<&Path>) -> Result<Signer, SigningKeyError> {
         Ok(Signer::new(
             self.kid().to_string(),
             match self {
@@ -279,10 +271,7 @@ impl AsymmetricKey {
         ))
     }
 
-    pub async fn resolve_verifier(
-        &self,
-        path: Option<PathBuf>,
-    ) -> Result<Verifier, SigningKeyError> {
+    pub async fn resolve_verifier(&self, path: Option<&Path>) -> Result<Verifier, SigningKeyError> {
         Ok(match self {
             AsymmetricKey::LocalVerifier { .. } => Verifier::Local(LocalVerifyingKey::new(
                 VerifyingKey::new(self.public_key(path)?),
@@ -294,7 +283,7 @@ impl AsymmetricKey {
         })
     }
 
-    pub fn resolve_jwk(&self, path: Option<PathBuf>) -> Result<Jwk, JwtSignerError> {
+    pub fn resolve_jwk(&self, path: Option<&Path>) -> Result<Jwk, JwtSignerError> {
         let key_id = self.kid();
         let public_key = self.public_key(path).map_err(JwtSignerError::InvalidKey)?;
 
@@ -317,7 +306,7 @@ impl AsymmetricKey {
         })
     }
 
-    fn public_key(&self, path: Option<PathBuf>) -> Result<RsaPublicKey, SigningKeyError> {
+    fn public_key(&self, path: Option<&Path>) -> Result<RsaPublicKey, SigningKeyError> {
         Ok(match self {
             AsymmetricKey::LocalVerifier { public, .. } => {
                 RsaPublicKey::from_public_key_pem(public.resolve(path)?.expose_secret())?
