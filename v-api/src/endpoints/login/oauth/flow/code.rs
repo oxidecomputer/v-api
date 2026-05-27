@@ -291,7 +291,7 @@ where
         provider.name().to_string(),
         query.client_id,
         Some(query.redirect_uri),
-        query.scope,
+        query.scope.unwrap_or_default(),
         "authorization_code".to_string(),
     )
     .map_err(|err| {
@@ -2753,7 +2753,7 @@ mod tests {
     }
 
     /// When a login attempt has no scope (`None`), the minted JWT must have
-    /// `scp: Some([])` which the caller-resolution layer interprets as
+    /// `scp: ""` (empty string) which the caller-resolution layer interprets as
     /// `BasePermissions::Restricted` with an empty permission set (no permissions).
     #[tokio::test]
     async fn test_null_scope_produces_no_permission_token() {
@@ -2787,14 +2787,14 @@ mod tests {
 
         assert_eq!(
             jwt.claims.scp,
-            Some(vec![]),
+            Vec::<String>::new(),
             "JWT scp claim must be an empty list (implying no permissions) when no scope was requested",
         );
     }
 
     /// When a login attempt specifies the special `"full"` scope, the minted JWT
-    /// must carry `scp: Some(["full"])` which the caller-resolution layer
-    /// interprets as `BasePermissions::Full` (all permissions).
+    /// must carry `scp: "full"` which the caller-resolution layer interprets as
+    /// `BasePermissions::Full` (all permissions).
     #[tokio::test]
     async fn test_full_scope_produces_full_permission_token() {
         let storage = mock_exchange_storage(vec![VPermission::CreateAccessToken]);
@@ -2828,7 +2828,7 @@ mod tests {
 
         assert_eq!(
             jwt.claims.scp,
-            Some(vec!["full".to_string()]),
+            vec!["full".to_string()],
             "JWT scp claim must contain 'full' when the full scope was requested",
         );
     }
@@ -2869,7 +2869,7 @@ mod tests {
 
         assert_eq!(
             jwt.claims.scp,
-            Some(vec!["user:info:r".to_string()]),
+            vec!["user:info:r".to_string()],
             "JWT scp claim must contain the requested scope when one was provided",
         );
     }

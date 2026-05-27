@@ -422,7 +422,7 @@ where
         &self,
         api_user: &TypedUuid<UserId>,
         api_user_provider: &TypedUuid<UserProviderId>,
-        scope: Option<Vec<String>>,
+        scope: Vec<String>,
     ) -> Claims {
         let expires_at =
             Utc::now() + TimeDelta::try_seconds(self.auth.default_jwt_expiration()).unwrap();
@@ -613,7 +613,7 @@ where
         caller: &Caller<T>,
         api_user: &TypedUuid<UserId>,
         api_user_provider: &TypedUuid<UserProviderId>,
-        scope: Option<Vec<String>>,
+        scope: Vec<String>,
     ) -> ResourceResult<RegisteredAccessToken, ApiError> {
         let claims = self.generate_claims(api_user, api_user_provider, scope);
         let token = self
@@ -1101,7 +1101,7 @@ mod tests {
                 Some(token_id),
                 &user.id,
                 &provider.id,
-                Some(scope),
+                scope,
                 Utc::now().add(TimeDelta::try_seconds(300).unwrap()),
             ))
             .await
@@ -2260,7 +2260,7 @@ pub(crate) mod test_mocks {
                 },
                 &api_user_id,
                 &api_user_provider_id,
-                None,
+                vec![],
             )
             .await;
 

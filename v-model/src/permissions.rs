@@ -320,7 +320,7 @@ where
 pub trait AsScope: Sized {
     fn as_scope(&self) -> &str;
     fn from_scope_arg(scope_arg: &str) -> Result<Permissions<Self>, PermissionError> {
-        Self::from_scope(scope_arg.split(' '))
+        Self::from_scope(scope_arg.split(' ').filter(|s| !s.is_empty()))
     }
     fn from_scope<S>(scope: impl Iterator<Item = S>) -> Result<Permissions<Self>, PermissionError>
     where

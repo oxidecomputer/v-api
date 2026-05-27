@@ -324,7 +324,7 @@ impl NewLoginAttempt {
         provider: String,
         client_id: TypedUuid<OAuthClientId>,
         redirect_uri: Option<String>,
-        scope: Option<String>,
+        scope: String,
         grant_type: String,
     ) -> Result<Self, InvalidValueError> {
         // Validate that the redirect URI is a well-formed URL. This ensures
@@ -351,7 +351,7 @@ impl NewLoginAttempt {
             provider_pkce_verifier: None,
             provider_authz_code: None,
             provider_error: None,
-            scope,
+            scope: Some(scope),
             grant_type,
             device_code: None,
             provider_device_code: None,

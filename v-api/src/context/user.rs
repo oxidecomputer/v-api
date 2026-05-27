@@ -260,10 +260,12 @@ where
             }
             AuthToken::Jwt(jwt) => {
                 // AuthnToken::Jwt can only be generated from a verified JWT
-                let permissions = match &jwt.claims.scp {
-                    Some(scp) if scp.iter().any(|s| s == "full") => BasePermissions::Full,
-                    Some(scp) => BasePermissions::Restricted(<T as AsScope>::from_scope(scp.iter())?),
-                    None => BasePermissions::Restricted(Permissions::new()),
+                let permissions = if jwt.claims.scp.iter().any(|s| s == "full") {
+                    BasePermissions::Full
+                } else if jwt.claims.scp.is_empty() {
+                    BasePermissions::Restricted(Permissions::new())
+                } else {
+                    BasePermissions::Restricted(<T as AsScope>::from_scope(jwt.claims.scp.iter())?)
                 };
 
                 // Verify that the access token has not been revoked and is known

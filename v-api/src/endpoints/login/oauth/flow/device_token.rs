@@ -133,11 +133,10 @@ where
         .await
         .map_err(|_| bad_request("Unknown client id"))?;
 
-    // Validate scope if provided. A None scope means no permissions.
+    // Validate scope if provided. An omitted scope means no permissions.
     // Use the special scope "full" to request all permissions.
-    if let Some(ref scope) = body.scope
-        && let Err(err) = VPermission::from_scope_arg(scope)
-    {
+    let scope = body.scope.unwrap_or_default();
+    if let Err(err) = VPermission::from_scope_arg(&scope) {
         tracing::warn!(?err, ?scope, "Client submitted an invalid scope");
         return Ok(error_response(
             StatusCode::BAD_REQUEST,
@@ -199,7 +198,7 @@ where
         provider.name().to_string(),
         body.client_id,
         None,
-        body.scope,
+        scope,
         "urn:ietf:params:oauth:grant-type:device_code".to_string(),
     )
     .map_err(|err| {
@@ -434,6 +433,11 @@ where
 
             let exchange_response = response.0;
 
+            tracing::trace!(
+                ?exchange_response,
+                "Received device authorization response from upstream provider"
+            );
+
             Ok(Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "application/json")
@@ -452,8 +456,6 @@ where
         }
     }
 }
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 /// Validate the grant_type for device code exchange per RFC 8628 §3.4.
 fn validate_device_grant_type(grant_type: &str) -> bool {

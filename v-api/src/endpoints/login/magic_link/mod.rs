@@ -225,12 +225,16 @@ where
 
         tracing::info!(api_user_id = ?api_user_info.user.id, "Retrieved api user to generate access token for");
 
-        let scope = Some(
-            attempt
-                .scope
-                .map(|scope| scope.split(' ').map(|s| s.to_string()).collect::<Vec<_>>())
-                .unwrap_or_default(),
-        );
+        let scope = attempt
+            .scope
+            .map(|scope| {
+                scope
+                    .split(' ')
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
 
         let token = ctx
             .generate_access_token(

@@ -44,7 +44,6 @@ pub struct CodeOAuth {
     client: CodeClient,
     client_id: Uuid,
     redirect_uri: String,
-    scopes: Vec<String>,
     port: u16,
 }
 
@@ -75,7 +74,6 @@ impl CodeOAuth {
             client,
             client_id: provider.client_id(),
             redirect_uri,
-            scopes: provider.scopes().iter().map(|s| s.to_string()).collect(),
             port: provider.public_pkce_port().ok_or_else(|| {
                 anyhow::anyhow!("OAuth code flow provider must define a public proxy port")
             })?,
@@ -87,13 +85,14 @@ impl CodeOAuth {
     pub fn authorize_url(
         &self,
         pkce_challenge: PkceCodeChallenge,
+        scope: &str,
     ) -> (oauth2::url::Url, CsrfToken) {
         let mut req = self
             .client
             .authorize_url(CsrfToken::new_random)
             .set_pkce_challenge(pkce_challenge);
 
-        for scope in &self.scopes {
+        for scope in scope.split(" ") {
             req = req.add_scope(Scope::new(scope.to_string()));
         }
 
@@ -107,12 +106,17 @@ impl CodeOAuth {
     /// 3. Forward the redirect request to the API server via the adapter.
     /// 4. Extract the token from the server's response.
     /// 5. Return a success page to the browser and shut down the proxy.
-    pub async fn login<T>(&self, adapter: Arc<T>, request_idp_token: bool) -> Result<T::ShortToken>
+    pub async fn login<T>(
+        &self,
+        adapter: Arc<T>,
+        request_idp_token: bool,
+        scope: &str,
+    ) -> Result<T::ShortToken>
     where
         T: CliOAuthAdapter + Send + Sync + 'static,
     {
         let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
-        let (auth_url, csrf_state) = self.authorize_url(pkce_challenge);
+        let (auth_url, csrf_state) = self.authorize_url(pkce_challenge, scope);
 
         println!(
             "Open the following URL in your browser to authenticate:\n\n  {}\n",

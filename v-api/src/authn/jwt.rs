@@ -52,10 +52,38 @@ pub struct Claims {
     pub aud: String,
     pub sub: TypedUuid<UserId>,
     pub prv: TypedUuid<UserProviderId>,
-    pub scp: Option<Vec<String>>,
+    #[serde(with = "scp_format")]
+    pub scp: Vec<String>,
     pub exp: i64,
     pub nbf: i64,
     pub jti: TypedUuid<AccessTokenId>,
+}
+
+/// Serialize and deserialize the `scp` claim as a space-delimited string per
+/// RFC 9068 §2.2.2 / RFC 6749 §3.3. Internally the claim is stored as a
+/// `Vec<String>` for convenient iteration, but on the wire it is always a
+/// single space-separated string (empty string when there are no scopes).
+mod scp_format {
+    use serde::{self, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(value: &[String], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&value.join(" "))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        if s.is_empty() {
+            Ok(vec![])
+        } else {
+            Ok(s.split(' ').map(String::from).collect())
+        }
+    }
 }
 
 impl Claims {
@@ -64,7 +92,7 @@ impl Claims {
         id: Option<TypedUuid<AccessTokenId>>,
         user: &TypedUuid<UserId>,
         provider: &TypedUuid<UserProviderId>,
-        scope: Option<Vec<String>>,
+        scope: Vec<String>,
         expires_at: DateTime<Utc>,
     ) -> Self
     where
@@ -226,4 +254,88 @@ where
 {
     let json = serde_json::to_vec(value)?;
     Ok(URL_SAFE_NO_PAD.encode(json))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    /// Build a minimal `Claims` value for serialization tests. The non-scp
+    /// fields are placeholders — only the `scp` field matters here.
+    fn test_claims(scp: Vec<String>) -> Claims {
+        Claims {
+            iss: "test".into(),
+            aud: "test".into(),
+            sub: TypedUuid::new_v4(),
+            prv: TypedUuid::new_v4(),
+            scp,
+            exp: 0,
+            nbf: 0,
+            jti: TypedUuid::new_v4(),
+        }
+    }
+
+    #[test]
+    fn scp_serializes_as_space_delimited_string() {
+        let claims = test_claims(vec!["user:info:r".into(), "group:info:w".into()]);
+        let json: Value = serde_json::to_value(&claims).unwrap();
+        assert_eq!(
+            json["scp"],
+            Value::String("user:info:r group:info:w".into()),
+            "scp must serialize as a space-delimited string, not an array",
+        );
+    }
+
+    #[test]
+    fn scp_single_scope_serializes_as_string() {
+        let claims = test_claims(vec!["full".into()]);
+        let json: Value = serde_json::to_value(&claims).unwrap();
+        assert_eq!(
+            json["scp"],
+            Value::String("full".into()),
+            "A single scope must serialize as a plain string",
+        );
+    }
+
+    #[test]
+    fn scp_empty_vec_serializes_as_empty_string() {
+        let claims = test_claims(vec![]);
+        let json: Value = serde_json::to_value(&claims).unwrap();
+        assert_eq!(
+            json["scp"],
+            Value::String("".into()),
+            "An empty scope list must serialize as an empty string",
+        );
+    }
+
+    #[test]
+    fn scp_deserializes_from_string() {
+        let json = r#""user:info:r group:info:w""#;
+        let parsed: Vec<String> =
+            scp_format::deserialize(&mut serde_json::Deserializer::from_str(json)).unwrap();
+        assert_eq!(
+            parsed,
+            vec!["user:info:r".to_string(), "group:info:w".to_string()],
+        );
+    }
+
+    #[test]
+    fn scp_rejects_array() {
+        let json = r#"["user:info:r", "group:info:w"]"#;
+        let result: Result<Vec<String>, _> =
+            scp_format::deserialize(&mut serde_json::Deserializer::from_str(json));
+        assert!(
+            result.is_err(),
+            "scp must reject a JSON array; only space-delimited strings are accepted",
+        );
+    }
+
+    #[test]
+    fn scp_round_trips_through_json() {
+        let original = test_claims(vec!["user:info:r".into(), "full".into()]);
+        let json_str = serde_json::to_string(&original).unwrap();
+        let decoded: Claims = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(decoded.scp, original.scp);
+    }
 }

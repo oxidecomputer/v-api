@@ -26,8 +26,7 @@ struct DeviceAuthorizationResponse {
 #[derive(Serialize)]
 struct DeviceAuthorizationRequest {
     client_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    scope: Option<String>,
+    scope: String,
 }
 
 /// Request body sent to the v-api device token exchange endpoint.
@@ -57,7 +56,10 @@ struct DeviceTokenError {
 
 /// Initiate a device authorization flow through the v-api proxy and poll until
 /// the user completes authorization or the device code expires.
-pub async fn login(provider: &impl CliOAuthProviderInfo) -> Result<DeviceTokenResponse> {
+pub async fn login(
+    provider: &impl CliOAuthProviderInfo,
+    scope: &str,
+) -> Result<DeviceTokenResponse> {
     let authz_endpoint = provider
         .device_authorization_endpoint()
         .ok_or_else(|| anyhow::anyhow!("Provider does not support device authorization"))?;
@@ -66,22 +68,11 @@ pub async fn login(provider: &impl CliOAuthProviderInfo) -> Result<DeviceTokenRe
         .ok_or_else(|| anyhow::anyhow!("Provider does not support device token exchange"))?;
 
     let http = reqwest::Client::new();
-
-    // Step 1: Initiate device authorization
-    let scope = {
-        let s = provider.scopes();
-        if s.is_empty() {
-            None
-        } else {
-            Some(s.join(" "))
-        }
-    };
-
     let resp = http
         .post(authz_endpoint)
         .json(&DeviceAuthorizationRequest {
             client_id: provider.client_id().to_string(),
-            scope,
+            scope: scope.to_string(),
         })
         .send()
         .await?;
