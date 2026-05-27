@@ -129,7 +129,10 @@ where
         let mut responses = vec![];
 
         for endpoint in self.user_info_endpoints() {
-            tracing::trace!(?endpoint, "Requesting user information from OAuth provider endpoint");
+            tracing::trace!(
+                ?endpoint,
+                "Requesting user information from OAuth provider endpoint"
+            );
             let mut request = Request::new(Method::GET, endpoint.parse().unwrap());
             self.initialize_headers(&mut request);
 

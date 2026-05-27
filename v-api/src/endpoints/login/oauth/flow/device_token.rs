@@ -153,7 +153,10 @@ where
         scope: Some(provider.default_scopes().join(" ")),
     };
 
-    tracing::trace!(?upstream_request, "Sending device authorization request to upstream provider");
+    tracing::trace!(
+        ?upstream_request,
+        "Sending device authorization request to upstream provider"
+    );
 
     let response = client
         .request(Method::POST, &device_info.remote.device_code_endpoint)
