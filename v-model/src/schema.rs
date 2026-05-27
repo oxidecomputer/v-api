@@ -110,7 +110,7 @@ diesel::table! {
         authz_code -> Nullable<Varchar>,
         expires_at -> Nullable<Timestamptz>,
         error -> Nullable<Varchar>,
-        scope -> Varchar,
+        scope -> Nullable<Varchar>,
         provider -> Varchar,
         provider_pkce_verifier -> Nullable<Varchar>,
         provider_authz_code -> Nullable<Varchar>,

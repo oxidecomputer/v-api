@@ -930,6 +930,7 @@ fn as_scope_trait_tokens(
                 for entry in scope {
                     match entry.as_ref() {
                         #(#from_scope_mapping,)*
+                        "full" => {},
                         other => return Err(v_model::permissions::PermissionError::InvalidScope(other.to_string())),
                     }
                 }

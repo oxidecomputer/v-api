@@ -245,7 +245,7 @@ where
                             tracing::debug!("Verified caller key");
                             Ok((
                                 key.user_id,
-                                key.permissions
+                                key.permission_boundary
                                     .map(BasePermissions::Restricted)
                                     .unwrap_or(BasePermissions::Full),
                             ))
@@ -261,8 +261,9 @@ where
             AuthToken::Jwt(jwt) => {
                 // AuthnToken::Jwt can only be generated from a verified JWT
                 let permissions = match &jwt.claims.scp {
+                    Some(scp) if scp.iter().any(|s| s == "full") => BasePermissions::Full,
                     Some(scp) => BasePermissions::Restricted(<T as AsScope>::from_scope(scp.iter())?),
-                    None => BasePermissions::Full,
+                    None => BasePermissions::Restricted(Permissions::new()),
                 };
 
                 // Verify that the access token has not been revoked and is known
@@ -500,7 +501,7 @@ where
     ) -> ResourceResult<ApiKey<T>, StoreError> {
         let can_create = caller.can(&VPermission::CreateApiKey(*api_user_id).into());
         let can_grant = token
-            .permissions
+            .permission_boundary
             .as_ref()
             .is_none_or(|p| caller.can_grant_all(p));
 

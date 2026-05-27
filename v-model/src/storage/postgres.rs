@@ -333,7 +333,7 @@ where
                 api_key::api_user_id.eq(key.user_id.into_untyped_uuid()),
                 api_key::key_signature.eq(key.key_signature.clone()),
                 api_key::expires_at.eq(key.expires_at),
-                api_key::permissions.eq(key.permissions),
+                api_key::permissions.eq(key.permission_boundary),
             ))
             .get_result_async(&*self.pool.get().await?)
             .await?;

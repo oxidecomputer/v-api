@@ -51,7 +51,6 @@ use crate::{
 
 static LOGIN_ATTEMPT_COOKIE: &str = "__v_login";
 static LOGIN_ATTEMPT_COOKIE_PATH: &str = "/login/oauth/";
-static DEFAULT_SCOPE: &str = "user:info:r";
 
 /// Build the login attempt cookie with consistent attributes.
 /// The `Path` is scoped to the OAuth login endpoints so the cookie is not
@@ -275,9 +274,11 @@ where
 
     tracing::debug!(provider = ?provider.name(), "Acquired OAuth provider for authz code login");
 
-    // Check that the passed in scopes are valid. The scopes are not currently restricted by client
-    let scope = query.scope.unwrap_or_else(|| DEFAULT_SCOPE.to_string());
-    if let Err(err) = VPermission::from_scope_arg(&scope) {
+    // Check that the passed in scopes are valid. A None scope means no permissions.
+    // Use the special scope "full" to request all permissions.
+    if let Some(ref scope) = query.scope
+        && let Err(err) = VPermission::from_scope_arg(scope)
+    {
         tracing::warn!(?err, ?scope, "Client submitted an invalid scope");
         Err(OAuthError::new(
             OAuthErrorCode::InvalidScope,
@@ -290,7 +291,7 @@ where
         provider.name().to_string(),
         query.client_id,
         Some(query.redirect_uri),
-        scope,
+        query.scope,
         "authorization_code".to_string(),
     )
     .map_err(|err| {
@@ -589,8 +590,9 @@ pub struct OAuthAuthzCodeExchangeResponse {
     pub access_token: String,
     pub token_type: String,
     pub expires_in: i64,
-    /// The scope granted to the access token (RFC 6749 §5.1).
-    pub scope: String,
+    /// The scope granted to the access token (RFC 6749 §5.1). A None value
+    /// indicates all scopes (full permissions).
+    pub scope: Option<String>,
     pub idp_token: Option<String>,
 }
 
@@ -948,7 +950,10 @@ mod tests {
     };
 
     use crate::{
-        authn::key::RawKey,
+        authn::{
+            jwt::{Claims, Jwt},
+            key::RawKey,
+        },
         context::{
             VContext,
             test_mocks::{MockStorage, mock_context},
@@ -1167,7 +1172,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: String::new(),
+            scope: None,
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -1309,7 +1314,7 @@ mod tests {
                 provider_error: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
-                scope: String::new(),
+                scope: None,
                 grant_type: "authorization_code".to_string(),
                 device_code: None,
                 provider_device_code: None,
@@ -1357,7 +1362,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: String::new(),
+            scope: None,
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -1428,7 +1433,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: String::new(),
+            scope: None,
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -1499,7 +1504,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: String::new(),
+            scope: None,
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -1829,7 +1834,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: String::new(),
+            scope: None,
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -2049,7 +2054,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: String::new(),
+            scope: None,
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -2347,7 +2352,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: "user:info:r".to_string(),
+            scope: Some("user:info:r".to_string()),
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -2445,7 +2450,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: String::new(),
+            scope: None,
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -2600,7 +2605,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: "user:info:r".to_string(),
+            scope: Some("user:info:r".to_string()),
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -2694,7 +2699,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: "user:info:r".to_string(),
+            scope: Some("user:info:r".to_string()),
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -2744,6 +2749,128 @@ mod tests {
             "Code lookup must not return an attempt for a different provider. \
              Expected None, but got {:?}.",
             github_result.as_ref().map(|a| &a.provider),
+        );
+    }
+
+    /// When a login attempt has no scope (`None`), the minted JWT must have
+    /// `scp: Some([])` which the caller-resolution layer interprets as
+    /// `BasePermissions::Restricted` with an empty permission set (no permissions).
+    #[tokio::test]
+    async fn test_null_scope_produces_no_permission_token() {
+        let storage = mock_exchange_storage(vec![VPermission::CreateAccessToken]);
+        let ctx = mock_context(Arc::new(storage)).await;
+
+        let mut attempt = mock_completed_attempt();
+        attempt.scope = None;
+
+        let info = UserInfo {
+            external_id: ExternalUserId::Google("test-google-id".to_string()),
+            verified_emails: vec!["user@example.com".to_string()],
+            display_name: Some("Test User".to_string()),
+            idp_token: None,
+        };
+        let provider = NoOpOAuthProvider::new();
+
+        let response = complete_exchange(&ctx, info, &provider, &attempt, false, None)
+            .await
+            .unwrap()
+            .0;
+
+        assert_eq!(
+            response.scope, None,
+            "Exchange response scope must be None when the login attempt has no scope",
+        );
+
+        let jwt = Jwt::<Claims>::new(&ctx, &response.access_token)
+            .await
+            .expect("JWT should decode successfully");
+
+        assert_eq!(
+            jwt.claims.scp,
+            Some(vec![]),
+            "JWT scp claim must be an empty list (implying no permissions) when no scope was requested",
+        );
+    }
+
+    /// When a login attempt specifies the special `"full"` scope, the minted JWT
+    /// must carry `scp: Some(["full"])` which the caller-resolution layer
+    /// interprets as `BasePermissions::Full` (all permissions).
+    #[tokio::test]
+    async fn test_full_scope_produces_full_permission_token() {
+        let storage = mock_exchange_storage(vec![VPermission::CreateAccessToken]);
+        let ctx = mock_context(Arc::new(storage)).await;
+
+        let mut attempt = mock_completed_attempt();
+        attempt.scope = Some("full".to_string());
+
+        let info = UserInfo {
+            external_id: ExternalUserId::Google("test-google-id".to_string()),
+            verified_emails: vec!["user@example.com".to_string()],
+            display_name: Some("Test User".to_string()),
+            idp_token: None,
+        };
+        let provider = NoOpOAuthProvider::new();
+
+        let response = complete_exchange(&ctx, info, &provider, &attempt, false, None)
+            .await
+            .unwrap()
+            .0;
+
+        assert_eq!(
+            response.scope,
+            Some("full".to_string()),
+            "Exchange response must echo back the full scope",
+        );
+
+        let jwt = Jwt::<Claims>::new(&ctx, &response.access_token)
+            .await
+            .expect("JWT should decode successfully");
+
+        assert_eq!(
+            jwt.claims.scp,
+            Some(vec!["full".to_string()]),
+            "JWT scp claim must contain 'full' when the full scope was requested",
+        );
+    }
+
+    /// When a login attempt specifies an explicit scope, the minted JWT must
+    /// carry that scope in the `scp` claim so that caller resolution treats it
+    /// as `BasePermissions::Restricted`.
+    #[tokio::test]
+    async fn test_explicit_scope_produces_restricted_token() {
+        let storage = mock_exchange_storage(vec![VPermission::CreateAccessToken]);
+        let ctx = mock_context(Arc::new(storage)).await;
+
+        let mut attempt = mock_completed_attempt();
+        attempt.scope = Some("user:info:r".to_string());
+
+        let info = UserInfo {
+            external_id: ExternalUserId::Google("test-google-id".to_string()),
+            verified_emails: vec!["user@example.com".to_string()],
+            display_name: Some("Test User".to_string()),
+            idp_token: None,
+        };
+        let provider = NoOpOAuthProvider::new();
+
+        let response = complete_exchange(&ctx, info, &provider, &attempt, false, None)
+            .await
+            .unwrap()
+            .0;
+
+        assert_eq!(
+            response.scope,
+            Some("user:info:r".to_string()),
+            "Exchange response must echo back the explicit scope",
+        );
+
+        let jwt = Jwt::<Claims>::new(&ctx, &response.access_token)
+            .await
+            .expect("JWT should decode successfully");
+
+        assert_eq!(
+            jwt.claims.scp,
+            Some(vec!["user:info:r".to_string()]),
+            "JWT scp claim must contain the requested scope when one was provided",
         );
     }
 }

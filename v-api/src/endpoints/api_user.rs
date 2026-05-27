@@ -348,7 +348,7 @@ where
             .into_iter()
             .map(|token| ApiKeyResponse {
                 id: token.id,
-                permissions: into_permissions_response(token.permissions),
+                permission_boundary: into_permissions_response(token.permission_boundary),
                 created_at: token.created_at,
             })
             .collect(),
@@ -400,7 +400,7 @@ where
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct ApiKeyCreateParams<T> {
-    permissions: Option<Permissions<T>>,
+    permission_boundary: Option<Permissions<T>>,
     expires_at: DateTime<Utc>,
 }
 
@@ -410,7 +410,7 @@ pub struct InitialApiKeyResponse<T> {
     pub id: TypedUuid<ApiKeyId>,
     #[partial(ApiKeyResponse(skip))]
     pub key: OpenApiSecretString,
-    pub permissions: Option<Permissions<T>>,
+    pub permission_boundary: Option<Permissions<T>>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -459,7 +459,7 @@ where
                 id: key_id,
                 user_id: path.user_id,
                 key_signature: key.signature().to_string(),
-                permissions: into_permissions(body.permissions),
+                permission_boundary: into_permissions(body.permission_boundary),
                 expires_at: body.expires_at,
             },
             &info.user.id,
@@ -471,7 +471,7 @@ where
     Ok(HttpResponseCreated(InitialApiKeyResponse {
         id: user_key.id,
         key: key.key().into(),
-        permissions: into_permissions_response(user_key.permissions),
+        permission_boundary: into_permissions_response(user_key.permission_boundary),
         created_at: user_key.created_at,
     }))
 }
@@ -517,7 +517,7 @@ where
         .await?;
     Ok(HttpResponseOk(ApiKeyResponse {
         id: token.id,
-        permissions: into_permissions_response(token.permissions),
+        permission_boundary: into_permissions_response(token.permission_boundary),
         created_at: token.created_at,
     }))
 }
@@ -555,7 +555,7 @@ where
         .await?;
     Ok(HttpResponseOk(ApiKeyResponse {
         id: token.id,
-        permissions: into_permissions_response(token.permissions),
+        permission_boundary: into_permissions_response(token.permission_boundary),
         created_at: token.created_at,
     }))
 }
@@ -1302,7 +1302,7 @@ mod tests {
         };
 
         let new_token = ApiKeyCreateParams {
-            permissions: None,
+            permission_boundary: None,
             expires_at: Utc::now() + TimeDelta::try_seconds(5 * 60).unwrap(),
         };
 
@@ -1339,7 +1339,7 @@ mod tests {
                     id: TypedUuid::new_v4(),
                     user_id: api_user_id,
                     key_signature: key.key_signature,
-                    permissions: key.permissions,
+                    permission_boundary: key.permission_boundary,
                     expires_at: key.expires_at,
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
@@ -1441,7 +1441,10 @@ mod tests {
 
         assert!(resp.is_ok());
         assert_eq!(get_status(&resp), StatusCode::CREATED);
-        assert_eq!(resp.as_ref().unwrap().0.permissions, new_token.permissions);
+        assert_eq!(
+            resp.as_ref().unwrap().0.permission_boundary,
+            new_token.permission_boundary
+        );
 
         let user5 = mock_user();
 
@@ -1476,7 +1479,7 @@ mod tests {
             id: TypedUuid::new_v4(),
             user_id: api_user_id,
             key_signature: "encrypted_key".to_string(),
-            permissions: None,
+            permission_boundary: None,
             expires_at: Utc::now() + TimeDelta::try_seconds(5 * 60).unwrap(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -1627,7 +1630,7 @@ mod tests {
             id: TypedUuid::new_v4(),
             user_id: api_user_id,
             key_signature: "encrypted_key".to_string(),
-            permissions: None,
+            permission_boundary: None,
             expires_at: Utc::now() + TimeDelta::try_seconds(5 * 60).unwrap(),
             created_at: Utc::now(),
             updated_at: Utc::now(),

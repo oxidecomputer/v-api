@@ -26,7 +26,8 @@ pub struct ApiKeyModel<T> {
     pub id: Uuid,
     pub api_user_id: Uuid,
     pub key_signature: String,
-    pub permissions: Option<Permissions<T>>,
+    #[diesel(column_name = permissions)]
+    pub permission_boundary: Option<Permissions<T>>,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -92,7 +93,7 @@ pub struct LoginAttemptModel {
     pub authz_code: Option<String>,
     pub expires_at: Option<DateTime<Utc>>,
     pub error: Option<String>,
-    pub scope: String,
+    pub scope: Option<String>,
     pub provider: String,
     pub provider_pkce_verifier: Option<String>,
     pub provider_authz_code: Option<String>,

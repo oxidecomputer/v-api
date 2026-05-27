@@ -52,18 +52,20 @@ where
 
     tracing::info!(api_user_id = ?api_user_info.user.id, "Retrieved api user to generate access token for");
 
-    let scope = attempt
-        .scope
-        .split(' ')
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>();
+    let scope = Some(
+        attempt
+            .scope
+            .as_deref()
+            .map(|s| s.split(' ').map(|s| s.to_string()).collect::<Vec<_>>())
+            .unwrap_or_default(),
+    );
 
     let token = ctx
         .generate_access_token(
             &ctx.builtin_registration_user(),
             &api_user_info.user.id,
             &api_user_provider.id,
-            Some(scope),
+            scope,
         )
         .await?;
 
