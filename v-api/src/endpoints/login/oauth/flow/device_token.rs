@@ -79,6 +79,7 @@ pub struct DeviceAuthorizationResponse {
     /// The end-user verification code displayed to the user.
     pub user_code: String,
     /// The end-user verification URI on the authorization server.
+    #[serde(alias = "verification_url")]
     pub verification_uri: Url,
     /// Optional verification URI that includes the user_code.
     #[serde(default)]
@@ -92,7 +93,7 @@ pub struct DeviceAuthorizationResponse {
 }
 
 /// Body sent to the upstream provider's device authorization endpoint.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct UpstreamDeviceAuthzRequest {
     client_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -152,6 +153,11 @@ where
         scope: Some(provider.default_scopes().join(" ")),
     };
 
+    tracing::trace!(
+        ?upstream_request,
+        "Sending device authorization request to upstream provider"
+    );
+
     let response = client
         .request(Method::POST, &device_info.remote.device_code_endpoint)
         .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
@@ -178,8 +184,10 @@ where
     // Parse the upstream device authorization response
     let device_authz: DeviceAuthorizationResponse =
         serde_json::from_slice(&bytes).map_err(|err| {
+            let body = String::from_utf8_lossy(&bytes);
             tracing::error!(
                 ?err,
+                ?body,
                 "Failed to parse upstream device authorization response"
             );
             internal_error("Failed to parse upstream device authorization response")

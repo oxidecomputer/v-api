@@ -129,6 +129,10 @@ where
         let mut responses = vec![];
 
         for endpoint in self.user_info_endpoints() {
+            tracing::trace!(
+                ?endpoint,
+                "Requesting user information from OAuth provider endpoint"
+            );
             let mut request = Request::new(Method::GET, endpoint.parse().unwrap());
             self.initialize_headers(&mut request);
 
@@ -144,8 +148,10 @@ where
             tracing::trace!(?status, "Received response from OAuth provider");
 
             if !status.is_success() {
+                let body = response.text().await.unwrap_or_default();
                 tracing::error!(
                     ?status,
+                    ?body,
                     endpoint,
                     "User info endpoint returned non-success status"
                 );
