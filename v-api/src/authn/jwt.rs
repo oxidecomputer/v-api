@@ -81,7 +81,10 @@ mod scp_format {
         if s.is_empty() {
             Ok(vec![])
         } else {
-            Ok(s.split(' ').map(String::from).collect())
+            Ok(s.split(' ')
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect())
         }
     }
 }

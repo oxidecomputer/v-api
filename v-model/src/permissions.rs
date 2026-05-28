@@ -305,6 +305,8 @@ where
 pub enum PermissionError {
     #[error("Scope is invalid: {0}")]
     InvalidScope(String),
+    #[error("\"full\" scope cannot be combined with other scopes")]
+    FullScopeMustBeExclusive,
 }
 
 impl<T> FromSql<Jsonb, Pg> for Permissions<T>
@@ -319,15 +321,22 @@ where
 
 pub trait AsScope: Sized {
     fn as_scope(&self) -> &str;
+
+    /// Validate that scope entries do not violate combination rules.
+    /// The "full" scope must be the only entry when present.
+    fn validate_scope<S: AsRef<str>>(entries: &[S]) -> Result<(), PermissionError> {
+        if entries.len() > 1 && entries.iter().any(|s| s.as_ref() == "full") {
+            return Err(PermissionError::FullScopeMustBeExclusive);
+        }
+        Ok(())
+    }
+
     fn from_scope_arg(scope_arg: &str) -> Result<Permissions<Self>, PermissionError> {
         let entries: Vec<&str> = scope_arg.split(' ').filter(|s| !s.is_empty()).collect();
-        if entries.len() > 1 && entries.contains(&"full") {
-            return Err(PermissionError::InvalidScope(
-                "\"full\" must be the only scope when present".to_string(),
-            ));
-        }
+        Self::validate_scope(&entries)?;
         Self::from_scope(entries.into_iter())
     }
+
     fn from_scope<S>(scope: impl Iterator<Item = S>) -> Result<Permissions<Self>, PermissionError>
     where
         S: AsRef<str>;
