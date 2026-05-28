@@ -32,6 +32,10 @@ impl Printer {
         let json_value = serde_json::to_value(value)
             .unwrap_or_else(|e| serde_json::Value::String(format!("<serialization error: {}>", e)));
 
+        if json_value.is_null() {
+            return;
+        }
+
         match self {
             Printer::Json => {
                 println!("{}", serde_json::to_string(&json_value).unwrap_or_default());
