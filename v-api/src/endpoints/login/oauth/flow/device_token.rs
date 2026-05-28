@@ -133,8 +133,7 @@ where
         .await
         .map_err(|_| bad_request("Unknown client id"))?;
 
-    // Validate scope if provided. An omitted scope means no permissions.
-    // Use the special scope "full" to request all permissions.
+    // An omitted scope means no permissions
     let scope = body.scope.unwrap_or_default();
     if let Err(err) = VPermission::from_scope_arg(&scope) {
         tracing::warn!(?err, ?scope, "Client submitted an invalid scope");
