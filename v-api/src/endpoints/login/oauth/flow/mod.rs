@@ -54,14 +54,10 @@ where
 
     let scope = attempt
         .scope
-        .as_deref()
-        .map(|s| {
-            s.split(' ')
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+        .split(' ')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>();
 
     let token = ctx
         .generate_access_token(

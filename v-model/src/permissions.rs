@@ -320,7 +320,13 @@ where
 pub trait AsScope: Sized {
     fn as_scope(&self) -> &str;
     fn from_scope_arg(scope_arg: &str) -> Result<Permissions<Self>, PermissionError> {
-        Self::from_scope(scope_arg.split(' ').filter(|s| !s.is_empty()))
+        let entries: Vec<&str> = scope_arg.split(' ').filter(|s| !s.is_empty()).collect();
+        if entries.len() > 1 && entries.contains(&"full") {
+            return Err(PermissionError::InvalidScope(
+                "\"full\" must be the only scope when present".to_string(),
+            ));
+        }
+        Self::from_scope(entries.into_iter())
     }
     fn from_scope<S>(scope: impl Iterator<Item = S>) -> Result<Permissions<Self>, PermissionError>
     where

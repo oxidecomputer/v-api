@@ -590,9 +590,9 @@ pub struct OAuthAuthzCodeExchangeResponse {
     pub access_token: String,
     pub token_type: String,
     pub expires_in: i64,
-    /// The scope granted to the access token (RFC 6749 §5.1). A None value
-    /// indicates all scopes (full permissions).
-    pub scope: Option<String>,
+    /// The scope granted to the access token per RFC 6749 §5.1. An empty
+    /// string indicates no permissions. Use "full" for all permissions.
+    pub scope: String,
     pub idp_token: Option<String>,
 }
 
@@ -1172,7 +1172,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: None,
+            scope: String::new(),
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -1314,7 +1314,7 @@ mod tests {
                 provider_error: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
-                scope: None,
+                scope: String::new(),
                 grant_type: "authorization_code".to_string(),
                 device_code: None,
                 provider_device_code: None,
@@ -1362,7 +1362,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: None,
+            scope: String::new(),
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -1433,7 +1433,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: None,
+            scope: String::new(),
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -1504,7 +1504,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: None,
+            scope: String::new(),
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -1834,7 +1834,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: None,
+            scope: String::new(),
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -2054,7 +2054,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: None,
+            scope: String::new(),
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -2352,7 +2352,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: Some("user:info:r".to_string()),
+            scope: "user:info:r".to_string(),
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -2450,7 +2450,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: None,
+            scope: String::new(),
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -2605,7 +2605,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: Some("user:info:r".to_string()),
+            scope: "user:info:r".to_string(),
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -2699,7 +2699,7 @@ mod tests {
             provider_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            scope: Some("user:info:r".to_string()),
+            scope: "user:info:r".to_string(),
             grant_type: "authorization_code".to_string(),
             device_code: None,
             provider_device_code: None,
@@ -2761,7 +2761,7 @@ mod tests {
         let ctx = mock_context(Arc::new(storage)).await;
 
         let mut attempt = mock_completed_attempt();
-        attempt.scope = None;
+        attempt.scope = String::new();
 
         let info = UserInfo {
             external_id: ExternalUserId::Google("test-google-id".to_string()),
@@ -2777,8 +2777,8 @@ mod tests {
             .0;
 
         assert_eq!(
-            response.scope, None,
-            "Exchange response scope must be None when the login attempt has no scope",
+            response.scope, "",
+            "Exchange response scope must be empty when the login attempt has no scope",
         );
 
         let jwt = Jwt::<Claims>::new(&ctx, &response.access_token)
@@ -2801,7 +2801,7 @@ mod tests {
         let ctx = mock_context(Arc::new(storage)).await;
 
         let mut attempt = mock_completed_attempt();
-        attempt.scope = Some("full".to_string());
+        attempt.scope = "full".to_string();
 
         let info = UserInfo {
             external_id: ExternalUserId::Google("test-google-id".to_string()),
@@ -2817,8 +2817,7 @@ mod tests {
             .0;
 
         assert_eq!(
-            response.scope,
-            Some("full".to_string()),
+            response.scope, "full",
             "Exchange response must echo back the full scope",
         );
 
@@ -2842,7 +2841,7 @@ mod tests {
         let ctx = mock_context(Arc::new(storage)).await;
 
         let mut attempt = mock_completed_attempt();
-        attempt.scope = Some("user:info:r".to_string());
+        attempt.scope = "user:info:r".to_string();
 
         let info = UserInfo {
             external_id: ExternalUserId::Google("test-google-id".to_string()),
@@ -2858,8 +2857,7 @@ mod tests {
             .0;
 
         assert_eq!(
-            response.scope,
-            Some("user:info:r".to_string()),
+            response.scope, "user:info:r",
             "Exchange response must echo back the explicit scope",
         );
 

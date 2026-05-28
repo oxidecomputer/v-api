@@ -93,7 +93,7 @@ pub struct LoginAttemptModel {
     pub authz_code: Option<String>,
     pub expires_at: Option<DateTime<Utc>>,
     pub error: Option<String>,
-    pub scope: Option<String>,
+    pub scope: String,
     pub provider: String,
     pub provider_pkce_verifier: Option<String>,
     pub provider_authz_code: Option<String>,

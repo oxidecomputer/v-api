@@ -277,7 +277,7 @@ pub struct LoginAttempt {
     pub created_at: DateTime<Utc>,
     #[partial(NewLoginAttempt(skip))]
     pub updated_at: DateTime<Utc>,
-    pub scope: Option<String>,
+    pub scope: String,
     pub grant_type: String,
     pub device_code: Option<String>,
     pub provider_device_code: Option<String>,
@@ -351,7 +351,7 @@ impl NewLoginAttempt {
             provider_pkce_verifier: None,
             provider_authz_code: None,
             provider_error: None,
-            scope: Some(scope),
+            scope,
             grant_type,
             device_code: None,
             provider_device_code: None,
