@@ -135,7 +135,7 @@ diesel::table! {
         channel -> Varchar,
         recipient -> Varchar,
         redirect_uri -> Varchar,
-        scope -> Nullable<Varchar>,
+        scope -> Varchar,
         nonce_signature -> Varchar,
         expiration -> Timestamptz,
         created_at -> Timestamptz,

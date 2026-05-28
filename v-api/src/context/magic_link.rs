@@ -288,7 +288,7 @@ where
         redirect_uri: &Url,
         medium: MagicLinkMedium,
         channel: &str,
-        scope: Option<&str>,
+        scope: &str,
         expiration: DateTime<Utc>,
         recipient: &str,
     ) -> ResourceResult<MagicLinkAttempt, MagicLinkSendError> {
@@ -351,7 +351,7 @@ where
                 medium: medium.to_string(),
                 channel: channel.to_string(),
                 redirect_uri: redirect_uri.to_string(),
-                scope: scope.map(|s| s.to_string()),
+                scope: scope.to_string(),
                 nonce_signature: signature,
                 expiration,
             },
@@ -528,7 +528,7 @@ mod tests {
                 &Url::parse("http://127.0.0.1").unwrap(),
                 MagicLinkMedium::Email,
                 "all",
-                None,
+                "",
                 Utc::now().add(Duration::seconds(60)),
                 "user@company",
             )
@@ -594,7 +594,7 @@ mod tests {
                 &Url::parse("http://127.0.0.1").unwrap(),
                 MagicLinkMedium::Email,
                 "all",
-                None,
+                "",
                 Utc::now().add(Duration::seconds(60)),
                 "user@company",
             )
@@ -663,7 +663,7 @@ mod tests {
                 &Url::parse("http://127.0.0.1").unwrap(),
                 MagicLinkMedium::Email,
                 "all",
-                None,
+                "",
                 Utc::now().add(Duration::seconds(60)),
                 "user@company",
             )
@@ -692,7 +692,7 @@ mod tests {
             medium: String::new(),
             channel: String::new(),
             redirect_uri: String::new(),
-            scope: None,
+            scope: String::new(),
             nonce_signature: signature,
             expiration: Utc::now(),
             created_at: Utc::now(),

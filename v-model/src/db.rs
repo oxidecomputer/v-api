@@ -172,7 +172,7 @@ pub struct MagicLinkAttemptModel {
     pub channel: String,
     pub recipient: String,
     pub redirect_uri: String,
-    pub scope: Option<String>,
+    pub scope: String,
     pub nonce_signature: String,
     pub expiration: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
