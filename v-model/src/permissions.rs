@@ -332,9 +332,7 @@ pub trait AsScope: Sized {
     }
 
     fn from_scope_arg(scope_arg: &str) -> Result<Permissions<Self>, PermissionError> {
-        let entries: Vec<&str> = scope_arg.split(' ').filter(|s| !s.is_empty()).collect();
-        Self::validate_scope(&entries)?;
-        Self::from_scope(entries.into_iter())
+        Self::from_scope(scope_arg.split(' ').filter(|s| !s.is_empty()))
     }
 
     fn from_scope<S>(scope: impl Iterator<Item = S>) -> Result<Permissions<Self>, PermissionError>
