@@ -216,7 +216,7 @@ async fn test_api_user() {
             id: TypedUuid::new_v4(),
             user_id: api_user.user.id,
             key_signature: format!("key-{}", Uuid::new_v4()),
-            permissions: Some(vec![TestPermission::GetApiKey(api_user_id)].into()),
+            permission_boundary: Some(vec![TestPermission::GetApiKey(api_user_id)].into()),
             expires_at: Utc::now() + TimeDelta::try_seconds(5 * 60).unwrap(),
         },
     )
@@ -230,7 +230,7 @@ async fn test_api_user() {
             id: TypedUuid::new_v4(),
             user_id: api_user.user.id,
             key_signature: format!("key-{}", Uuid::new_v4()),
-            permissions: Some(
+            permission_boundary: Some(
                 vec![
                     TestPermission::CreateApiUser,
                     TestPermission::GetApiKey(api_user_id),
@@ -245,7 +245,7 @@ async fn test_api_user() {
 
     assert!(
         excess_token
-            .permissions
+            .permission_boundary
             .as_ref()
             .unwrap()
             .can(&TestPermission::CreateApiUser)
@@ -258,7 +258,7 @@ async fn test_api_user() {
             id: TypedUuid::new_v4(),
             user_id: api_user.user.id,
             key_signature: format!("key-{}", Uuid::new_v4()),
-            permissions: Some(
+            permission_boundary: Some(
                 vec![
                     TestPermission::CreateApiUser,
                     TestPermission::GetApiKey(api_user_id),
@@ -410,7 +410,7 @@ async fn test_magic_link_attempt() {
             medium: String::new(),
             channel: String::new(),
             redirect_uri: String::new(),
-            scope: None,
+            scope: String::new(),
             nonce_signature: "xxxxx".to_string(),
             expiration: Utc::now().add(Duration::seconds(60)),
         },
@@ -493,7 +493,7 @@ async fn test_magic_link_attempt() {
             medium: String::new(),
             channel: String::new(),
             redirect_uri: String::new(),
-            scope: None,
+            scope: String::new(),
             nonce_signature: "xxxxx".to_string(),
             expiration: Utc::now().sub(Duration::seconds(60)),
         },

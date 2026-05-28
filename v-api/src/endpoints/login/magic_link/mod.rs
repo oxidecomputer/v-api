@@ -25,9 +25,10 @@ use crate::{
     authn::{Verify, key::RawKey},
     context::magic_link::{MagicLinkSendError, MagicLinkTransitionError},
     endpoints::login::{ExternalUserId, UserInfo},
-    permissions::VAppPermission,
+    permissions::{VAppPermission, VPermission},
     response::{ResourceError, bad_request, internal_error, to_internal_error},
 };
+use v_model::permissions::AsScope;
 
 pub mod client;
 
@@ -75,7 +76,7 @@ where
             body.recipient,
             body.redirect_uri,
             body.expires_in,
-            body.scope,
+            body.scope.unwrap_or_default(),
         )
         .await?,
     ))
@@ -91,12 +92,19 @@ async fn magic_link_send_op_inner<T>(
     recipient: String,
     redirect_uri: Url,
     expires_in: i64,
-    scope: Option<String>,
+    scope: String,
 ) -> Result<MagicLinkSendResponse, HttpError>
 where
     T: VAppPermission + PermissionStorage,
 {
     tracing::info!("Handling magic link send request");
+
+    // Validate scope. An empty scope means no permissions.
+    // Use the special scope "full" to request all permissions.
+    if let Err(err) = VPermission::from_scope_arg(&scope) {
+        tracing::warn!(?err, ?scope, "Client submitted an invalid scope");
+        return Err(bad_request(format!("Invalid scope: {}", scope)));
+    }
 
     // Any caller may create a magic link attempt by supplying the clients secret
     let key = RawKey::try_from(secret.as_str()).map_err(|err| {
@@ -122,7 +130,7 @@ where
             &redirect_uri,
             medium,
             channel,
-            scope.as_deref(),
+            &scope,
             Utc::now().add(Duration::seconds(expires_in).min(EXPIRATION_MAX)),
             &recipient,
         )
@@ -227,7 +235,10 @@ where
 
         let scope = attempt
             .scope
-            .map(|scope| scope.split(' ').map(|s| s.to_string()).collect::<Vec<_>>());
+            .split(' ')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
 
         let token = ctx
             .generate_access_token(

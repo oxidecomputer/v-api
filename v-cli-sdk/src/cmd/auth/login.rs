@@ -79,6 +79,9 @@ where
         /// should be used when you need to authenticate to the underlying system frontend by the API
         #[arg(long, default_value = "false")]
         request_idp_token: bool,
+        /// Optional access scopes to apply to this session
+        #[arg(long, conflicts_with = "request_idp_token")]
+        scope: Option<String>,
     },
     /// Login via Magic Link
     #[command(name = "mlink")]
@@ -126,10 +129,14 @@ where
             Self::OAuth {
                 provider,
                 request_idp_token,
+                scope,
             } => {
                 let adapter = ctx.oauth_adapter();
-                let provider = provider.clone().into();
-                let provider = adapter.provider(provider).await?;
+                let provider = adapter.provider(provider.clone().into()).await?;
+                let scope = scope
+                    .as_ref()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| provider.scopes().join(" "));
 
                 // We now need to inspect the provider to determine the correct flow to use. If
                 // possible we use a limited input device flow, but not all providers support it.
@@ -142,13 +149,14 @@ where
                         );
                     }
                     Ok((
-                        self.run_oauth_device_provider(provider, mode, ctx.oauth_adapter())
+                        self.run_oauth_device_provider(provider, &scope, mode, ctx.oauth_adapter())
                             .await?,
                         None,
                     ))
                 } else if provider.supports_pkce_only() {
                     self.run_oauth_code_provider(
                         provider,
+                        &scope,
                         mode,
                         *request_idp_token,
                         ctx.oauth_adapter(),
@@ -169,6 +177,7 @@ where
     async fn run_oauth_device_provider<T, V>(
         &self,
         provider: V,
+        scope: &str,
         mode: AuthenticationMode,
         adapter: T,
     ) -> Result<String>
@@ -176,7 +185,7 @@ where
         T: CliOAuthAdapter,
         V: CliOAuthProviderInfo,
     {
-        let token = oauth::device::login(&provider).await?;
+        let token = oauth::device::login(&provider, scope).await?;
 
         match mode {
             AuthenticationMode::Identity => Ok(token.access_token.clone()),
@@ -193,6 +202,7 @@ where
     async fn run_oauth_code_provider<T, V>(
         &self,
         provider: T,
+        scope: &str,
         mode: AuthenticationMode,
         request_idp_token: bool,
         adapter: V,
@@ -205,7 +215,7 @@ where
         let adapter = Arc::new(adapter);
 
         let identity_token = oauth_client
-            .login(Arc::clone(&adapter), request_idp_token)
+            .login(Arc::clone(&adapter), request_idp_token, scope)
             .await?;
 
         let access_token = match mode {

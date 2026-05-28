@@ -60,7 +60,7 @@ where
                 None,
                 &api_user.user.id,
                 &api_user_provider.id,
-                None,
+                vec!["full".to_string()],
                 Utc::now() + Duration::seconds(60 * 60),
             ),
         )

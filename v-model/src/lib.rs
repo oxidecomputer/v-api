@@ -189,7 +189,7 @@ pub struct ApiKey<T> {
     pub id: TypedUuid<ApiKeyId>,
     pub user_id: TypedUuid<UserId>,
     pub key_signature: String,
-    pub permissions: Option<Permissions<T>>,
+    pub permission_boundary: Option<Permissions<T>>,
     pub expires_at: DateTime<Utc>,
     #[partial(NewApiKey(skip))]
     pub created_at: DateTime<Utc>,
@@ -205,7 +205,7 @@ impl<T> From<ApiKeyModel<T>> for ApiKey<T> {
             id: TypedUuid::from_untyped_uuid(value.id),
             user_id: TypedUuid::from_untyped_uuid(value.api_user_id),
             key_signature: value.key_signature,
-            permissions: value.permissions,
+            permission_boundary: value.permission_boundary,
             expires_at: value.expires_at,
             created_at: value.created_at,
             updated_at: value.updated_at,
@@ -639,7 +639,7 @@ pub struct MagicLinkAttempt {
     pub medium: String,
     pub channel: String,
     pub redirect_uri: String,
-    pub scope: Option<String>,
+    pub scope: String,
     pub nonce_signature: String,
     pub expiration: DateTime<Utc>,
     #[partial(NewMagicLinkAttempt(skip))]

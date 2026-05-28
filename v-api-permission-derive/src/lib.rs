@@ -925,10 +925,14 @@ fn as_scope_trait_tokens(
             where
                 S: AsRef<str>,
             {
+                let entries: Vec<S> = scope.collect();
+                Self::validate_scope(&entries)?;
+
                 let mut permissions = v_model::Permissions::default();
 
-                for entry in scope {
+                for entry in &entries {
                     match entry.as_ref() {
+                        "full" => {},
                         #(#from_scope_mapping,)*
                         other => return Err(v_model::permissions::PermissionError::InvalidScope(other.to_string())),
                     }

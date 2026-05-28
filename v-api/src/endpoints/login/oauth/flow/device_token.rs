@@ -100,8 +100,6 @@ struct UpstreamDeviceAuthzRequest {
     scope: Option<String>,
 }
 
-static DEFAULT_SCOPE: &str = "user:info:r";
-
 /// Initiate a device authorization flow by proxying the request to the upstream
 /// OAuth provider. On success a `LoginAttempt` is created (state = New) and the
 /// upstream device authorization response is returned to the caller.
@@ -135,8 +133,8 @@ where
         .await
         .map_err(|_| bad_request("Unknown client id"))?;
 
-    // Validate scope if provided
-    let scope = body.scope.unwrap_or_else(|| DEFAULT_SCOPE.to_string());
+    // An omitted scope means no permissions
+    let scope = body.scope.unwrap_or_default();
     if let Err(err) = VPermission::from_scope_arg(&scope) {
         tracing::warn!(?err, ?scope, "Client submitted an invalid scope");
         return Ok(error_response(
@@ -434,6 +432,11 @@ where
 
             let exchange_response = response.0;
 
+            tracing::trace!(
+                ?exchange_response,
+                "Received device authorization response from upstream provider"
+            );
+
             Ok(Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "application/json")
@@ -452,8 +455,6 @@ where
         }
     }
 }
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 /// Validate the grant_type for device code exchange per RFC 8628 §3.4.
 fn validate_device_grant_type(grant_type: &str) -> bool {
