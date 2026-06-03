@@ -755,7 +755,7 @@ dependencies = [
 
 [[package]]
 name = "dropshot-authorization-header"
-version = "0.4.0-alpha.3"
+version = "0.4.0-alpha.4"
 dependencies = [
  "async-trait",
  "base64",
@@ -3127,15 +3127,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tabwriter"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fce91f2f0ec87dff7e6bcbbeb267439aa1188703003c6055193c821487400432"
-dependencies = [
- "unicode-width",
-]
-
-[[package]]
 name = "take_mut"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3526,12 +3517,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
-name = "unicode-width"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
-
-[[package]]
 name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3589,7 +3574,7 @@ dependencies = [
 
 [[package]]
 name = "v-api"
-version = "0.4.0-alpha.3"
+version = "0.4.0-alpha.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3637,7 +3622,7 @@ dependencies = [
 
 [[package]]
 name = "v-api-param"
-version = "0.4.0-alpha.3"
+version = "0.4.0-alpha.4"
 dependencies = [
  "secrecy",
  "serde",
@@ -3648,7 +3633,7 @@ dependencies = [
 
 [[package]]
 name = "v-api-permission-derive"
-version = "0.4.0-alpha.3"
+version = "0.4.0-alpha.4"
 dependencies = [
  "heck",
  "newtype-uuid",
@@ -3665,7 +3650,7 @@ dependencies = [
 
 [[package]]
 name = "v-cli-sdk"
-version = "0.4.0-alpha.3"
+version = "0.4.0-alpha.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -3681,14 +3666,13 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
- "tabwriter",
  "tokio",
  "uuid",
 ]
 
 [[package]]
 name = "v-model"
-version = "0.4.0-alpha.3"
+version = "0.4.0-alpha.4"
 dependencies = [
  "async-bb8-diesel",
  "async-trait",
@@ -4282,7 +4266,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "xtask"
-version = "0.4.0-alpha.3"
+version = "0.4.0-alpha.4"
 dependencies = [
  "clap",
  "regex",
