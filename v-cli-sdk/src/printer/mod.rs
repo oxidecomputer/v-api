@@ -4,8 +4,7 @@
 
 use owo_colors::{OwoColorize, Style};
 use serde::Serialize;
-use std::io::Write;
-use tabwriter::TabWriter;
+use std::fmt::Write;
 
 #[derive(Debug, Clone)]
 pub enum Printer {
@@ -23,8 +22,8 @@ impl Printer {
     /// Print any serializable response object in the configured format.
     ///
     /// - `Json` mode emits compact, single-line JSON.
-    /// - `Tab` mode serializes to a `serde_json::Value` and pretty-prints it
-    ///   with tab-aligned key/value pairs.
+    /// - `Tab` mode pretty-prints with indentation and aligned key/value
+    ///   pairs within each object.
     pub fn print_response<T>(&self, value: &T)
     where
         T: Serialize,
@@ -42,10 +41,8 @@ impl Printer {
             }
             Printer::Tab => {
                 let styles = TabStyles::default();
-                let mut tw = TabWriter::new(vec![]).ansi(true);
-                pretty_print_value(&mut tw, &json_value, 0, &styles);
-                tw.flush().unwrap();
-                let output = String::from_utf8(tw.into_inner().unwrap()).unwrap();
+                let mut output = String::new();
+                pretty_print_value(&mut output, &json_value, 0, &styles);
                 print!("{}", output);
             }
         }
@@ -97,8 +94,10 @@ impl CliOutput for Printer {
 }
 
 // ---------------------------------------------------------------------------
-// Tab-indented pretty-printer for serde_json::Value
+// Indented pretty-printer for serde_json::Value
 // ---------------------------------------------------------------------------
+
+const INDENT_STR: &str = "  ";
 
 #[derive(Debug, Clone)]
 struct TabStyles {
@@ -117,92 +116,102 @@ impl Default for TabStyles {
     }
 }
 
-fn indent(tw: &mut TabWriter<Vec<u8>>, depth: usize) {
+fn write_indent(out: &mut String, depth: usize) {
     for _ in 0..depth {
-        let _ = write!(tw, "\t");
+        out.push_str(INDENT_STR);
     }
 }
 
 fn pretty_print_value(
-    tw: &mut TabWriter<Vec<u8>>,
+    out: &mut String,
     value: &serde_json::Value,
     depth: usize,
     styles: &TabStyles,
 ) {
     match value {
         serde_json::Value::Object(map) => {
+            let max_key_len = map.keys().map(|k| k.len()).max().unwrap_or(0);
             for (key, val) in map {
-                pretty_print_field(tw, key, val, depth, styles);
+                pretty_print_field(out, key, val, depth, max_key_len, styles);
             }
         }
         serde_json::Value::Array(arr) => {
             for (i, val) in arr.iter().enumerate() {
-                indent(tw, depth);
-                let _ = writeln!(tw, "{}", format!("[{}]", i).style(styles.label),);
-                pretty_print_value(tw, val, depth + 1, styles);
+                write_indent(out, depth);
+                let _ = writeln!(out, "{}", format!("[{}]", i).style(styles.label));
+                pretty_print_value(out, val, depth + 1, styles);
             }
         }
         _ => {
-            indent(tw, depth);
-            let _ = writeln!(tw, "{}", format_scalar(value, styles));
+            write_indent(out, depth);
+            let _ = writeln!(out, "{}", format_scalar(value, styles));
         }
     }
 }
 
 fn pretty_print_field(
-    tw: &mut TabWriter<Vec<u8>>,
+    out: &mut String,
     key: &str,
     value: &serde_json::Value,
     depth: usize,
+    max_key_len: usize,
     styles: &TabStyles,
 ) {
+    // Number of spaces after the colon so all sibling values align.
+    let padding = max_key_len - key.len() + 1;
+
     match value {
         serde_json::Value::Object(_) => {
-            indent(tw, depth);
-            let _ = writeln!(tw, "{}:", key.style(styles.label));
-            pretty_print_value(tw, value, depth + 1, styles);
+            write_indent(out, depth);
+            let _ = writeln!(out, "{}:", key.style(styles.label));
+            pretty_print_value(out, value, depth + 1, styles);
         }
         serde_json::Value::Array(arr) if arr.is_empty() => {
-            indent(tw, depth);
+            write_indent(out, depth);
             let _ = writeln!(
-                tw,
-                "{}:\t{}",
+                out,
+                "{}:{:padding$}{}",
                 key.style(styles.label),
+                "",
                 "[]".style(styles.null),
             );
         }
         serde_json::Value::Array(arr) if arr.iter().all(is_scalar) => {
-            // Print simple arrays inline, one value per line with the key on
-            // the first line only (mimics the existing TabDisplay list style).
+            // Print simple arrays inline: key on the first line, continuation
+            // lines aligned under the first value.
             for (i, val) in arr.iter().enumerate() {
-                indent(tw, depth);
+                write_indent(out, depth);
                 if i == 0 {
                     let _ = writeln!(
-                        tw,
-                        "{}:\t{}",
+                        out,
+                        "{}:{:padding$}{}",
                         key.style(styles.label),
+                        "",
                         format_scalar(val, styles),
                     );
                 } else {
-                    let _ = writeln!(tw, "\t{}", format_scalar(val, styles));
+                    // Align under the first value: key length + colon + padding.
+                    let lead = max_key_len + 2;
+                    let _ = writeln!(out, "{:lead$}{}", "", format_scalar(val, styles));
                 }
             }
         }
         serde_json::Value::Array(arr) => {
-            indent(tw, depth);
-            let _ = writeln!(tw, "{}:", key.style(styles.label));
+            write_indent(out, depth);
+            let _ = writeln!(out, "{}:", key.style(styles.label));
             for (i, val) in arr.iter().enumerate() {
-                indent(tw, depth + 1);
-                let _ = writeln!(tw, "{}", format!("[{}]", i).style(styles.label),);
-                pretty_print_value(tw, val, depth + 2, styles);
+                write_indent(out, depth + 1);
+                let _ = writeln!(out, "{}", format!("[{}]", i).style(styles.label));
+                pretty_print_value(out, val, depth + 2, styles);
             }
         }
         _ => {
-            indent(tw, depth);
+            write_indent(out, depth);
             let _ = writeln!(
-                tw,
-                "{}:\t{}",
+                out,
+                "{}:{:padding$}{}",
                 key.style(styles.label),
+                "",
                 format_scalar(value, styles),
             );
         }
@@ -225,7 +234,6 @@ fn format_scalar(value: &serde_json::Value, styles: &TabStyles) -> String {
         serde_json::Value::Bool(b) => format!("{}", b.style(styles.value)),
         serde_json::Value::Number(n) => format!("{}", n.style(styles.value)),
         serde_json::Value::String(s) => format!("{}", s.style(styles.value)),
-        // Fallback for non-scalars that end up here
         other => format!("{}", other.style(styles.value)),
     }
 }
