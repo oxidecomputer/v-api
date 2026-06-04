@@ -18,20 +18,13 @@ use std::ops::Add;
 use tap::TapFallible;
 use tracing::instrument;
 use url::Url;
-use v_model::{
-    NewLoginAttempt, OAuthClientId,
-    permissions::PermissionStorage,
-};
+use v_model::{NewLoginAttempt, OAuthClientId, permissions::PermissionStorage};
 
 use super::super::OAuthProviderNameParam;
 use crate::endpoints::login::UserInfoProvider;
 use crate::{
-    context::ApiContext,
-    endpoints::login::LoginError,
-    error::ApiError,
-    permissions::VAppPermission,
-    response::internal_error,
-    util::response::bad_request,
+    context::ApiContext, endpoints::login::LoginError, error::ApiError,
+    permissions::VAppPermission, response::internal_error, util::response::bad_request,
 };
 
 use super::complete_exchange;
