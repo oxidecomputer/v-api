@@ -20,7 +20,7 @@ use tracing::instrument;
 use url::Url;
 use v_model::{
     NewLoginAttempt, OAuthClientId,
-    permissions::{AsScope, PermissionStorage},
+    permissions::PermissionStorage,
 };
 
 use super::super::OAuthProviderNameParam;

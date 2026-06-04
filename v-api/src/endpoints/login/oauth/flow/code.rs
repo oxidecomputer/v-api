@@ -26,7 +26,7 @@ use tracing::instrument;
 use uuid::Uuid;
 use v_model::{
     LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient, OAuthClientId,
-    permissions::{AsScope, PermissionStorage},
+    permissions::PermissionStorage,
     schema_ext::LoginAttemptState,
 };
 

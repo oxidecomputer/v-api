@@ -28,7 +28,6 @@ use crate::{
     permissions::VAppPermission,
     response::{ResourceError, bad_request, internal_error, to_internal_error},
 };
-use v_model::permissions::AsScope;
 
 pub mod client;
 
