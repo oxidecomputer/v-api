@@ -277,7 +277,7 @@ where
     // Check that the passed in scopes are valid. A None scope means no permissions.
     // Use the special scope "full" to request all permissions.
     if let Some(ref scope) = query.scope
-        && let Err(err) = VPermission::from_scope_arg(scope)
+        && let Err(err) = T::from_scope_arg(scope)
     {
         tracing::warn!(?err, ?scope, "Client submitted an invalid scope");
         Err(OAuthError::new(

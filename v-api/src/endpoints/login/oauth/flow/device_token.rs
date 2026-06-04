@@ -135,7 +135,7 @@ where
 
     // An omitted scope means no permissions
     let scope = body.scope.unwrap_or_default();
-    if let Err(err) = VPermission::from_scope_arg(&scope) {
+    if let Err(err) = T::from_scope_arg(&scope) {
         tracing::warn!(?err, ?scope, "Client submitted an invalid scope");
         return Ok(error_response(
             StatusCode::BAD_REQUEST,
