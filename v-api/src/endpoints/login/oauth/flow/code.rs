@@ -582,7 +582,7 @@ pub struct OAuthAuthzCodeExchangeBody {
     pub grant_type: String,
     pub code: String,
     /// PKCE code verifier (RFC 7636). Required for all authorization code exchanges.
-    pub pkce_verifier: String,
+    pub code_verifier: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
@@ -707,7 +707,7 @@ where
         &provider.name().to_string(),
         client_id,
         &body.redirect_uri,
-        &body.pkce_verifier,
+        &body.code_verifier,
     )?;
 
     tracing::debug!("Verified login attempt");
@@ -814,7 +814,7 @@ fn verify_login_attempt(
     provider: &str,
     client_id: TypedUuid<OAuthClientId>,
     redirect_uri: &str,
-    pkce_verifier: &str,
+    code_verifier: &str,
 ) -> Result<(), OAuthError> {
     if attempt.provider != provider {
         Err(OAuthError::new(
@@ -845,7 +845,7 @@ fn verify_login_attempt(
         match attempt.pkce_challenge.as_deref() {
             Some(challenge) => {
                 let mut hasher = Sha256::new();
-                hasher.update(pkce_verifier);
+                hasher.update(code_verifier);
                 let hash = hasher.finalize();
                 let computed_challenge = BASE64_URL_SAFE_NO_PAD.encode(hash);
 
