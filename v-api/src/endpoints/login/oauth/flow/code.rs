@@ -40,7 +40,7 @@ use crate::{
         oauth::{CheckOAuthClient, OAuthProviderAuthorizationCodePkceInfo},
     },
     error::ApiError,
-    permissions::{VAppPermission, VPermission},
+    permissions::VAppPermission,
     response::bad_request,
     secrets::OpenApiSecretString,
     util::{

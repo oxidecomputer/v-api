@@ -29,7 +29,7 @@ use crate::{
     context::ApiContext,
     endpoints::login::LoginError,
     error::ApiError,
-    permissions::{VAppPermission, VPermission},
+    permissions::VAppPermission,
     response::internal_error,
     util::response::bad_request,
 };

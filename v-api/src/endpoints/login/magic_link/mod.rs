@@ -25,7 +25,7 @@ use crate::{
     authn::{Verify, key::RawKey},
     context::magic_link::{MagicLinkSendError, MagicLinkTransitionError},
     endpoints::login::{ExternalUserId, UserInfo},
-    permissions::{VAppPermission, VPermission},
+    permissions::VAppPermission,
     response::{ResourceError, bad_request, internal_error, to_internal_error},
 };
 use v_model::permissions::AsScope;
