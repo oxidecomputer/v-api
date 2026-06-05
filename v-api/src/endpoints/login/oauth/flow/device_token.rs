@@ -18,20 +18,13 @@ use std::ops::Add;
 use tap::TapFallible;
 use tracing::instrument;
 use url::Url;
-use v_model::{
-    NewLoginAttempt, OAuthClientId,
-    permissions::{AsScope, PermissionStorage},
-};
+use v_model::{NewLoginAttempt, OAuthClientId, permissions::PermissionStorage};
 
 use super::super::OAuthProviderNameParam;
 use crate::endpoints::login::UserInfoProvider;
 use crate::{
-    context::ApiContext,
-    endpoints::login::LoginError,
-    error::ApiError,
-    permissions::{VAppPermission, VPermission},
-    response::internal_error,
-    util::response::bad_request,
+    context::ApiContext, endpoints::login::LoginError, error::ApiError,
+    permissions::VAppPermission, response::internal_error, util::response::bad_request,
 };
 
 use super::complete_exchange;
@@ -135,7 +128,7 @@ where
 
     // An omitted scope means no permissions
     let scope = body.scope.unwrap_or_default();
-    if let Err(err) = VPermission::from_scope_arg(&scope) {
+    if let Err(err) = T::from_scope_arg(&scope) {
         tracing::warn!(?err, ?scope, "Client submitted an invalid scope");
         return Ok(error_response(
             StatusCode::BAD_REQUEST,

@@ -755,7 +755,7 @@ dependencies = [
 
 [[package]]
 name = "dropshot-authorization-header"
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 dependencies = [
  "async-trait",
  "base64",
@@ -3574,7 +3574,7 @@ dependencies = [
 
 [[package]]
 name = "v-api"
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3622,7 +3622,7 @@ dependencies = [
 
 [[package]]
 name = "v-api-param"
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 dependencies = [
  "secrecy",
  "serde",
@@ -3633,7 +3633,7 @@ dependencies = [
 
 [[package]]
 name = "v-api-permission-derive"
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 dependencies = [
  "heck",
  "newtype-uuid",
@@ -3650,7 +3650,7 @@ dependencies = [
 
 [[package]]
 name = "v-cli-sdk"
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -3672,7 +3672,7 @@ dependencies = [
 
 [[package]]
 name = "v-model"
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 dependencies = [
  "async-bb8-diesel",
  "async-trait",
@@ -4266,7 +4266,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "xtask"
-version = "0.4.0-alpha.4"
+version = "0.4.0-alpha.5"
 dependencies = [
  "clap",
  "regex",

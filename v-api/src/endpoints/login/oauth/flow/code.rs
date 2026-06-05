@@ -26,8 +26,7 @@ use tracing::instrument;
 use uuid::Uuid;
 use v_model::{
     LoginAttempt, LoginAttemptId, NewLoginAttempt, OAuthClient, OAuthClientId,
-    permissions::{AsScope, PermissionStorage},
-    schema_ext::LoginAttemptState,
+    permissions::PermissionStorage, schema_ext::LoginAttemptState,
 };
 
 use super::super::{OAuthProvider, OAuthProviderNameParam};
@@ -40,7 +39,7 @@ use crate::{
         oauth::{CheckOAuthClient, OAuthProviderAuthorizationCodePkceInfo},
     },
     error::ApiError,
-    permissions::{VAppPermission, VPermission},
+    permissions::VAppPermission,
     response::bad_request,
     secrets::OpenApiSecretString,
     util::{
@@ -277,7 +276,7 @@ where
     // Check that the passed in scopes are valid. A None scope means no permissions.
     // Use the special scope "full" to request all permissions.
     if let Some(ref scope) = query.scope
-        && let Err(err) = VPermission::from_scope_arg(scope)
+        && let Err(err) = T::from_scope_arg(scope)
     {
         tracing::warn!(?err, ?scope, "Client submitted an invalid scope");
         Err(OAuthError::new(

@@ -25,10 +25,9 @@ use crate::{
     authn::{Verify, key::RawKey},
     context::magic_link::{MagicLinkSendError, MagicLinkTransitionError},
     endpoints::login::{ExternalUserId, UserInfo},
-    permissions::{VAppPermission, VPermission},
+    permissions::VAppPermission,
     response::{ResourceError, bad_request, internal_error, to_internal_error},
 };
-use v_model::permissions::AsScope;
 
 pub mod client;
 
@@ -101,7 +100,7 @@ where
 
     // Validate scope. An empty scope means no permissions.
     // Use the special scope "full" to request all permissions.
-    if let Err(err) = VPermission::from_scope_arg(&scope) {
+    if let Err(err) = T::from_scope_arg(&scope) {
         tracing::warn!(?err, ?scope, "Client submitted an invalid scope");
         return Err(bad_request(format!("Invalid scope: {}", scope)));
     }
