@@ -12,6 +12,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::BTreeSet, error::Error as StdError, fmt::Debug};
+use tap::TapFallible;
 use thiserror::Error;
 use v_model::{
     AccessGroupId, Mapper,
@@ -138,6 +139,10 @@ where
     }
 
     fn validate_mapping_data(&self, value: &Value) -> bool {
-        serde_json::from_value::<MappingRulesData<T>>(value.clone()).is_ok()
+        serde_json::from_value::<MappingRulesData<T>>(value.clone())
+            .tap_err(|err| {
+                tracing::warn!(?value, ?err, "Failed to parse mapping rule");
+            })
+            .is_ok()
     }
 }
