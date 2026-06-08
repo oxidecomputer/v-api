@@ -61,8 +61,14 @@ where
 
     pub fn validate(&self, value: &Value) -> bool {
         match &self.engine {
-            Some(engine) => engine.validate_mapping_data(value),
-            None => false,
+            Some(engine) => {
+                tracing::trace!(?value, "Validating mapping rule");
+                engine.validate_mapping_data(value)
+            }
+            None => {
+                tracing::warn!("No mapping rule is installed to validate rules");
+                false
+            }
         }
     }
 
