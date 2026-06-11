@@ -52,8 +52,15 @@ enum AppPermissions {
     Flop,
     #[v_api(contract(kind = append, variant = NonCopies))]
     NonCopy(String),
-    #[v_api(expand(kind = iter, variant = NonCopy))]
+    #[v_api(
+        contract(kind = extend, variant = NonCopies),
+        expand(kind = iter, variant = NonCopy)
+    )]
     NonCopies(BTreeSet<String>),
+    #[v_api(
+        expand(kind = alias, variant = NonCopy, source = actor)
+    )]
+    NonCopiesAssigned,
 }
 
 #[test]
