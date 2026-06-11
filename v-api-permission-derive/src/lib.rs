@@ -1032,11 +1032,27 @@ fn permission_storage_contract_tokens(
             ContractKind::Drop => {
                 // We are dropping the specific permission value
             }
-            ContractKind::Extend => branches.push(quote! {
-                #permission_type::#variant_ident(#fields) => {
-                    #set_name.extend(#fields);
-                }
-            }),
+            ContractKind::Extend => {
+                assert_eq!(
+                    variant.fields.len(),
+                    1,
+                    "contract(kind = extend) requires exactly one field on variant `{}`",
+                    variant_ident,
+                );
+                let field_ident = variant
+                    .fields
+                    .iter()
+                    .next()
+                    .unwrap()
+                    .ident
+                    .as_ref()
+                    .unwrap_or(&stock_field_names[0]);
+                branches.push(quote! {
+                    #permission_type::#variant_ident(#field_ident) => {
+                        #set_name.extend(#field_ident.iter().cloned());
+                    }
+                });
+            }
             ContractKind::Replace => branches.push(quote! {
                 #permission_type::#variant_ident(#fields) => {
                     contracted.push(#permission_type::#target_variant);
