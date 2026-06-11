@@ -50,6 +50,10 @@ enum AppPermissions {
     Flip(TypedUuid<UserId>),
     #[v_api(expand(kind = replace, variant = Flip, source = actor, field = id))]
     Flop,
+    #[v_api(contract(kind = append, variant = NonCopies))]
+    NonCopy(String),
+    #[v_api(expand(kind = iter, variant = NonCopy))]
+    NonCopies(BTreeSet<String>),
 }
 
 #[test]

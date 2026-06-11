@@ -1008,11 +1008,27 @@ fn permission_storage_contract_tokens(
         };
 
         match setting.kind {
-            ContractKind::Append => branches.push(quote! {
-                #permission_type::#variant_ident(#fields) => {
-                    #set_name.insert(*#fields);
-                }
-            }),
+            ContractKind::Append => {
+                assert_eq!(
+                    variant.fields.len(),
+                    1,
+                    "contract(kind = append) requires exactly one field on variant `{}`",
+                    variant_ident,
+                );
+                let field_ident = variant
+                    .fields
+                    .iter()
+                    .next()
+                    .unwrap()
+                    .ident
+                    .as_ref()
+                    .unwrap_or(&stock_field_names[0]);
+                branches.push(quote! {
+                    #permission_type::#variant_ident(#field_ident) => {
+                        #set_name.insert(#field_ident.clone());
+                    }
+                });
+            }
             ContractKind::Drop => {
                 // We are dropping the specific permission value
             }
@@ -1118,7 +1134,7 @@ fn permission_storage_expand_tokens(
                         quote! {
                             #permission_type::#variant_ident => {
                                 for f0 in &#source.#field {
-                                    expanded.push(#permission_type::#target_variant(*f0))
+                                    expanded.push(#permission_type::#target_variant(f0.clone()))
                                 }
                             }
                         }
@@ -1129,7 +1145,7 @@ fn permission_storage_expand_tokens(
                         quote! {
                             #permission_type::#variant_ident(field) => {
                                 for f0 in field {
-                                    expanded.push(#permission_type::#target_variant(*f0))
+                                    expanded.push(#permission_type::#target_variant(f0.clone()))
                                 }
                             }
                         }
@@ -1145,7 +1161,7 @@ fn permission_storage_expand_tokens(
                             ExternalSource::Actor => {
                                 let source = source.to_ident();
                                 quote! {
-                                    #permission_type::#variant_ident => expanded.push(#permission_type::#target_variant(#source.#field)),
+                                    #permission_type::#variant_ident => expanded.push(#permission_type::#target_variant(#source.#field.clone())),
                                 }
                             },
                             ExternalSource::Extension => {
@@ -1158,7 +1174,7 @@ fn permission_storage_expand_tokens(
                                                 use std::any::Any;
                                                 let entry: Option<&#ext> = (**entry).downcast_ref();
                                                 if let Some(entry) = entry {
-                                                    expanded.push(#permission_type::#target_variant(entry.#field));
+                                                    expanded.push(#permission_type::#target_variant(entry.#field.clone()));
                                                 }
                                             }
                                         },
