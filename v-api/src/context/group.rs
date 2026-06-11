@@ -5,9 +5,9 @@
 use newtype_uuid::TypedUuid;
 use std::sync::Arc;
 use v_model::{
-    AccessGroup, AccessGroupId, NewAccessGroup,
+    Group, GroupId, NewGroup,
     permissions::Caller,
-    storage::{AccessGroupFilter, AccessGroupStore, ListPagination, StoreError},
+    storage::{GroupFilter, GroupStore, ListPagination, StoreError},
 };
 
 use crate::{
@@ -36,10 +36,10 @@ where
     pub async fn get_group(
         &self,
         caller: &Caller<T>,
-        group_id: &TypedUuid<AccessGroupId>,
-    ) -> ResourceResult<AccessGroup<T>, StoreError> {
+        group_id: &TypedUuid<GroupId>,
+    ) -> ResourceResult<Group<T>, StoreError> {
         if caller.can(&VPermission::GetGroup(*group_id).into()) {
-            AccessGroupStore::get(&*self.storage, group_id, false)
+            GroupStore::get(&*self.storage, group_id, false)
                 .await
                 .optional()
         } else {
@@ -50,10 +50,10 @@ where
     pub async fn list_groups(
         &self,
         caller: &Caller<T>,
-        filter: AccessGroupFilter,
-    ) -> ResourceResult<Vec<AccessGroup<T>>, StoreError> {
+        filter: GroupFilter,
+    ) -> ResourceResult<Vec<Group<T>>, StoreError> {
         let mut groups =
-            AccessGroupStore::list(&*self.storage, filter, &ListPagination::unlimited()).await?;
+            GroupStore::list(&*self.storage, filter, &ListPagination::unlimited()).await?;
         groups.retain(|group| caller.can(&VPermission::GetGroup(group.id).into()));
 
         Ok(groups)
@@ -62,11 +62,11 @@ where
     pub async fn create_group(
         &self,
         caller: &Caller<T>,
-        group: NewAccessGroup<T>,
-    ) -> ResourceResult<AccessGroup<T>, StoreError> {
+        group: NewGroup<T>,
+    ) -> ResourceResult<Group<T>, StoreError> {
         if caller.can(&VPermission::CreateGroup.into()) && caller.can_grant_all(&group.permissions)
         {
-            Ok(AccessGroupStore::upsert(&*self.storage, &group).await?)
+            Ok(GroupStore::upsert(&*self.storage, &group).await?)
         } else {
             resource_restricted()
         }
@@ -75,12 +75,12 @@ where
     pub async fn update_group(
         &self,
         caller: &Caller<T>,
-        group: NewAccessGroup<T>,
-    ) -> ResourceResult<AccessGroup<T>, StoreError> {
+        group: NewGroup<T>,
+    ) -> ResourceResult<Group<T>, StoreError> {
         if caller.can(&VPermission::ManageGroup(group.id).into())
             && caller.can_grant_all(&group.permissions)
         {
-            Ok(AccessGroupStore::upsert(&*self.storage, &group).await?)
+            Ok(GroupStore::upsert(&*self.storage, &group).await?)
         } else {
             resource_restricted()
         }
@@ -89,10 +89,10 @@ where
     pub async fn delete_group(
         &self,
         caller: &Caller<T>,
-        group_id: &TypedUuid<AccessGroupId>,
-    ) -> ResourceResult<AccessGroup<T>, StoreError> {
+        group_id: &TypedUuid<GroupId>,
+    ) -> ResourceResult<Group<T>, StoreError> {
         if caller.can(&VPermission::ManageGroup(*group_id).into()) {
-            AccessGroupStore::delete(&*self.storage, group_id)
+            GroupStore::delete(&*self.storage, group_id)
                 .await
                 .optional()
         } else {

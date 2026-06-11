@@ -15,7 +15,7 @@ use std::{collections::BTreeSet, error::Error as StdError, fmt::Debug};
 use tap::TapFallible;
 use thiserror::Error;
 use v_model::{
-    AccessGroupId, Mapper,
+    GroupId, Mapper,
     permissions::{Caller, Permissions},
     storage::StoreError,
 };
@@ -47,7 +47,7 @@ where
     async fn groups_for(
         &self,
         user: &UserInfo,
-    ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError>;
+    ) -> ResourceResult<BTreeSet<TypedUuid<GroupId>>, StoreError>;
 }
 
 #[derive(Debug, Error)]

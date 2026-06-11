@@ -16,18 +16,18 @@ use thiserror::Error;
 use tracing::instrument;
 
 use crate::{
-    AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUser,
+    Group, GroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUser,
     ApiUserContactEmail, ApiUserInfo, ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt,
     LoginAttemptId, MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId,
     MagicLinkRedirectUri, MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, Mapper,
-    MapperEvent, MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
+    MapperEvent, MapperId, NewGroup, NewAccessToken, NewApiKey, NewApiUser,
     NewApiUserContactEmail, NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMagicLink,
     NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, NewMapperEvent,
     NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
     OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId,
     UserContactEmailId, UserId, UserProviderId,
     db::{
-        AccessGroupModel, ApiKeyModel, ApiUserAccessTokenModel, ApiUserContactEmailModel,
+        GroupModel, ApiKeyModel, ApiUserAccessTokenModel, ApiUserContactEmailModel,
         ApiUserModel, ApiUserProviderModel, LinkRequestModel, LoginAttemptModel,
         MagicLinkAttemptModel, MagicLinkModel, MagicLinkRedirectUriModel, MagicLinkSecretModel,
         MapperEventModel, MapperModel, OAuthClientModel, OAuthClientRedirectUriModel,
@@ -35,7 +35,7 @@ use crate::{
     },
     permissions::Permission,
     schema::{
-        access_groups, api_key, api_user, api_user_access_token, api_user_contact_email,
+        groups, api_key, api_user, api_user_access_token, api_user_contact_email,
         api_user_provider, link_request, login_attempt, magic_link_attempt, magic_link_client,
         magic_link_client_redirect_uri, magic_link_client_secret, mapper, mapper_event,
         oauth_client, oauth_client_redirect_uri, oauth_client_secret,
@@ -45,7 +45,7 @@ use crate::{
 };
 
 use super::{
-    AccessGroupFilter, AccessGroupStore, AccessTokenFilter, AccessTokenStore, ApiKeyFilter,
+    GroupFilter, GroupStore, AccessTokenFilter, AccessTokenStore, ApiKeyFilter,
     ApiKeyStore, ApiUserContactEmailFilter, ApiUserContactEmailStore, ApiUserFilter,
     ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, ListPagination, LoginAttemptFilter,
     LoginAttemptStore, MagicLinkAttemptFilter, MagicLinkAttemptStore, MagicLinkFilter,
@@ -1353,18 +1353,18 @@ impl MagicLinkAttemptStore for PostgresStore {
 }
 
 #[async_trait]
-impl<T> AccessGroupStore<T> for PostgresStore
+impl<T> GroupStore<T> for PostgresStore
 where
     T: Permission,
 {
     async fn get(
         &self,
-        id: &TypedUuid<AccessGroupId>,
+        id: &TypedUuid<GroupId>,
         deleted: bool,
-    ) -> Result<Option<AccessGroup<T>>, StoreError> {
-        let client = AccessGroupStore::list(
+    ) -> Result<Option<Group<T>>, StoreError> {
+        let client = GroupStore::list(
             self,
-            AccessGroupFilter {
+            GroupFilter {
                 id: Some(vec![*id]),
                 name: None,
                 deleted,
@@ -1378,49 +1378,49 @@ where
 
     async fn list(
         &self,
-        filter: AccessGroupFilter,
+        filter: GroupFilter,
         pagination: &ListPagination,
-    ) -> Result<Vec<AccessGroup<T>>, StoreError> {
-        let mut query = access_groups::dsl::access_groups.into_boxed();
+    ) -> Result<Vec<Group<T>>, StoreError> {
+        let mut query = groups::dsl::groups.into_boxed();
 
-        let AccessGroupFilter { id, name, deleted } = filter;
+        let GroupFilter { id, name, deleted } = filter;
 
         if let Some(id) = id {
             query = query.filter(
-                access_groups::id.eq_any(id.into_iter().map(|group| group.into_untyped_uuid())),
+                groups::id.eq_any(id.into_iter().map(|group| group.into_untyped_uuid())),
             );
         }
 
         if let Some(name) = name {
-            query = query.filter(access_groups::name.eq_any(name));
+            query = query.filter(groups::name.eq_any(name));
         }
 
         if !deleted {
-            query = query.filter(access_groups::deleted_at.is_null());
+            query = query.filter(groups::deleted_at.is_null());
         }
 
         let results = query
             .offset(pagination.offset)
             .limit(pagination.limit)
-            .order(access_groups::created_at.desc())
-            .get_results_async::<AccessGroupModel<T>>(&*self.pool.get().await?)
+            .order(groups::created_at.desc())
+            .get_results_async::<GroupModel<T>>(&*self.pool.get().await?)
             .await?;
 
         Ok(results.into_iter().map(|model| model.into()).collect())
     }
 
-    async fn upsert(&self, group: &NewAccessGroup<T>) -> Result<AccessGroup<T>, StoreError> {
-        let group_m: AccessGroupModel<T> = insert_into(access_groups::dsl::access_groups)
+    async fn upsert(&self, group: &NewGroup<T>) -> Result<Group<T>, StoreError> {
+        let group_m: GroupModel<T> = insert_into(groups::dsl::groups)
             .values((
-                access_groups::id.eq(group.id.into_untyped_uuid()),
-                access_groups::name.eq(group.name.clone()),
-                access_groups::permissions.eq(group.permissions.clone()),
+                groups::id.eq(group.id.into_untyped_uuid()),
+                groups::name.eq(group.name.clone()),
+                groups::permissions.eq(group.permissions.clone()),
             ))
-            .on_conflict(access_groups::id)
+            .on_conflict(groups::id)
             .do_update()
             .set((
-                access_groups::name.eq(excluded(access_groups::name)),
-                access_groups::permissions.eq(excluded(access_groups::permissions)),
+                groups::name.eq(excluded(groups::name)),
+                groups::permissions.eq(excluded(groups::permissions)),
             ))
             .get_result_async(&*self.pool.get().await?)
             .await?;
@@ -1430,15 +1430,15 @@ where
 
     async fn delete(
         &self,
-        id: &TypedUuid<AccessGroupId>,
-    ) -> Result<Option<AccessGroup<T>>, StoreError> {
-        let _ = update(access_groups::dsl::access_groups)
-            .filter(access_groups::id.eq(id.into_untyped_uuid()))
-            .set(access_groups::deleted_at.eq(Utc::now()))
+        id: &TypedUuid<GroupId>,
+    ) -> Result<Option<Group<T>>, StoreError> {
+        let _ = update(groups::dsl::groups)
+            .filter(groups::id.eq(id.into_untyped_uuid()))
+            .set(groups::deleted_at.eq(Utc::now()))
             .execute_async(&*self.pool.get().await?)
             .await?;
 
-        AccessGroupStore::get(self, id, true).await
+        GroupStore::get(self, id, true).await
     }
 }
 

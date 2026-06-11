@@ -9,9 +9,9 @@ use serde::Deserialize;
 use std::fmt::Debug;
 use tracing::instrument;
 use v_model::{
-    AccessGroup, AccessGroupId, NewAccessGroup,
+    Group, GroupId, NewGroup,
     permissions::{Permission, PermissionStorage, Permissions},
-    storage::AccessGroupFilter,
+    storage::GroupFilter,
 };
 
 use crate::{
@@ -19,12 +19,12 @@ use crate::{
     permissions::VAppPermission,
 };
 
-fn into_group_response<T, U>(group: AccessGroup<T>) -> AccessGroup<U>
+fn into_group_response<T, U>(group: Group<T>) -> Group<U>
 where
     T: Permission,
     U: Permission + From<T>,
 {
-    AccessGroup {
+    Group {
         id: group.id,
         name: group.name,
         permissions: group
@@ -41,7 +41,7 @@ where
 #[instrument(skip(rqctx), err(Debug))]
 pub async fn get_groups_op<T, U>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
-) -> Result<HttpResponseOk<Vec<AccessGroup<U>>>, HttpError>
+) -> Result<HttpResponseOk<Vec<Group<U>>>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
     U: From<T> + Permission + JsonSchema,
@@ -49,7 +49,7 @@ where
     let (ctx, caller) = rqctx.as_ctx().await?;
     Ok(HttpResponseOk(
         ctx.group
-            .list_groups(&caller, AccessGroupFilter::default())
+            .list_groups(&caller, GroupFilter::default())
             .await?
             .into_iter()
             .map(into_group_response)
@@ -58,7 +58,7 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
-pub struct AccessGroupUpdateParams<T> {
+pub struct GroupUpdateParams<T> {
     name: String,
     permissions: Permissions<T>,
 }
@@ -66,8 +66,8 @@ pub struct AccessGroupUpdateParams<T> {
 #[instrument(skip(rqctx), err(Debug))]
 pub async fn create_group_op<T, U>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
-    body: AccessGroupUpdateParams<T>,
-) -> Result<HttpResponseCreated<AccessGroup<U>>, HttpError>
+    body: GroupUpdateParams<T>,
+) -> Result<HttpResponseCreated<Group<U>>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
     U: From<T> + Permission + JsonSchema,
@@ -77,7 +77,7 @@ where
         ctx.group
             .create_group(
                 &caller,
-                NewAccessGroup {
+                NewGroup {
                     id: TypedUuid::new_v4(),
                     name: body.name,
                     permissions: body.permissions,
@@ -89,16 +89,16 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
-pub struct AccessGroupPath {
-    group_id: TypedUuid<AccessGroupId>,
+pub struct GroupPath {
+    group_id: TypedUuid<GroupId>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]
 pub async fn update_group_op<T, U>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
-    path: AccessGroupPath,
-    body: AccessGroupUpdateParams<T>,
-) -> Result<HttpResponseOk<AccessGroup<U>>, HttpError>
+    path: GroupPath,
+    body: GroupUpdateParams<T>,
+) -> Result<HttpResponseOk<Group<U>>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
     U: From<T> + Permission + JsonSchema,
@@ -108,7 +108,7 @@ where
         ctx.group
             .update_group(
                 &caller,
-                NewAccessGroup {
+                NewGroup {
                     id: path.group_id,
                     name: body.name,
                     permissions: body.permissions,
@@ -122,8 +122,8 @@ where
 #[instrument(skip(rqctx), err(Debug))]
 pub async fn delete_group_op<T, U>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
-    path: AccessGroupPath,
-) -> Result<HttpResponseOk<AccessGroup<U>>, HttpError>
+    path: GroupPath,
+) -> Result<HttpResponseOk<Group<U>>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
     U: From<T> + Permission + JsonSchema,

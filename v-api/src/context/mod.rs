@@ -24,11 +24,11 @@ use v_model::saga::{
     view::SagaExecNodeId,
 };
 use v_model::{
-    AccessGroupId, ApiUserInfo, ApiUserProvider, LinkRequest, Mapper, MapperSource, NewApiUser,
+    GroupId, ApiUserInfo, ApiUserProvider, LinkRequest, Mapper, MapperSource, NewApiUser,
     NewApiUserProvider, NewLinkRequest, UserId, UserProviderId,
     permissions::{Caller, Permission},
     storage::{
-        AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore, ApiUserFilter,
+        GroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore, ApiUserFilter,
         ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, LinkRequestStore,
         ListPagination, LoginAttemptStore, MagicLinkAttemptStore, MagicLinkRedirectUriStore,
         MagicLinkSecretStore, MagicLinkStore, MapperEventStore, MapperStore,
@@ -89,7 +89,7 @@ pub trait VApiStorage<P: Send + Sync>:
     + OAuthClientStore
     + OAuthClientSecretStore
     + OAuthClientRedirectUriStore
-    + AccessGroupStore<P>
+    + GroupStore<P>
     + MapperStore
     + MapperEventStore
     + LinkRequestStore
@@ -117,7 +117,7 @@ where
         + OAuthClientStore
         + OAuthClientSecretStore
         + OAuthClientRedirectUriStore
-        + AccessGroupStore<P>
+        + GroupStore<P>
         + MapperStore
         + MapperEventStore
         + LinkRequestStore
@@ -144,7 +144,7 @@ pub trait VApiStorage<P: Send + Sync>:
     + OAuthClientStore
     + OAuthClientSecretStore
     + OAuthClientRedirectUriStore
-    + AccessGroupStore<P>
+    + GroupStore<P>
     + MapperStore
     + MapperEventStore
     + LinkRequestStore
@@ -170,7 +170,7 @@ where
         + OAuthClientStore
         + OAuthClientSecretStore
         + OAuthClientRedirectUriStore
-        + AccessGroupStore<P>
+        + GroupStore<P>
         + MapperStore
         + MapperEventStore
         + LinkRequestStore
@@ -530,7 +530,7 @@ where
                 .group
                 .list_groups(
                     caller,
-                    v_model::storage::AccessGroupFilter {
+                    v_model::storage::GroupFilter {
                         id: Some(mapped_groups.into_iter().collect()),
                         ..Default::default()
                     },
@@ -631,7 +631,7 @@ where
     pub async fn list_api_users_for_group(
         &self,
         caller: &Caller<T>,
-        group_id: TypedUuid<AccessGroupId>,
+        group_id: TypedUuid<GroupId>,
     ) -> ResourceResult<Vec<ApiUserInfo<T>>, StoreError> {
         if caller.can(&VPermission::GetGroup(group_id).into()) {
             Ok(self
@@ -651,7 +651,7 @@ where
         &self,
         caller: &Caller<T>,
         api_user_id: &TypedUuid<UserId>,
-        group_id: &TypedUuid<AccessGroupId>,
+        group_id: &TypedUuid<GroupId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
         let group = self.group.get_group(caller, group_id).await?;
         if caller.can(&VPermission::ManageGroupMembership(*group_id).into())
@@ -679,7 +679,7 @@ where
         &self,
         caller: &Caller<T>,
         api_user_id: &TypedUuid<UserId>,
-        group_id: &TypedUuid<AccessGroupId>,
+        group_id: &TypedUuid<GroupId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
         if caller.can(&VPermission::ManageGroupMembership(*group_id).into()) {
             // TODO: This needs to be wrapped in a transaction. That requires reworking the way the
@@ -1045,10 +1045,10 @@ mod tests {
     use newtype_uuid::TypedUuid;
     use std::{collections::BTreeSet, ops::Add, sync::Arc};
     use v_model::{
-        AccessGroup, AccessToken, AccessTokenId, ApiUser, ApiUserInfo, ApiUserProvider, UserId,
+        Group, AccessToken, AccessTokenId, ApiUser, ApiUserInfo, ApiUserProvider, UserId,
         permissions::Permissions,
         storage::{
-            AccessGroupFilter, ListPagination, MockAccessGroupStore, MockAccessTokenStore,
+            GroupFilter, ListPagination, MockGroupStore, MockAccessTokenStore,
             MockApiUserStore,
         },
     };
@@ -1117,7 +1117,7 @@ mod tests {
         // Initialize a test environment with a user belonging to a group
         let group_id = TypedUuid::new_v4();
         let group_permissions: Permissions<VPermission> = vec![VPermission::CreateGroup].into();
-        let group = AccessGroup {
+        let group = Group {
             id: group_id,
             name: "TestGroup".to_string(),
             permissions: group_permissions.clone(),
@@ -1126,11 +1126,11 @@ mod tests {
             deleted_at: None,
         };
         let pagination = ListPagination::unlimited();
-        let mut group_store = MockAccessGroupStore::new();
+        let mut group_store = MockGroupStore::new();
         group_store
             .expect_list()
             .with(
-                eq(AccessGroupFilter {
+                eq(GroupFilter {
                     id: Some(vec![group_id]),
                     ..Default::default()
                 }),
@@ -1181,7 +1181,7 @@ mod tests {
             .with(eq(invalid_token_id), eq(false))
             .returning(move |_, _| Ok(None));
 
-        storage.access_group_store = Some(Arc::new(group_store));
+        storage.group_store = Some(Arc::new(group_store));
         storage.api_user_store = Some(Arc::new(user_store));
         storage.access_token_store = Some(Arc::new(token_store));
 
@@ -1315,21 +1315,21 @@ pub(crate) mod test_mocks {
         view::{SagaExecNodeId, SagaId},
     };
     use v_model::{
-        AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail,
+        GroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail,
         ApiUserProvider, LinkRequestId, LoginAttemptId, MagicLink, MagicLinkAttempt,
         MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri, MagicLinkRedirectUriId,
-        MagicLinkSecret, MagicLinkSecretId, MapperId, NewAccessGroup, NewAccessToken, NewApiKey,
+        MagicLinkSecret, MagicLinkSecretId, MapperId, NewGroup, NewAccessToken, NewApiKey,
         NewApiUser, NewApiUserContactEmail, NewApiUserProvider, NewLoginAttempt, NewMagicLink,
         NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, OAuthClientId,
         OAuthRedirectUriId, OAuthSecretId, UserContactEmailId, UserId, UserProviderId,
         permissions::Caller,
         schema_ext::MagicLinkAttemptState,
         storage::{
-            AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore,
+            GroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore,
             ApiUserProviderStore, ApiUserStore, LinkRequestStore, ListPagination,
             LoginAttemptStore, MagicLinkAttemptFilter, MagicLinkAttemptStore, MagicLinkFilter,
             MagicLinkRedirectUriStore, MagicLinkSecretStore, MagicLinkStore, MapperEventStore,
-            MapperStore, MockAccessGroupStore, MockAccessTokenStore, MockApiKeyStore,
+            MapperStore, MockGroupStore, MockAccessTokenStore, MockApiKeyStore,
             MockApiUserContactEmailStore, MockApiUserProviderStore, MockApiUserStore,
             MockLinkRequestStore, MockLoginAttemptStore, MockMagicLinkAttemptStore,
             MockMagicLinkRedirectUriStore, MockMagicLinkSecretStore, MockMagicLinkStore,
@@ -1428,7 +1428,7 @@ pub(crate) mod test_mocks {
         pub oauth_client_store: Option<Arc<MockOAuthClientStore>>,
         pub oauth_client_secret_store: Option<Arc<MockOAuthClientSecretStore>>,
         pub oauth_client_redirect_uri_store: Option<Arc<MockOAuthClientRedirectUriStore>>,
-        pub access_group_store: Option<Arc<MockAccessGroupStore<VPermission>>>,
+        pub group_store: Option<Arc<MockGroupStore<VPermission>>>,
         pub mapper_store: Option<Arc<MockMapperStore>>,
         pub mapper_event_store: Option<Arc<MockMapperEventStore>>,
         pub link_request_store: Option<Arc<MockLinkRequestStore>>,
@@ -1454,7 +1454,7 @@ pub(crate) mod test_mocks {
                 oauth_client_store: None,
                 oauth_client_secret_store: None,
                 oauth_client_redirect_uri_store: None,
-                access_group_store: None,
+                group_store: None,
                 mapper_store: None,
                 mapper_event_store: None,
                 link_request_store: None,
@@ -1843,14 +1843,14 @@ pub(crate) mod test_mocks {
     }
 
     #[async_trait]
-    impl AccessGroupStore<VPermission> for MockStorage {
+    impl GroupStore<VPermission> for MockStorage {
         async fn get(
             &self,
-            id: &TypedUuid<AccessGroupId>,
+            id: &TypedUuid<GroupId>,
             deleted: bool,
-        ) -> Result<Option<v_model::AccessGroup<VPermission>>, v_model::storage::StoreError>
+        ) -> Result<Option<v_model::Group<VPermission>>, v_model::storage::StoreError>
         {
-            self.access_group_store
+            self.group_store
                 .as_ref()
                 .unwrap()
                 .get(id, deleted)
@@ -1859,10 +1859,10 @@ pub(crate) mod test_mocks {
 
         async fn list(
             &self,
-            filter: v_model::storage::AccessGroupFilter,
+            filter: v_model::storage::GroupFilter,
             pagination: &ListPagination,
-        ) -> Result<Vec<v_model::AccessGroup<VPermission>>, v_model::storage::StoreError> {
-            self.access_group_store
+        ) -> Result<Vec<v_model::Group<VPermission>>, v_model::storage::StoreError> {
+            self.group_store
                 .as_ref()
                 .unwrap()
                 .list(filter, pagination)
@@ -1871,9 +1871,9 @@ pub(crate) mod test_mocks {
 
         async fn upsert(
             &self,
-            group: &NewAccessGroup<VPermission>,
-        ) -> Result<v_model::AccessGroup<VPermission>, v_model::storage::StoreError> {
-            self.access_group_store
+            group: &NewGroup<VPermission>,
+        ) -> Result<v_model::Group<VPermission>, v_model::storage::StoreError> {
+            self.group_store
                 .as_ref()
                 .unwrap()
                 .upsert(group)
@@ -1882,10 +1882,10 @@ pub(crate) mod test_mocks {
 
         async fn delete(
             &self,
-            id: &TypedUuid<AccessGroupId>,
-        ) -> Result<Option<v_model::AccessGroup<VPermission>>, v_model::storage::StoreError>
+            id: &TypedUuid<GroupId>,
+        ) -> Result<Option<v_model::Group<VPermission>>, v_model::storage::StoreError>
         {
-            self.access_group_store.as_ref().unwrap().delete(id).await
+            self.group_store.as_ref().unwrap().delete(id).await
         }
     }
 

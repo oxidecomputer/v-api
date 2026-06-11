@@ -667,7 +667,7 @@ fn system_permission_tokens() -> TokenStream {
                 contract(kind = drop, variant = GetGroupsJoined),
                 scope(to = "group:info:r")
             )]
-            GetGroup(newtype_uuid::TypedUuid<v_model::AccessGroupId>),
+            GetGroup(newtype_uuid::TypedUuid<v_model::GroupId>),
             #[v_api(
                 expand(kind = iter, variant = GetGroup, source = actor, field = groups)
                 scope(to = "group:info:r", from = "group:info:r")
@@ -683,13 +683,13 @@ fn system_permission_tokens() -> TokenStream {
                 contract(kind = append, variant = ManageGroups),
                 scope(to = "group:info:w")
             )]
-            ManageGroup(newtype_uuid::TypedUuid<v_model::AccessGroupId>),
+            ManageGroup(newtype_uuid::TypedUuid<v_model::GroupId>),
             #[v_api(
                 contract(kind = extend, variant = ManageGroups),
                 expand(kind = iter, variant = ManageGroup),
                 scope(to = "group:info:w")
             )]
-            ManageGroups(BTreeSet<newtype_uuid::TypedUuid<v_model::AccessGroupId>>),
+            ManageGroups(BTreeSet<newtype_uuid::TypedUuid<v_model::GroupId>>),
             #[v_api(
                 expand(kind = alias, variant = ManageGroup, source = actor),
                 scope(to = "group:info:w", from = "group:info:w")
@@ -706,13 +706,13 @@ fn system_permission_tokens() -> TokenStream {
                 contract(kind = append, variant = ManageGroupMemberships)
                 scope(to = "group:membership:w")
             )]
-            ManageGroupMembership(newtype_uuid::TypedUuid<v_model::AccessGroupId>),
+            ManageGroupMembership(newtype_uuid::TypedUuid<v_model::GroupId>),
             #[v_api(
                 contract(kind = extend, variant = ManageGroupMemberships)
                 expand(kind = iter, variant = ManageGroupMembership)
                 scope(to = "group:membership:w")
             )]
-            ManageGroupMemberships(BTreeSet<newtype_uuid::TypedUuid<v_model::AccessGroupId>>),
+            ManageGroupMemberships(BTreeSet<newtype_uuid::TypedUuid<v_model::GroupId>>),
             #[v_api(
                 expand(kind = alias, variant = ManageGroupMembership, source = actor),
                 scope(to = "group:membership:w", from = "group:membership:w")

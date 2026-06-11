@@ -13,7 +13,7 @@ mod macros {
                 RequestContext, TypedBody, Body,
             };
             use http::Response;
-            use v_model::{Mapper, ApiUserContactEmail, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret, AccessGroup, ApiUser, MagicLink, MagicLinkRedirectUri, MagicLinkSecret};
+            use v_model::{Mapper, ApiUserContactEmail, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret, Group, ApiUser, MagicLink, MagicLinkRedirectUri, MagicLinkSecret};
 
             use v_api::endpoints::{
                 api_user::{
@@ -30,8 +30,8 @@ mod macros {
                     ApiUserProviderPath,
                 },
                 group::{
-                    create_group_op, delete_group_op, get_groups_op, update_group_op, AccessGroupPath,
-                    AccessGroupUpdateParams,
+                    create_group_op, delete_group_op, get_groups_op, update_group_op, GroupPath,
+                    GroupUpdateParams,
                 },
                 login::{
                     magic_link:: {
@@ -625,7 +625,7 @@ mod macros {
             }]
             pub async fn get_groups(
                 rqctx: RequestContext<$context_type>,
-            ) -> Result<HttpResponseOk<Vec<AccessGroup<$permission_type>>>, HttpError> {
+            ) -> Result<HttpResponseOk<Vec<Group<$permission_type>>>, HttpError> {
                 get_groups_op(&rqctx).await
             }
 
@@ -636,8 +636,8 @@ mod macros {
             }]
             pub async fn create_group(
                 rqctx: RequestContext<$context_type>,
-                body: TypedBody<AccessGroupUpdateParams<$permission_type>>,
-            ) -> Result<HttpResponseCreated<AccessGroup<$permission_type>>, HttpError> {
+                body: TypedBody<GroupUpdateParams<$permission_type>>,
+            ) -> Result<HttpResponseCreated<Group<$permission_type>>, HttpError> {
                 create_group_op(&rqctx, body.into_inner()).await
             }
 
@@ -648,9 +648,9 @@ mod macros {
             }]
             pub async fn update_group(
                 rqctx: RequestContext<$context_type>,
-                path: Path<AccessGroupPath>,
-                body: TypedBody<AccessGroupUpdateParams<$permission_type>>,
-            ) -> Result<HttpResponseOk<AccessGroup<$permission_type>>, HttpError> {
+                path: Path<GroupPath>,
+                body: TypedBody<GroupUpdateParams<$permission_type>>,
+            ) -> Result<HttpResponseOk<Group<$permission_type>>, HttpError> {
                 update_group_op(&rqctx, path.into_inner(), body.into_inner()).await
             }
 
@@ -661,8 +661,8 @@ mod macros {
             }]
             pub async fn delete_group(
                 rqctx: RequestContext<$context_type>,
-                path: Path<AccessGroupPath>,
-            ) -> Result<HttpResponseOk<AccessGroup<$permission_type>>, HttpError> {
+                path: Path<GroupPath>,
+            ) -> Result<HttpResponseOk<Group<$permission_type>>, HttpError> {
                 delete_group_op(&rqctx, path.into_inner()).await
             }
 

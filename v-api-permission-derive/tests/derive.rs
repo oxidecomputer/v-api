@@ -293,9 +293,9 @@ fn test_implies_set_does_not_imply_assigned_or_all() {
 
 #[test]
 fn test_implies_system_manage_groups_all() {
-    use v_model::AccessGroupId;
+    use v_model::GroupId;
 
-    let group_id = TypedUuid::<AccessGroupId>::new_v4();
+    let group_id = TypedUuid::<GroupId>::new_v4();
 
     // ManageGroupsAll implies ManageGroup(any)
     assert!(VPermission::implies(
@@ -304,7 +304,7 @@ fn test_implies_system_manage_groups_all() {
     ));
 
     // ManageGroupsAll implies ManageGroups(any set)
-    let set: BTreeSet<TypedUuid<AccessGroupId>> = [group_id].into();
+    let set: BTreeSet<TypedUuid<GroupId>> = [group_id].into();
     assert!(VPermission::implies(
         &VPermission::ManageGroupsAll,
         &VPermission::ManageGroups(set),
@@ -329,9 +329,9 @@ fn test_implies_system_manage_groups_all() {
 
 #[test]
 fn test_implies_system_manage_group_membership_all() {
-    use v_model::AccessGroupId;
+    use v_model::GroupId;
 
-    let group_id = TypedUuid::<AccessGroupId>::new_v4();
+    let group_id = TypedUuid::<GroupId>::new_v4();
 
     assert!(VPermission::implies(
         &VPermission::ManageGroupMembershipsAll,
@@ -409,11 +409,11 @@ fn test_implies_system_manage_api_users_all() {
 
 #[test]
 fn test_implies_system_set_containment() {
-    use v_model::AccessGroupId;
+    use v_model::GroupId;
 
-    let g1 = TypedUuid::<AccessGroupId>::new_v4();
-    let g2 = TypedUuid::<AccessGroupId>::new_v4();
-    let g3 = TypedUuid::<AccessGroupId>::new_v4();
+    let g1 = TypedUuid::<GroupId>::new_v4();
+    let g2 = TypedUuid::<GroupId>::new_v4();
+    let g3 = TypedUuid::<GroupId>::new_v4();
 
     let full: BTreeSet<_> = [g1, g2, g3].into();
     let partial: BTreeSet<_> = [g1, g3].into();

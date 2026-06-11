@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, Utc};
 use db::{
-    AccessGroupModel, ApiKeyModel, ApiUserAccessTokenModel, ApiUserContactEmailModel, ApiUserModel,
+    GroupModel, ApiKeyModel, ApiUserAccessTokenModel, ApiUserContactEmailModel, ApiUserModel,
     ApiUserProviderModel, LinkRequestModel, LoginAttemptModel, MagicLinkAttemptModel,
     MagicLinkModel, MagicLinkRedirectUriModel, MagicLinkSecretModel, MapperEventModel, MapperModel,
     OAuthClientModel, OAuthClientRedirectUriModel, OAuthClientSecretModel,
@@ -70,7 +70,7 @@ impl TypedUuidKind for UserId {
 pub struct ApiUser<T> {
     pub id: TypedUuid<UserId>,
     pub permissions: Permissions<T>,
-    pub groups: BTreeSet<TypedUuid<AccessGroupId>>,
+    pub groups: BTreeSet<TypedUuid<GroupId>>,
     #[partial(NewApiUser(skip))]
     pub created_at: DateTime<Utc>,
     #[partial(NewApiUser(skip))]
@@ -668,31 +668,31 @@ impl From<MagicLinkAttemptModel> for MagicLinkAttempt {
 }
 
 #[derive(JsonSchema)]
-pub enum AccessGroupId {}
-impl TypedUuidKind for AccessGroupId {
+pub enum GroupId {}
+impl TypedUuidKind for GroupId {
     fn tag() -> TypedUuidTag {
-        const TAG: TypedUuidTag = TypedUuidTag::new("access-group");
+        const TAG: TypedUuidTag = TypedUuidTag::new("group");
         TAG
     }
 }
 
-#[partial(NewAccessGroup)]
+#[partial(NewGroup)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct AccessGroup<T> {
-    pub id: TypedUuid<AccessGroupId>,
+pub struct Group<T> {
+    pub id: TypedUuid<GroupId>,
     pub name: String,
     pub permissions: Permissions<T>,
-    #[partial(NewAccessGroup(skip))]
+    #[partial(NewGroup(skip))]
     pub created_at: DateTime<Utc>,
-    #[partial(NewAccessGroup(skip))]
+    #[partial(NewGroup(skip))]
     pub updated_at: DateTime<Utc>,
-    #[partial(NewAccessGroup(skip))]
+    #[partial(NewGroup(skip))]
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
-impl<T> From<AccessGroupModel<T>> for AccessGroup<T> {
-    fn from(value: AccessGroupModel<T>) -> Self {
-        AccessGroup {
+impl<T> From<GroupModel<T>> for Group<T> {
+    fn from(value: GroupModel<T>) -> Self {
+        Group {
             id: TypedUuid::from_untyped_uuid(value.id),
             name: value.name,
             permissions: value.permissions,

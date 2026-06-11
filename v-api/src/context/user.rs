@@ -10,12 +10,12 @@ use thiserror::Error;
 use tracing::{Instrument, info_span, instrument};
 use uuid::Uuid;
 use v_model::{
-    AccessGroup, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserInfo,
+    Group, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserInfo,
     ApiUserProvider, ArcMap, NewAccessToken, NewApiKey, NewApiUser, NewApiUserContactEmail,
     NewApiUserProvider, Permissions, UserId, UserProviderId,
     permissions::{AsScope, Caller, Permission, PermissionError, PermissionStorage},
     storage::{
-        AccessGroupFilter, AccessGroupStore, AccessTokenStore, ApiKeyFilter, ApiKeyStore,
+        GroupFilter, GroupStore, AccessTokenStore, ApiKeyFilter, ApiKeyStore,
         ApiUserContactEmailStore, ApiUserFilter, ApiUserProviderFilter, ApiUserProviderStore,
         ApiUserStore, ListPagination, StoreError,
     },
@@ -297,9 +297,9 @@ where
     ) -> Result<Permissions<T>, StoreError> {
         tracing::trace!("Expanding groups into permissions");
 
-        let groups = AccessGroupStore::list(
+        let groups = GroupStore::list(
             &*self.storage,
-            AccessGroupFilter {
+            GroupFilter {
                 id: Some(user.groups.iter().copied().collect()),
                 ..Default::default()
             },
@@ -371,7 +371,7 @@ where
         caller: &Caller<T>,
         id: TypedUuid<UserId>,
         permissions: Permissions<T>,
-        groups: Vec<AccessGroup<T>>,
+        groups: Vec<Group<T>>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
         let group_permissions: Permissions<T> = groups
             .iter()

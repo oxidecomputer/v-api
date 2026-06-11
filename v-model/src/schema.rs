@@ -13,7 +13,7 @@ pub mod sql_types {
 }
 
 diesel::table! {
-    access_groups (id) {
+    groups (id) {
         id -> Uuid,
         name -> Varchar,
         permissions -> Jsonb,
@@ -264,7 +264,7 @@ diesel::joinable!(oauth_client_secret -> oauth_client (oauth_client_id));
 diesel::joinable!(saga_events -> sagas (saga_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
-    access_groups,
+    groups,
     api_key,
     api_user,
     api_user_access_token,

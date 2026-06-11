@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use tracing::instrument;
 use v_model::{
-    AccessGroupId,
+    GroupId,
     permissions::{Caller, Permissions},
-    storage::{AccessGroupFilter, StoreError},
+    storage::{GroupFilter, StoreError},
 };
 
 use crate::{
@@ -59,11 +59,11 @@ where
     async fn groups_for(
         &self,
         _user: &UserInfo,
-    ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError> {
+    ) -> ResourceResult<BTreeSet<TypedUuid<GroupId>>, StoreError> {
         tracing::trace!("Running default mapper");
         let groups = self
             .group
-            .list_groups(&self.caller, AccessGroupFilter::default())
+            .list_groups(&self.caller, GroupFilter::default())
             .await?
             .into_iter()
             .filter_map(|group| {

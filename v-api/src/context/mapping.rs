@@ -6,7 +6,7 @@ use newtype_uuid::TypedUuid;
 use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc};
 use v_model::{
-    AccessGroupId, Mapper, MapperEvent, MapperId, MapperSource, NewMapper, NewMapperEvent,
+    GroupId, Mapper, MapperEvent, MapperId, MapperSource, NewMapper, NewMapperEvent,
     Permissions, UserId,
     permissions::Caller,
     storage::{ListPagination, MapperEventStore, MapperFilter, MapperStore, StoreError},
@@ -121,7 +121,7 @@ where
         caller: &Caller<T>,
         info: &UserInfo,
         user_id: TypedUuid<UserId>,
-    ) -> ResourceResult<(Permissions<T>, BTreeSet<TypedUuid<AccessGroupId>>), StoreError> {
+    ) -> ResourceResult<(Permissions<T>, BTreeSet<TypedUuid<GroupId>>), StoreError> {
         let mut mapped_permissions = Permissions::new();
         let mut mapped_groups = BTreeSet::new();
 

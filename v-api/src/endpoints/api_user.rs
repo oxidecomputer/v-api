@@ -17,9 +17,9 @@ use tap::TapFallible;
 use tracing::instrument;
 use uuid::Uuid;
 use v_model::{
-    AccessGroupId, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserProvider, NewApiKey, UserId,
+    GroupId, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserProvider, NewApiKey, UserId,
     permissions::{Caller, Permission, PermissionStorage, Permissions},
-    storage::{AccessGroupFilter, ApiUserFilter, ApiUserProviderFilter, ListPagination},
+    storage::{GroupFilter, ApiUserFilter, ApiUserProviderFilter, ListPagination},
 };
 
 use crate::{
@@ -193,7 +193,7 @@ where
 pub struct ApiUserUpdateParams<T> {
     permissions: Permissions<T>,
     #[serde(default)]
-    group_ids: BTreeSet<TypedUuid<AccessGroupId>>,
+    group_ids: BTreeSet<TypedUuid<GroupId>>,
 }
 
 /// Creates a new API user with the specified permissions and group memberships.
@@ -230,7 +230,7 @@ where
         .group
         .list_groups(
             &caller,
-            AccessGroupFilter {
+            GroupFilter {
                 id: Some(body.group_ids.into_iter().collect()),
                 ..Default::default()
             },
@@ -659,7 +659,7 @@ where
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct AddGroupBody {
-    group_id: TypedUuid<AccessGroupId>,
+    group_id: TypedUuid<GroupId>,
 }
 
 /// Adds an API user to an access group.
@@ -694,7 +694,7 @@ where
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ApiUserRemoveGroupPath {
     user_id: TypedUuid<UserId>,
-    group_id: TypedUuid<AccessGroupId>,
+    group_id: TypedUuid<GroupId>,
 }
 
 /// Removes an API user from an access group.
@@ -727,7 +727,7 @@ where
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ApiUserGroupPath {
-    group_id: TypedUuid<AccessGroupId>,
+    group_id: TypedUuid<GroupId>,
 }
 
 /// Lists all API users that are members of a specific access group.
@@ -879,7 +879,7 @@ mod tests {
         ApiKey, ApiUser, ApiUserContactEmail, ApiUserInfo, ApiUserProvider, NewApiUser,
         permissions::{Caller, Permissions},
         storage::{
-            ApiKeyFilter, ListPagination, MockAccessGroupStore, MockApiKeyStore,
+            ApiKeyFilter, ListPagination, MockGroupStore, MockApiKeyStore,
             MockApiUserContactEmailStore, MockApiUserProviderStore, MockApiUserStore, StoreError,
         },
     };
@@ -948,15 +948,15 @@ mod tests {
             .expect_list()
             .returning(|_, _| Ok(vec![]));
 
-        let mut access_group_store = MockAccessGroupStore::new();
-        access_group_store
+        let mut group_store = MockGroupStore::new();
+        group_store
             .expect_list()
             .returning(|_, _| Ok(vec![]));
 
         let mut storage = MockStorage::new();
         storage.api_user_store = Some(Arc::new(store));
         storage.api_user_provider_store = Some(Arc::new(api_user_provider_store));
-        storage.access_group_store = Some(Arc::new(access_group_store));
+        storage.group_store = Some(Arc::new(group_store));
 
         let ctx = mock_context(Arc::new(storage)).await;
 
@@ -1064,15 +1064,15 @@ mod tests {
         api_user_provider_store
             .expect_list()
             .returning(|_, _| Ok(vec![]));
-        let mut access_group_store = MockAccessGroupStore::new();
-        access_group_store
+        let mut group_store = MockGroupStore::new();
+        group_store
             .expect_list()
             .returning(|_, _| Ok(vec![]));
 
         let mut storage = MockStorage::new();
         storage.api_user_store = Some(Arc::new(store));
         storage.api_user_provider_store = Some(Arc::new(api_user_provider_store));
-        storage.access_group_store = Some(Arc::new(access_group_store));
+        storage.group_store = Some(Arc::new(group_store));
 
         let ctx = mock_context(Arc::new(storage)).await;
 

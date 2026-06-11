@@ -943,7 +943,7 @@ mod tests {
         NewApiUserProvider, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret,
         schema_ext::LoginAttemptState,
         storage::{
-            MockAccessGroupStore, MockAccessTokenStore, MockApiUserProviderStore, MockApiUserStore,
+            MockGroupStore, MockAccessTokenStore, MockApiUserProviderStore, MockApiUserStore,
             MockLoginAttemptStore, MockMapperStore, MockOAuthClientStore,
         },
     };
@@ -2193,13 +2193,13 @@ mod tests {
     async fn mock_should_provide_idp_token_ctx(
         user_permissions: Vec<VPermission>,
     ) -> (VContext<VPermission>, ApiUserInfo<VPermission>) {
-        let mut access_group_store = MockAccessGroupStore::new();
-        access_group_store
+        let mut group_store = MockGroupStore::new();
+        group_store
             .expect_list()
             .returning(|_, _| Ok(vec![]));
 
         let mut storage = MockStorage::new();
-        storage.access_group_store = Some(Arc::new(access_group_store));
+        storage.group_store = Some(Arc::new(group_store));
 
         let ctx = mock_context(Arc::new(storage)).await;
         let info = ApiUserInfo {
@@ -2309,9 +2309,9 @@ mod tests {
             })
         });
 
-        // AccessGroupStore: list returns empty (no groups configured)
-        let mut access_group_store = MockAccessGroupStore::new();
-        access_group_store
+        // GroupStore: list returns empty (no groups configured)
+        let mut group_store = MockGroupStore::new();
+        group_store
             .expect_list()
             .returning(|_, _| Ok(vec![]));
 
@@ -2320,7 +2320,7 @@ mod tests {
         storage.api_user_store = Some(Arc::new(user_store));
         storage.mapper_store = Some(Arc::new(mapper_store));
         storage.access_token_store = Some(Arc::new(access_token_store));
-        storage.access_group_store = Some(Arc::new(access_group_store));
+        storage.group_store = Some(Arc::new(group_store));
         storage
     }
 

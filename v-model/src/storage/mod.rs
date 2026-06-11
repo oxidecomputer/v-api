@@ -16,11 +16,11 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail,
+    Group, GroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail,
     ApiUserInfo, ApiUserProvider, LinkRequest, LinkRequestId, LoginAttempt, LoginAttemptId,
     MagicLink, MagicLinkAttempt, MagicLinkAttemptId, MagicLinkId, MagicLinkRedirectUri,
     MagicLinkRedirectUriId, MagicLinkSecret, MagicLinkSecretId, Mapper, MapperEvent, MapperEventId,
-    MapperId, MapperSource, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
+    MapperId, MapperSource, NewGroup, NewAccessToken, NewApiKey, NewApiUser,
     NewApiUserContactEmail, NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMagicLink,
     NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, NewMapperEvent,
     NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
@@ -95,7 +95,7 @@ impl ListPagination {
 pub struct ApiUserFilter {
     pub id: Option<Vec<TypedUuid<UserId>>>,
     pub email: Option<Vec<String>>,
-    pub groups: Option<Vec<TypedUuid<AccessGroupId>>>,
+    pub groups: Option<Vec<TypedUuid<GroupId>>>,
     pub deleted: bool,
 }
 
@@ -110,7 +110,7 @@ impl ApiUserFilter {
         self
     }
 
-    pub fn groups(mut self, groups: Vec<TypedUuid<AccessGroupId>>) -> Self {
+    pub fn groups(mut self, groups: Vec<TypedUuid<GroupId>>) -> Self {
         self.groups = Some(groups);
         self
     }
@@ -414,30 +414,30 @@ pub trait MagicLinkAttemptStore {
 }
 
 #[derive(Debug, Default, PartialEq)]
-pub struct AccessGroupFilter {
-    pub id: Option<Vec<TypedUuid<AccessGroupId>>>,
+pub struct GroupFilter {
+    pub id: Option<Vec<TypedUuid<GroupId>>>,
     pub name: Option<Vec<String>>,
     pub deleted: bool,
 }
 
 #[cfg_attr(feature = "mock", automock)]
 #[async_trait]
-pub trait AccessGroupStore<T: Send + Sync> {
+pub trait GroupStore<T: Send + Sync> {
     async fn get(
         &self,
-        id: &TypedUuid<AccessGroupId>,
+        id: &TypedUuid<GroupId>,
         deleted: bool,
-    ) -> Result<Option<AccessGroup<T>>, StoreError>;
+    ) -> Result<Option<Group<T>>, StoreError>;
     async fn list(
         &self,
-        filter: AccessGroupFilter,
+        filter: GroupFilter,
         pagination: &ListPagination,
-    ) -> Result<Vec<AccessGroup<T>>, StoreError>;
-    async fn upsert(&self, group: &NewAccessGroup<T>) -> Result<AccessGroup<T>, StoreError>;
+    ) -> Result<Vec<Group<T>>, StoreError>;
+    async fn upsert(&self, group: &NewGroup<T>) -> Result<Group<T>, StoreError>;
     async fn delete(
         &self,
-        id: &TypedUuid<AccessGroupId>,
-    ) -> Result<Option<AccessGroup<T>>, StoreError>;
+        id: &TypedUuid<GroupId>,
+    ) -> Result<Option<Group<T>>, StoreError>;
 }
 
 #[derive(Debug, Default, PartialEq)]

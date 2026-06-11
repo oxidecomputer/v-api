@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::{
     permissions::Permissions,
     schema::{
-        access_groups, api_key, api_user, api_user_access_token, api_user_contact_email,
+        groups, api_key, api_user, api_user_access_token, api_user_contact_email,
         api_user_provider, link_request, login_attempt, magic_link_attempt, magic_link_client,
         magic_link_client_redirect_uri, magic_link_client_secret, mapper, mapper_event,
         oauth_client, oauth_client_redirect_uri, oauth_client_secret,
@@ -180,8 +180,8 @@ pub struct MagicLinkAttemptModel {
 }
 
 #[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
-#[diesel(table_name = access_groups)]
-pub struct AccessGroupModel<T> {
+#[diesel(table_name = groups)]
+pub struct GroupModel<T> {
     pub id: Uuid,
     pub name: String,
     pub permissions: Permissions<T>,
