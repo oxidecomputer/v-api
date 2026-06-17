@@ -1,14 +1,16 @@
 = Migrating from v-api v0.3.0 to v0.4.0
+:toc: macro
+:toclevels: 3
 
 This guide covers all breaking changes and new features introduced between v0.3.0 and
 v0.4.0 of the v-api framework. Work through each section in order — later sections may
 depend on earlier ones.
 
+toc::[]
+
 '''
 
-:toc:
-:toc-title: Table of Contents
-
+[[database-migrations]]
 == 1. Database Migrations
 
 Four new migrations must be applied **in order** before deploying v0.4.0. If you use
@@ -41,6 +43,7 @@ tables). This was missing in v0.3.0 and is now applied automatically.
 
 '''
 
+[[migration-system-restructure]]
 == 2. Migration System Restructure
 
 The `v-api-installer` crate has been **removed**. Its responsibilities are now handled
@@ -77,6 +80,7 @@ handles this automatically.
 
 '''
 
+[[permission-implication]]
 == 3. Permission Implication
 
 v0.3.0 used **strict equality** for permission checks. Holding `GetApiUsersAll` did _not_
@@ -210,6 +214,7 @@ New endpoints:
 
 '''
 
+[[oauth-rework]]
 == 4. OAuth Rework
 
 This is the largest change in v0.4.0 and affects the OAuth provider trait, configuration,
@@ -444,6 +449,7 @@ This ensures that the `callback_url` is a well-formed url.
 
 '''
 
+[[api-key-and-scope-refactoring]]
 == 5. API Key and Scope Refactoring
 
 === 5.1 `permissions` → `permission_boundary` rename
@@ -554,6 +560,7 @@ Pass `""` instead of `None` for no specific scope.
 
 '''
 
+[[preset-mappers]]
 == 6. Preset Mappers
 
 Preset mappers are a new type of mapper that lives **in memory** instead of the database.
@@ -628,6 +635,7 @@ Update any code that constructs or destructures `Mapper` directly.
 
 '''
 
+[[v-cli-sdk-introduction]]
 == 7. v-cli-sdk Introduction
 
 A new `v-cli-sdk` crate provides reusable https://docs.rs/clap[clap] commands and
@@ -682,6 +690,7 @@ This crate is additive — it does not require changes to your server code.
 
 '''
 
+[[other-breaking-changes]]
 == 8. Other Breaking Changes
 
 === 8.1 Saga feature gating
