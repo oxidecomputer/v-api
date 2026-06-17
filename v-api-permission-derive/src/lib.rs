@@ -1238,26 +1238,73 @@ fn permission_storage_implies_tokens(
     let mut branches = vec![];
 
     // From explicit implies annotations (typically on "All" variants).
-    // e.g., ManageGroupsAll implies(variant = ManageGroup) generates:
-    //   (Self::ManageGroupsAll, Self::ManageGroup(..)) => true
+    //
+    // When the held variant has fewer fields than the target, the present
+    // fields are compared positionally and the remaining target fields are
+    // treated as wildcards.  For example:
+    //
+    //   TransitionStateAllStates(Uuid) implies(variant = TransitionState)
+    //   where TransitionState(Uuid, States) generates:
+    //     (Self::TransitionStateAllStates(held_0), Self::TransitionState(target_0, ..)) => held_0 == target_0
+    //
+    //   TransitionStateAll implies(variant = TransitionState) generates:
+    //     (Self::TransitionStateAll, Self::TransitionState(..)) => true
     for (variant, setting) in &implies_settings {
         let held_ident = &variant.ident;
         let target_ident = &setting.variant;
 
-        let target_fields = variant_field_counts
+        let held_field_count = variant.fields.len();
+        let target_field_count = variant_field_counts
             .get(&target_ident.to_string())
             .copied()
             .unwrap_or(0);
 
-        let target_pattern = if target_fields > 0 {
-            quote! { #permission_type::#target_ident(..) }
-        } else {
-            quote! { #permission_type::#target_ident }
-        };
+        // Number of fields that can be compared positionally.
+        let matched_count = held_field_count.min(target_field_count);
 
-        branches.push(quote! {
-            (#permission_type::#held_ident, #target_pattern) => true
-        });
+        if matched_count == 0 {
+            // No fields to compare — wildcard both sides.
+            let held_pattern = if held_field_count > 0 {
+                quote! { #permission_type::#held_ident(..) }
+            } else {
+                quote! { #permission_type::#held_ident }
+            };
+            let target_pattern = if target_field_count > 0 {
+                quote! { #permission_type::#target_ident(..) }
+            } else {
+                quote! { #permission_type::#target_ident }
+            };
+
+            branches.push(quote! {
+                (#held_pattern, #target_pattern) => true
+            });
+        } else {
+            // Generate positional bindings for the fields we will compare.
+            let held_bindings: Vec<proc_macro2::Ident> = (0..matched_count)
+                .map(|i| format_ident!("held_{}", i))
+                .collect();
+            let target_bindings: Vec<proc_macro2::Ident> = (0..matched_count)
+                .map(|i| format_ident!("target_{}", i))
+                .collect();
+
+            let held_pattern = if held_field_count > matched_count {
+                quote! { #permission_type::#held_ident(#(#held_bindings),*, ..) }
+            } else {
+                quote! { #permission_type::#held_ident(#(#held_bindings),*) }
+            };
+
+            let target_pattern = if target_field_count > matched_count {
+                quote! { #permission_type::#target_ident(#(#target_bindings),*, ..) }
+            } else {
+                quote! { #permission_type::#target_ident(#(#target_bindings),*) }
+            };
+
+            let body = quote! { #(#held_bindings == #target_bindings)&&* };
+
+            branches.push(quote! {
+                (#held_pattern, #target_pattern) => #body
+            });
+        }
     }
 
     // From expand(kind = iter) annotations without an external source/field.
