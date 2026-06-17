@@ -14,6 +14,14 @@ struct ItemWrapper {
     id: Uuid,
 }
 
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub enum States {
+    Alpha,
+    Beta,
+}
+
 #[v_api(From(VPermission))]
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -61,12 +69,67 @@ enum AppPermissions {
         expand(kind = alias, variant = NonCopy, source = actor)
     )]
     NonCopiesAssigned,
+
+    TransitionState(Uuid, States),
+
+    #[v_api(implies(variant = TransitionState))]
+    TransitionStateAllStates(Uuid),
+
+    #[v_api(implies(variant = TransitionState), implies(variant = TransitionStateAllStates))]
+    TransitionStateAll,
 }
 
 #[test]
 fn test_derive() {
     let _ = ItemWrapper { id: Uuid::new_v4() };
     let _ = AppPermissions::Flop;
+}
+
+#[test]
+fn test_implies_transition_state_all_states() {
+    let id = Uuid::new_v4();
+    // TransitionStateAllStates(id) implies TransitionState(id, <any state>)
+    assert!(AppPermissions::implies(
+        &AppPermissions::TransitionStateAllStates(id),
+        &AppPermissions::TransitionState(id, States::Alpha),
+    ));
+    assert!(AppPermissions::implies(
+        &AppPermissions::TransitionStateAllStates(id),
+        &AppPermissions::TransitionState(id, States::Beta),
+    ));
+
+    // Different id — should NOT imply
+    let other_id = Uuid::new_v4();
+    assert!(!AppPermissions::implies(
+        &AppPermissions::TransitionStateAllStates(id),
+        &AppPermissions::TransitionState(other_id, States::Alpha),
+    ));
+}
+
+#[test]
+fn test_implies_transition_state_all() {
+    let id = Uuid::new_v4();
+    // TransitionStateAll implies TransitionState(any, any)
+    assert!(AppPermissions::implies(
+        &AppPermissions::TransitionStateAll,
+        &AppPermissions::TransitionState(id, States::Alpha),
+    ));
+    assert!(AppPermissions::implies(
+        &AppPermissions::TransitionStateAll,
+        &AppPermissions::TransitionState(id, States::Beta),
+    ));
+
+    // TransitionStateAll also implies TransitionStateAllStates(any)
+    assert!(AppPermissions::implies(
+        &AppPermissions::TransitionStateAll,
+        &AppPermissions::TransitionStateAllStates(id),
+    ));
+
+    // But NOT the reverse
+    assert!(!AppPermissions::implies(
+        &AppPermissions::TransitionStateAllStates(id),
+        &AppPermissions::TransitionStateAll,
+    ));
 }
 
 #[test]
