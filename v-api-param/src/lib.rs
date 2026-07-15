@@ -394,8 +394,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         write!(file, r#"{{ "a": "1", "b": "2" }}"#).unwrap();
 
-        let param: JsonParam<HashMap<String, String>> =
-            SerializedParam::from_path(file.path());
+        let param: JsonParam<HashMap<String, String>> = SerializedParam::from_path(file.path());
         let resolved = param.resolve(None).unwrap();
 
         assert_eq!(resolved.get("a").map(String::as_str), Some("1"));
