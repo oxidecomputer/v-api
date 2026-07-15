@@ -15,3 +15,7 @@
 - `v-model` - Shared data models, Diesel schema, migrations, storage traits, and Postgres implementations.
 - `xtask` - Workspace maintenance CLI for tasks such as bumping crate versions.
 - `dropshot-authorization-header` - Dropshot extractors for Basic and Bearer Authorization headers.
+
+## TypeScript packages
+
+- `remix-auth-vapi` - Generic remix-auth (OAuth + magic link) strategies for v-api based services. Talks directly to v-api's generic endpoints (`/login/oauth/*`, `/login/magic/*`, `/self`). Run `npm test`/`npm run build` from within the package directory.

@@ -1,0 +1,48 @@
+{
+  "name": "@oxide/remix-auth-vapi",
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    "import": "./dist/index.js",
+    "require": "./dist/index.cjs"
+  },
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "tsc": "tsc"
+  },
+  "keywords": [
+    "react-router",
+    "remix",
+    "remix-auth",
+    "v-api",
+    "auth",
+    "authentication",
+    "strategy"
+  ],
+  "author": "Oxide Computer Company",
+  "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oxidecomputer/v-api.git"
+  },
+  "peerDependencies": {
+    "react-router": "^7.4.0",
+    "remix-auth": "^4.0.0"
+  },
+  "devDependencies": {
+    "msw": "^2.6.0",
+    "tsup": "^8.0.2",
+    "typescript": "^5.7.2",
+    "vitest": "^4.0.15"
+  },
+  "dependencies": {
+    "remix-auth-oauth2": "^3.4.0"
+  }
+}
