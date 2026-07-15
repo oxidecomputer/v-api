@@ -13,7 +13,7 @@
 //! - [`SerializedParam`] resolves to an arbitrary `T`, deserializing the file
 //!   contents using a [`ParamFormat`] marker (for example [`Json`] or
 //!   [`Toml`]). This is useful when the file contents are themselves a
-//!   structured document whose shape and size are only known per-environment.
+//!   structured document whose shape and size are only known at runtime.
 //!
 //! # TOML Usage
 //!
@@ -95,13 +95,9 @@ impl From<String> for StringParam {
 }
 
 /// A param that can be specified either inline or as a path to a file whose
-/// contents are deserialized into `T` using the format `F`.
-///
-/// This generalizes [`StringParam`] for cases where the external file is a
-/// structured document rather than a single opaque secret. A common use is
-/// configuration whose *shape* is fixed but whose *contents* vary per
-/// environment (and are therefore staged on a parameters volume rather than
-/// baked into the config file):
+/// contents are deserialized into `T` using the format `F`. A common use is
+/// configuration whose *shape* is fixed but whose *contents* are only known
+/// at runtime:
 ///
 /// ```toml
 /// # a config file that is identical across environments
