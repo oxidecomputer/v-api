@@ -105,10 +105,13 @@ impl From<String> for StringParam {
 /// ```
 ///
 /// ```rust
-/// # use std::collections::HashMap;
-/// # use v_api_param::{SerializedParam, Json};
-/// // The file at the path above is deserialized as JSON into `T`.
-/// type Silos = SerializedParam<HashMap<String, String>, Json>;
+/// #[cfg(feature = "json")]
+/// {
+///     # use std::collections::HashMap;
+///     # use v_api_param::{SerializedParam, Json};
+///     // The file at the path above is deserialized as JSON into `T`.
+///     type Silos = SerializedParam<HashMap<String, String>, Json>;
+/// }
 /// ```
 ///
 /// Like [`StringParam`], path-relative resolution against an optional base
