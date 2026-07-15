@@ -2,7 +2,7 @@
   "name": "@oxide/remix-auth-vapi",
   "version": "0.1.0",
   "engines": {
-    "node": ">=18"
+    "node": ">=24"
   },
   "type": "module",
   "main": "./dist/index.js",
