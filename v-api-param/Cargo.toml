@@ -6,8 +6,15 @@ publish.workspace = true
 
 [dependencies]
 secrecy = { workspace = true, features = ["serde"] }
-serde = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }
 thiserror = { workspace = true }
+
+[features]
+default = []
+json = ["dep:serde_json"]
+toml = ["dep:toml"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
