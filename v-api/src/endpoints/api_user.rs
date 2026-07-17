@@ -1301,6 +1301,10 @@ mod tests {
             user_id: TypedUuid::new_v4(),
         };
 
+        let allowed_user_path = ApiUserPath {
+            user_id: TypedUuid::new_v4(),
+        };
+
         let new_token = ApiKeyCreateParams {
             permission_boundary: None,
             expires_at: Utc::now() + TimeDelta::try_seconds(5 * 60).unwrap(),
@@ -1325,6 +1329,27 @@ mod tests {
             .expect_get()
             .with(eq(unknown_api_user_path.user_id), eq(false))
             .returning(move |_, _| Ok(None));
+        api_user_store
+            .expect_get()
+            .with(eq(allowed_user_path.user_id), eq(false))
+            .returning(move |_, _| {
+                Ok(Some(ApiUserInfo {
+                    user: ApiUser {
+                        id: allowed_user_path.user_id,
+                        permissions: vec![
+                            VPermission::GetApiUser(allowed_user_path.user_id),
+                            VPermission::CreateApiKey(allowed_user_path.user_id),
+                        ]
+                        .into(),
+                        groups: BTreeSet::new(),
+                        created_at: Utc::now(),
+                        updated_at: Utc::now(),
+                        deleted_at: None,
+                    },
+                    email: None,
+                    providers: vec![],
+                }))
+            });
         let mut api_user_provider_store = MockApiUserProviderStore::new();
         api_user_provider_store
             .expect_list()
@@ -1418,14 +1443,12 @@ mod tests {
         assert!(resp.is_err());
         assert_eq!(get_status(&resp), StatusCode::NOT_FOUND);
 
-        let user4 = mock_user();
-
         // 4. Succeed in creating token
         let success_permissions = Caller {
-            id: user4.id,
+            id: allowed_user_path.user_id,
             permissions: vec![
-                VPermission::GetApiUser(api_user_path.user_id),
-                VPermission::CreateApiKey(api_user_path.user_id),
+                VPermission::GetApiUser(allowed_user_path.user_id),
+                VPermission::CreateApiKey(allowed_user_path.user_id),
             ]
             .into(),
             extensions: HashMap::default(),
@@ -1434,7 +1457,7 @@ mod tests {
         let resp = create_api_user_token_inner(
             &ctx,
             success_permissions,
-            api_user_path,
+            allowed_user_path,
             new_token.clone(),
         )
         .await;
