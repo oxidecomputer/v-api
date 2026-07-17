@@ -62,10 +62,9 @@ where
     ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError> {
         tracing::trace!("Running email domain mapper");
         let has_email_in_domain = user.verified_emails.iter().any(|email| {
-            let parts = email.split('@');
+            let mut parts = email.split('@');
             parts
-                .skip(1)
-                .next()
+                .nth(1)
                 .map(|domain| domain == self.data.domain)
                 .unwrap_or(false)
         });
