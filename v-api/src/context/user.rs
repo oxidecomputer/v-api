@@ -41,6 +41,8 @@ pub enum BasePermissions<T: Permission> {
 
 #[derive(Debug, Error)]
 pub enum UserContextError {
+    #[error("permission boundary must be defined for a cross-user token")]
+    BoundaryRequired,
     #[error("Failed to authenticate caller")]
     FailedToAuthenticate,
     #[error("Supplied API key is invalid")]
@@ -498,14 +500,20 @@ where
         caller: &Caller<T>,
         token: NewApiKey<T>,
         api_user_id: &TypedUuid<UserId>,
-    ) -> ResourceResult<ApiKey<T>, StoreError> {
+    ) -> ResourceResult<ApiKey<T>, UserContextError> {
         let can_create = caller.can(&VPermission::CreateApiKey(*api_user_id).into());
+
+        // If the user is requesting a token for themselves, they can grant an unbounded token.
+        // If the request is for a different user, then a permission boundary must be provided.
+        let self_token = &caller.id == api_user_id;
+        let has_boundary = token.permission_boundary.is_some();
         let can_grant = token
             .permission_boundary
             .as_ref()
             .is_none_or(|p| caller.can_grant_all(p));
+        let authorized = has_boundary && can_grant || !has_boundary && self_token;
 
-        if can_create && can_grant {
+        if can_create && authorized {
             Ok(ApiKeyStore::upsert(&*self.storage, token).await?)
         } else {
             resource_restricted()
@@ -677,5 +685,224 @@ where
             signed_token: signed,
             expires_in: claims.exp - Utc::now().timestamp(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests for the authorization checks in [`UserContext::create_api_user_token`].
+    //!
+    //! The guard being verified is:
+    //!
+    //! ```text
+    //! authorized = (has_boundary && caller.can_grant_all(boundary))
+    //!              || (!has_boundary && caller.id == api_user_id)
+    //! create allowed = caller.can(CreateApiKey(api_user_id)) && authorized
+    //! ```
+    //!
+    //! In other words:
+    //! - Every explicit boundary must contain only permissions the caller can
+    //!   grant, regardless of who the token is for.
+    //! - A boundary-less key (which resolves to `BasePermissions::Full` at
+    //!   authentication) may only be created for oneself.
+    //! - `CreateApiKey` authority for the target is always required.
+
+    use std::{collections::HashMap, sync::Arc};
+
+    use chrono::{TimeDelta, Utc};
+    use newtype_uuid::TypedUuid;
+    use v_model::{
+        ApiKey, NewApiKey, UserId,
+        permissions::{Caller, Permissions},
+        storage::MockApiKeyStore,
+    };
+
+    use crate::{context::test_mocks::MockStorage, permissions::VPermission};
+
+    use super::UserContext;
+
+    /// Build a `UserContext` whose token store echoes back whatever key is
+    /// upserted, so tests can observe the persisted `permission_boundary`.
+    fn user_context_with_token_store() -> UserContext<VPermission> {
+        let mut token_store = MockApiKeyStore::new();
+        token_store.expect_upsert().returning(move |key| {
+            Ok(ApiKey {
+                id: TypedUuid::new_v4(),
+                user_id: key.user_id,
+                key_signature: key.key_signature,
+                permission_boundary: key.permission_boundary,
+                expires_at: key.expires_at,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                deleted_at: None,
+            })
+        });
+
+        let mut storage = MockStorage::new();
+        storage.api_user_token_store = Some(Arc::new(token_store));
+
+        UserContext::new(Arc::new(storage))
+    }
+
+    fn make_caller(id: TypedUuid<UserId>, permissions: Vec<VPermission>) -> Caller<VPermission> {
+        Caller {
+            id,
+            permissions: permissions.into(),
+            extensions: HashMap::default(),
+        }
+    }
+
+    fn make_key(
+        user_id: TypedUuid<UserId>,
+        permission_boundary: Option<Permissions<VPermission>>,
+    ) -> NewApiKey<VPermission> {
+        NewApiKey {
+            id: TypedUuid::new_v4(),
+            user_id,
+            key_signature: "key-signature".to_string(),
+            permission_boundary,
+            expires_at: Utc::now() + TimeDelta::try_days(1).unwrap(),
+        }
+    }
+
+    /// A caller delegated only `CreateApiKey(target)` (and not the target's own
+    /// permissions) must NOT be able to mint a boundary-less key for another
+    /// user. A boundary-less key resolves to `BasePermissions::Full` at
+    /// authentication, so this would grant the target's full permission set.
+    #[tokio::test]
+    async fn boundaryless_token_for_other_user_is_rejected() {
+        let ctx = user_context_with_token_store();
+        let target_id = TypedUuid::new_v4();
+
+        let attacker = make_caller(
+            TypedUuid::new_v4(),
+            vec![VPermission::CreateApiKey(target_id)],
+        );
+        // Far-future expiry, boundary-less => Full permissions of the target.
+        let mut token = make_key(target_id, None);
+        token.expires_at = Utc::now() + TimeDelta::try_days(3650).unwrap();
+
+        let result = ctx
+            .create_api_user_token(&attacker, token, &target_id)
+            .await;
+
+        assert!(
+            result.is_err(),
+            "privilege escalation: a caller who cannot grant the target user's permissions minted \
+             a boundary-less (BasePermissions::Full) key for them; persisted boundary = {:?}",
+            result.map(|k| k.permission_boundary),
+        );
+    }
+
+    /// A caller must not place a permission they cannot grant into a key's
+    /// boundary, even when creating a token for another user.
+    #[tokio::test]
+    async fn ungrantable_boundary_for_other_user_is_rejected() {
+        let ctx = user_context_with_token_store();
+        let target_id = TypedUuid::new_v4();
+
+        let attacker = make_caller(
+            TypedUuid::new_v4(),
+            vec![VPermission::CreateApiKey(target_id)],
+        );
+        let token = make_key(target_id, Some(vec![VPermission::ManageApiUsersAll].into()));
+
+        let result = ctx
+            .create_api_user_token(&attacker, token, &target_id)
+            .await;
+
+        assert!(
+            result.is_err(),
+            "caller was able to grant a permission (ManageApiUsersAll) they do not hold",
+        );
+    }
+
+    /// The grant check applies even when creating a token for oneself: an
+    /// explicit boundary must still contain only permissions the caller can
+    /// grant. Only a *boundary-less* self-token is exempt from the grant check.
+    #[tokio::test]
+    async fn ungrantable_boundary_for_self_is_rejected() {
+        let ctx = user_context_with_token_store();
+        let self_id = TypedUuid::new_v4();
+
+        let caller = make_caller(self_id, vec![VPermission::CreateApiKey(self_id)]);
+        let token = make_key(self_id, Some(vec![VPermission::ManageApiUsersAll].into()));
+
+        let result = ctx.create_api_user_token(&caller, token, &self_id).await;
+
+        assert!(
+            result.is_err(),
+            "caller escalated by granting themselves ManageApiUsersAll (which they do not hold) \
+             via a self-token boundary",
+        );
+    }
+
+    /// `CreateApiKey` authority for the target is always required — even for a
+    /// boundary-less token for oneself.
+    #[tokio::test]
+    async fn missing_create_permission_is_rejected() {
+        let ctx = user_context_with_token_store();
+        let self_id = TypedUuid::new_v4();
+
+        // No CreateApiKey permission at all.
+        let caller = make_caller(self_id, vec![]);
+        let token = make_key(self_id, None);
+
+        let result = ctx.create_api_user_token(&caller, token, &self_id).await;
+
+        assert!(
+            result.is_err(),
+            "a token was created without CreateApiKey authority for the target",
+        );
+    }
+
+    /// A user may mint an unbounded (`BasePermissions::Full`) token for
+    /// themselves.
+    #[tokio::test]
+    async fn boundaryless_self_token_is_allowed() {
+        let ctx = user_context_with_token_store();
+        let self_id = TypedUuid::new_v4();
+
+        let caller = make_caller(self_id, vec![VPermission::CreateApiKey(self_id)]);
+        let token = make_key(self_id, None);
+
+        let key = ctx
+            .create_api_user_token(&caller, token, &self_id)
+            .await
+            .expect("a user should be able to create a boundary-less token for themselves");
+
+        assert_eq!(
+            key.permission_boundary, None,
+            "self-service token should be persisted boundary-less",
+        );
+    }
+
+    /// A caller may create a bounded token for another user as long as they can
+    /// grant every permission in the boundary.
+    #[tokio::test]
+    async fn grantable_boundary_for_other_user_is_allowed() {
+        let ctx = user_context_with_token_store();
+        let target_id = TypedUuid::new_v4();
+
+        let caller = make_caller(
+            TypedUuid::new_v4(),
+            vec![
+                VPermission::CreateApiKey(target_id),
+                VPermission::GetApiUser(target_id),
+            ],
+        );
+        let boundary: Permissions<VPermission> = vec![VPermission::GetApiUser(target_id)].into();
+        let token = make_key(target_id, Some(boundary.clone()));
+
+        let key = ctx
+            .create_api_user_token(&caller, token, &target_id)
+            .await
+            .expect("a bounded, grantable token for another user should be allowed");
+
+        assert_eq!(
+            key.permission_boundary,
+            Some(boundary),
+            "the persisted boundary should match the requested, grantable boundary",
+        );
     }
 }

@@ -281,6 +281,10 @@ impl From<UserContextError> for HttpError {
         tracing::info!(?error, "Failed to authenticate caller");
 
         match error {
+            UserContextError::BoundaryRequired => client_error(
+                ClientErrorStatusCode::BAD_REQUEST,
+                "permission boundary must be defined for a cross-user token",
+            ),
             UserContextError::FailedToAuthenticate => client_error(
                 ClientErrorStatusCode::UNAUTHORIZED,
                 "Failed to authenticate",
