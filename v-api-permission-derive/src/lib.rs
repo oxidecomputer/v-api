@@ -975,6 +975,9 @@ fn permission_storage_contract_tokens(
 ) -> proc_macro2::TokenStream {
     let mut branches = vec![];
     let mut sets = HashMap::new();
+    // Maps a drop target variant (by name) to the target variant identifier and
+    // the source patterns whose presence should cause the target to be restored.
+    let mut drop_targets: HashMap<String, (Ident, Vec<proc_macro2::TokenStream>)> = HashMap::new();
     let stock_field_names = [
         format_ident!("f0"),
         format_ident!("f1"),
@@ -1030,7 +1033,29 @@ fn permission_storage_contract_tokens(
                 });
             }
             ContractKind::Drop => {
-                // We are dropping the specific permission value
+                // The concrete permission value is derived from dynamic state via
+                // the inverse `expand` rule (e.g. `GetGroup(id)` is produced by
+                // expanding `GetGroupsJoined` against the actor's group
+                // membership). It must never be persisted as a static grant, so we
+                // discard it here rather than letting it fall through to the
+                // catch-all. To keep `contract` the exact inverse of `expand`, we
+                // record that the dynamic target variant should be restored.
+                let drop_pattern = if variant.fields.is_empty() {
+                    quote! {}
+                } else {
+                    quote! { (..) }
+                };
+                let source_pattern = quote! { #permission_type::#variant_ident #drop_pattern };
+                // Discard the concrete value so it does not fall through to the
+                // catch-all and get persisted as a static grant.
+                branches.push(quote! {
+                    #source_pattern => {}
+                });
+                drop_targets
+                    .entry(target_variant.to_string())
+                    .or_insert_with(|| (target_variant.clone(), Vec::new()))
+                    .1
+                    .push(source_pattern);
             }
             ContractKind::Extend => {
                 assert_eq!(
@@ -1081,6 +1106,21 @@ fn permission_storage_contract_tokens(
             None => quote! { #tokens },
         });
 
+    // After the loop, restore each dynamic target whose concrete form was
+    // dropped, unless it is already present in the contracted output.
+    let drops_add = drop_targets
+        .values()
+        .fold(quote! {}, |tokens, (target, patterns)| {
+            quote! {
+                #tokens
+                if collection.iter().any(|p| matches!(p, #(#patterns)|*))
+                    && !contracted.contains(&#permission_type::#target)
+                {
+                    contracted.push(#permission_type::#target);
+                }
+            }
+        });
+
     quote! {
         fn contract(collection: &v_model::Permissions<Self>) -> v_model::Permissions<Self> {
             let mut contracted = Vec::new();
@@ -1097,6 +1137,7 @@ fn permission_storage_contract_tokens(
             }
 
             #collections_add
+            #drops_add
 
             contracted.into()
         }
