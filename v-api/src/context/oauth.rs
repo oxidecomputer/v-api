@@ -120,12 +120,19 @@ where
         id: &TypedUuid<OAuthSecretId>,
         client_id: &TypedUuid<OAuthClientId>,
     ) -> ResourceResult<OAuthClientSecret, OAuthError> {
-        if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
-            OAuthClientSecretStore::delete(&*self.storage, id)
-                .await
-                .optional()
+        let client = self.get_oauth_client(caller, client_id).await?;
+
+        // Verify the secret belongs to the client
+        if client.secrets.into_iter().any(|s| s.id == *id) {
+            if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
+                OAuthClientSecretStore::delete(&*self.storage, id)
+                    .await
+                    .optional()
+            } else {
+                resource_restricted()
+            }
         } else {
-            resource_restricted()
+            Err(ResourceError::DoesNotExist)
         }
     }
 
@@ -162,12 +169,150 @@ where
         id: &TypedUuid<OAuthRedirectUriId>,
         client_id: &TypedUuid<OAuthClientId>,
     ) -> ResourceResult<OAuthClientRedirectUri, OAuthError> {
-        if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
-            OAuthClientRedirectUriStore::delete(&*self.storage, id)
-                .await
-                .optional()
+        let client = self.get_oauth_client(caller, client_id).await?;
+
+        // Verify the redirect_uris belongs to the client
+        if client.redirect_uris.into_iter().any(|r| r.id == *id) {
+            if caller.can(&VPermission::ManageOAuthClient(*client_id).into()) {
+                OAuthClientRedirectUriStore::delete(&*self.storage, id)
+                    .await
+                    .optional()
+            } else {
+                resource_restricted()
+            }
         } else {
-            resource_restricted()
+            Err(ResourceError::DoesNotExist)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, sync::Arc};
+
+    use chrono::Utc;
+    use newtype_uuid::TypedUuid;
+    use v_model::{
+        OAuthClient, OAuthClientRedirectUri, OAuthClientSecret,
+        permissions::Caller,
+        storage::{
+            MockOAuthClientRedirectUriStore, MockOAuthClientSecretStore, MockOAuthClientStore,
+        },
+    };
+
+    use crate::{context::test_mocks::MockStorage, permissions::VPermission};
+
+    use super::OAuthContext;
+
+    #[tokio::test]
+    async fn cannot_delete_secret_of_unauthorized_client() {
+        let attacker_client_id = TypedUuid::new_v4();
+        let victim_client_id = TypedUuid::new_v4();
+        let victim_secret_id = TypedUuid::new_v4();
+
+        // Faithfully model the Postgres store, which soft-deletes purely by
+        // secret id and returns the deleted record (owned by the victim).
+        let mut secret_store = MockOAuthClientSecretStore::new();
+        secret_store.expect_delete().returning(move |id| {
+            Ok(Some(OAuthClientSecret {
+                id: *id,
+                oauth_client_id: victim_client_id,
+                secret_signature: "victim-secret".to_string(),
+                created_at: Utc::now(),
+                deleted_at: Some(Utc::now()),
+            }))
+        });
+
+        // Defensive: if a fix verifies ownership by fetching the authorized
+        // client, that client legitimately does not contain the victim's secret.
+        let mut client_store = MockOAuthClientStore::new();
+        client_store.expect_get().returning(move |id, _| {
+            Ok(Some(OAuthClient {
+                id: *id,
+                secrets: vec![],
+                redirect_uris: vec![],
+                created_at: Utc::now(),
+                deleted_at: None,
+            }))
+        });
+
+        let mut storage = MockStorage::new();
+        storage.oauth_client_secret_store = Some(Arc::new(secret_store));
+        storage.oauth_client_store = Some(Arc::new(client_store));
+        let ctx = OAuthContext::new(Arc::new(storage));
+
+        // Attacker only manages their own client C.
+        let attacker = Caller {
+            id: TypedUuid::new_v4(),
+            permissions: vec![VPermission::ManageOAuthClient(attacker_client_id)].into(),
+            extensions: HashMap::default(),
+        };
+
+        // They target the victim's secret while authorizing against their own client.
+        let result = ctx
+            .delete_oauth_secret(&attacker, &victim_secret_id, &attacker_client_id)
+            .await;
+
+        if let Ok(deleted) = result {
+            assert_eq!(
+                deleted.oauth_client_id, attacker_client_id,
+                "IDOR: deleted secret {:?} owned by client {:?} while only authorized to manage \
+                 client {:?}",
+                deleted.id, deleted.oauth_client_id, attacker_client_id,
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cannot_delete_redirect_uri_of_unauthorized_client() {
+        let attacker_client_id = TypedUuid::new_v4();
+        let victim_client_id = TypedUuid::new_v4();
+        let victim_redirect_uri_id = TypedUuid::new_v4();
+
+        let mut redirect_store = MockOAuthClientRedirectUriStore::new();
+        redirect_store.expect_delete().returning(move |id| {
+            Ok(Some(OAuthClientRedirectUri {
+                id: *id,
+                oauth_client_id: victim_client_id,
+                redirect_uri: "https://victim.example.com/callback".to_string(),
+                created_at: Utc::now(),
+                deleted_at: Some(Utc::now()),
+            }))
+        });
+
+        let mut client_store = MockOAuthClientStore::new();
+        client_store.expect_get().returning(move |id, _| {
+            Ok(Some(OAuthClient {
+                id: *id,
+                secrets: vec![],
+                redirect_uris: vec![],
+                created_at: Utc::now(),
+                deleted_at: None,
+            }))
+        });
+
+        let mut storage = MockStorage::new();
+        storage.oauth_client_redirect_uri_store = Some(Arc::new(redirect_store));
+        storage.oauth_client_store = Some(Arc::new(client_store));
+        let ctx = OAuthContext::new(Arc::new(storage));
+
+        let attacker = Caller {
+            id: TypedUuid::new_v4(),
+            permissions: vec![VPermission::ManageOAuthClient(attacker_client_id)].into(),
+            extensions: HashMap::default(),
+        };
+
+        let result = ctx
+            .delete_oauth_redirect_uri(&attacker, &victim_redirect_uri_id, &attacker_client_id)
+            .await;
+
+        if let Ok(deleted) = result {
+            assert_eq!(
+                deleted.oauth_client_id, attacker_client_id,
+                "IDOR: deleted redirect URI {:?} owned by client {:?} while only authorized to \
+                 manage client {:?}",
+                deleted.id, deleted.oauth_client_id, attacker_client_id,
+            );
         }
     }
 }
