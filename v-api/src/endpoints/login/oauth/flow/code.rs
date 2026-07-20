@@ -600,7 +600,7 @@ pub struct OAuthAuthzCodeIdpToken {
     pub token: String,
 }
 
-#[instrument(skip(rqctx), err(Debug))]
+#[instrument(skip(rqctx, body), err(Debug))]
 pub async fn authz_code_exchange_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     query: Query<OAuthAuthzCodeExchangeQuery>,
@@ -654,11 +654,7 @@ where
     // We of course deny underspecifying credentials, but we also want to disallow over specifying
     // them. For example, if the client provides both basic auth and a client id/secret in the
     // request body, we should reject the request.
-    tracing::debug!(
-        ?basic_credentials,
-        ?body_credentials,
-        "Extracted credentials from request"
-    );
+    tracing::debug!("Extracted credentials from request");
     let (client_id, client_secret) = match (basic_credentials, body_credentials) {
         (Some(_), (Some(_), _)) => Err(bad_request(
             "Cannot provide both basic auth and client credentials",
