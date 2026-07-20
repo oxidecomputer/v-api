@@ -9,6 +9,7 @@ use dropshot::{
 };
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use std::ops::Add;
 use tracing::instrument;
@@ -27,6 +28,7 @@ use crate::{
     endpoints::login::{ExternalUserId, UserInfo},
     permissions::VAppPermission,
     response::{ResourceError, bad_request, internal_error, to_internal_error},
+    secrets::OpenApiSecretString,
 };
 
 pub mod client;
@@ -41,7 +43,7 @@ pub struct MagicLinkPath {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct MagicLinkSendRequest {
     medium: MagicLinkMedium,
-    secret: String,
+    secret: OpenApiSecretString,
     recipient: String,
     redirect_uri: Url,
     expires_in: i64,
@@ -53,7 +55,7 @@ pub struct MagicLinkSendResponse {
     attempt_id: TypedUuid<MagicLinkAttemptId>,
 }
 
-#[instrument(skip(rqctx), err(Debug))]
+#[instrument(skip(rqctx, body), err(Debug))]
 pub async fn magic_link_send_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<MagicLinkPath>,
@@ -87,7 +89,7 @@ async fn magic_link_send_op_inner<T>(
     ctx: &VContext<T>,
     medium: MagicLinkMedium,
     channel: &str,
-    secret: String,
+    secret: OpenApiSecretString,
     recipient: String,
     redirect_uri: Url,
     expires_in: i64,
@@ -106,7 +108,7 @@ where
     }
 
     // Any caller may create a magic link attempt by supplying the clients secret
-    let key = RawKey::try_from(secret.as_str()).map_err(|err| {
+    let key = RawKey::try_from(secret.0.expose_secret()).map_err(|err| {
         tracing::info!(?err, "Request supplied malformed secret");
         bad_request("Malformed secret".to_string())
     })?;
@@ -168,7 +170,7 @@ impl From<MagicLinkSendError> for HttpError {
 pub struct MagicLinkExchangeRequest {
     attempt_id: TypedUuid<MagicLinkAttemptId>,
     recipient: String,
-    secret: String,
+    secret: OpenApiSecretString,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -178,7 +180,7 @@ pub struct MagicLinkExchangeResponse {
     expires_in: i64,
 }
 
-#[instrument(skip(rqctx), err(Debug))]
+#[instrument(skip(rqctx, body), err(Debug))]
 pub async fn magic_link_exchange_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     body: TypedBody<MagicLinkExchangeRequest>,
@@ -190,7 +192,12 @@ where
     let body = body.into_inner();
 
     // Any caller may consume a magic link by supplying the attempt secret
-    let key: RawKey = body.secret.as_str().try_into().map_err(to_internal_error)?;
+    let key: RawKey = body
+        .secret
+        .0
+        .expose_secret()
+        .try_into()
+        .map_err(to_internal_error)?;
     let signed_key = key.sign(ctx.signer()).await.unwrap();
 
     let recipient_signature = ctx
