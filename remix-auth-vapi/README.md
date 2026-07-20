@@ -1,21 +1,14 @@
 # @oxide/remix-auth-vapi
 
 Generic [remix-auth](https://github.com/sergiodxa/remix-auth) strategies for any
-[v-api](https://github.com/oxidecomputer/v-api) based service (Turnstile, RFD API,
-mfg-support, ...).
+[v-api](https://github.com/oxidecomputer/v-api) based service.
 
-Unlike the per-service packages this replaces (`@oxide/remix-auth-turnstile`,
-`@oxide/remix-auth-rfd`, `@oxide/remix-auth-mfg-support`), this package has **no
-dependency on a generated per-service TypeScript SDK**. It talks directly to the
-handful of HTTP endpoints that every v-api service exposes identically:
+Talks to the HTTP endpoints every v-api service exposes:
 
 - `POST /login/magic/{channel}/send`
 - `POST /login/magic/{channel}/exchange`
 - `GET /login/oauth/{provider}/code/authorize` and `POST .../code/token` (via `remix-auth-oauth2`)
 - `GET /self`
-
-Consumers still need their service's generated SDK for everything else (fetching
-domain data), but the auth layer no longer requires it.
 
 ## Usage
 
