@@ -197,12 +197,19 @@ where
         id: &TypedUuid<MagicLinkSecretId>,
         client_id: &TypedUuid<MagicLinkId>,
     ) -> ResourceResult<MagicLinkSecret, StoreError> {
-        if caller.can(&VPermission::ManageMagicLinkClient(*client_id).into()) {
-            MagicLinkSecretStore::delete(&*self.storage, id)
-                .await
-                .optional()
+        let client = self.get_magic_link(caller, client_id).await?;
+
+        // Verify the secret belongs to the client
+        if client.secrets.into_iter().any(|s| s.id == *id) {
+            if caller.can(&VPermission::ManageMagicLinkClient(*client_id).into()) {
+                MagicLinkSecretStore::delete(&*self.storage, id)
+                    .await
+                    .optional()
+            } else {
+                resource_restricted()
+            }
         } else {
-            resource_restricted()
+            Err(ResourceError::DoesNotExist)
         }
     }
 
@@ -235,12 +242,19 @@ where
         id: &TypedUuid<MagicLinkRedirectUriId>,
         client_id: &TypedUuid<MagicLinkId>,
     ) -> ResourceResult<MagicLinkRedirectUri, StoreError> {
-        if caller.can(&VPermission::ManageMagicLinkClient(*client_id).into()) {
-            MagicLinkRedirectUriStore::delete(&*self.storage, id)
-                .await
-                .optional()
+        let client = self.get_magic_link(caller, client_id).await?;
+
+        // Verify the redirect_uris belongs to the client
+        if client.redirect_uris.into_iter().any(|r| r.id == *id) {
+            if caller.can(&VPermission::ManageMagicLinkClient(*client_id).into()) {
+                MagicLinkRedirectUriStore::delete(&*self.storage, id)
+                    .await
+                    .optional()
+            } else {
+                resource_restricted()
+            }
         } else {
-            resource_restricted()
+            Err(ResourceError::DoesNotExist)
         }
     }
 
@@ -423,6 +437,7 @@ mod tests {
     use chrono::{Duration, Utc};
     use newtype_uuid::TypedUuid;
     use std::{
+        collections::HashMap,
         ops::Add,
         sync::{
             Arc, RwLock,
@@ -432,9 +447,13 @@ mod tests {
     use url::Url;
     use uuid::Uuid;
     use v_model::{
-        MagicLinkAttempt,
+        MagicLink, MagicLinkAttempt, MagicLinkId, MagicLinkRedirectUri, MagicLinkSecret,
+        permissions::Caller,
         schema_ext::{MagicLinkAttemptState, MagicLinkMedium},
-        storage::MockMagicLinkAttemptStore,
+        storage::{
+            MockMagicLinkAttemptStore, MockMagicLinkRedirectUriStore, MockMagicLinkSecretStore,
+            MockMagicLinkStore,
+        },
     };
 
     use super::{MagicLinkContext, MagicLinkMessage, MagicLinkTarget};
@@ -741,5 +760,223 @@ mod tests {
             MagicLinkAttemptState::Complete,
             transitioned_attempt.attempt_state
         );
+    }
+
+    fn caller_for_client(client_id: TypedUuid<MagicLinkId>) -> Caller<VPermission> {
+        Caller {
+            id: TypedUuid::new_v4(),
+            permissions: vec![
+                VPermission::GetMagicLinkClient(client_id),
+                VPermission::ManageMagicLinkClient(client_id),
+            ]
+            .into(),
+            extensions: HashMap::default(),
+        }
+    }
+
+    /// An attacker managing their own client `C` must NOT be able
+    /// to delete a secret belonging to a different client `V`, even though they
+    /// authorize the request against `C` and know `V`'s secret id.
+    #[tokio::test]
+    async fn cannot_delete_secret_of_unauthorized_client() {
+        let attacker_client_id = TypedUuid::new_v4();
+        let victim_client_id = TypedUuid::new_v4();
+        let victim_secret_id = TypedUuid::new_v4();
+
+        // The attacker's own client owns no secrets.
+        let mut client_store = MockMagicLinkStore::new();
+        client_store.expect_get().returning(move |id, _| {
+            Ok(Some(MagicLink {
+                id: *id,
+                secrets: vec![],
+                redirect_uris: vec![],
+                created_at: Utc::now(),
+                deleted_at: None,
+            }))
+        });
+
+        // Faithfully model the Postgres store, which would soft-delete purely
+        // by secret id and return the victim's record if reached.
+        let mut secret_store = MockMagicLinkSecretStore::new();
+        secret_store.expect_delete().returning(move |id| {
+            Ok(Some(MagicLinkSecret {
+                id: *id,
+                magic_link_client_id: victim_client_id,
+                secret_signature: "victim-secret".to_string(),
+                created_at: Utc::now(),
+                deleted_at: Some(Utc::now()),
+            }))
+        });
+
+        let mut storage = MockStorage::new();
+        storage.magic_link_store = Some(Arc::new(client_store));
+        storage.magic_link_secret_store = Some(Arc::new(secret_store));
+        let ctx = mock_mlink_context(Arc::new(storage));
+
+        let attacker = caller_for_client(attacker_client_id);
+        let result = ctx
+            .delete_magic_link_secret(&attacker, &victim_secret_id, &attacker_client_id)
+            .await;
+
+        if let Ok(deleted) = result {
+            assert_eq!(
+                deleted.magic_link_client_id, attacker_client_id,
+                "IDOR: deleted secret {:?} owned by client {:?} while only authorized to manage \
+                 client {:?}",
+                deleted.id, deleted.magic_link_client_id, attacker_client_id,
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cannot_delete_redirect_uri_of_unauthorized_client() {
+        let attacker_client_id = TypedUuid::new_v4();
+        let victim_client_id = TypedUuid::new_v4();
+        let victim_redirect_uri_id = TypedUuid::new_v4();
+
+        let mut client_store = MockMagicLinkStore::new();
+        client_store.expect_get().returning(move |id, _| {
+            Ok(Some(MagicLink {
+                id: *id,
+                secrets: vec![],
+                redirect_uris: vec![],
+                created_at: Utc::now(),
+                deleted_at: None,
+            }))
+        });
+
+        let mut redirect_store = MockMagicLinkRedirectUriStore::new();
+        redirect_store.expect_delete().returning(move |id| {
+            Ok(Some(MagicLinkRedirectUri {
+                id: *id,
+                magic_link_client_id: victim_client_id,
+                redirect_uri: "https://victim.example.com/callback".to_string(),
+                created_at: Utc::now(),
+                deleted_at: Some(Utc::now()),
+            }))
+        });
+
+        let mut storage = MockStorage::new();
+        storage.magic_link_store = Some(Arc::new(client_store));
+        storage.magic_link_redirect_store = Some(Arc::new(redirect_store));
+        let ctx = mock_mlink_context(Arc::new(storage));
+
+        let attacker = caller_for_client(attacker_client_id);
+        let result = ctx
+            .delete_magic_link_redirect_uri(&attacker, &victim_redirect_uri_id, &attacker_client_id)
+            .await;
+
+        if let Ok(deleted) = result {
+            assert_eq!(
+                deleted.magic_link_client_id, attacker_client_id,
+                "IDOR: deleted redirect URI {:?} owned by client {:?} while only authorized to \
+                 manage client {:?}",
+                deleted.id, deleted.magic_link_client_id, attacker_client_id,
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn can_delete_own_secret() {
+        let client_id = TypedUuid::new_v4();
+        let secret_id = TypedUuid::new_v4();
+
+        let owned_secret = MagicLinkSecret {
+            id: secret_id,
+            magic_link_client_id: client_id,
+            secret_signature: "own-secret".to_string(),
+            created_at: Utc::now(),
+            deleted_at: None,
+        };
+
+        let client = MagicLink {
+            id: client_id,
+            secrets: vec![owned_secret.clone()],
+            redirect_uris: vec![],
+            created_at: Utc::now(),
+            deleted_at: None,
+        };
+
+        let mut client_store = MockMagicLinkStore::new();
+        client_store
+            .expect_get()
+            .returning(move |_, _| Ok(Some(client.clone())));
+
+        let mut secret_store = MockMagicLinkSecretStore::new();
+        secret_store.expect_delete().returning(move |id| {
+            Ok(Some(MagicLinkSecret {
+                id: *id,
+                magic_link_client_id: client_id,
+                secret_signature: "own-secret".to_string(),
+                created_at: Utc::now(),
+                deleted_at: Some(Utc::now()),
+            }))
+        });
+
+        let mut storage = MockStorage::new();
+        storage.magic_link_store = Some(Arc::new(client_store));
+        storage.magic_link_secret_store = Some(Arc::new(secret_store));
+        let ctx = mock_mlink_context(Arc::new(storage));
+
+        let caller = caller_for_client(client_id);
+        let deleted = ctx
+            .delete_magic_link_secret(&caller, &secret_id, &client_id)
+            .await
+            .expect("a client manager should be able to delete their own secret");
+
+        assert_eq!(deleted.id, secret_id);
+        assert_eq!(deleted.magic_link_client_id, client_id);
+    }
+
+    #[tokio::test]
+    async fn can_delete_own_redirect_uri() {
+        let client_id = TypedUuid::new_v4();
+        let redirect_uri_id = TypedUuid::new_v4();
+
+        let owned_redirect = MagicLinkRedirectUri {
+            id: redirect_uri_id,
+            magic_link_client_id: client_id,
+            redirect_uri: "https://client.example.com/callback".to_string(),
+            created_at: Utc::now(),
+            deleted_at: None,
+        };
+
+        let client = MagicLink {
+            id: client_id,
+            secrets: vec![],
+            redirect_uris: vec![owned_redirect.clone()],
+            created_at: Utc::now(),
+            deleted_at: None,
+        };
+
+        let mut client_store = MockMagicLinkStore::new();
+        client_store
+            .expect_get()
+            .returning(move |_, _| Ok(Some(client.clone())));
+
+        let mut redirect_store = MockMagicLinkRedirectUriStore::new();
+        redirect_store.expect_delete().returning(move |id| {
+            Ok(Some(MagicLinkRedirectUri {
+                id: *id,
+                magic_link_client_id: client_id,
+                redirect_uri: "https://client.example.com/callback".to_string(),
+                created_at: Utc::now(),
+                deleted_at: Some(Utc::now()),
+            }))
+        });
+
+        let mut storage = MockStorage::new();
+        storage.magic_link_store = Some(Arc::new(client_store));
+        storage.magic_link_redirect_store = Some(Arc::new(redirect_store));
+        let ctx = mock_mlink_context(Arc::new(storage));
+
+        let caller = caller_for_client(client_id);
+        let deleted = ctx
+            .delete_magic_link_redirect_uri(&caller, &redirect_uri_id, &client_id)
+            .await
+            .expect("a client manager should be able to delete their own redirect URI");
+
+        assert_eq!(deleted.id, redirect_uri_id);
+        assert_eq!(deleted.magic_link_client_id, client_id);
     }
 }
