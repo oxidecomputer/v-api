@@ -51,6 +51,12 @@ use crate::{
 static LOGIN_ATTEMPT_COOKIE: &str = "__v_login";
 static LOGIN_ATTEMPT_COOKIE_PATH: &str = "/login/oauth/";
 
+/// All paths under which a login attempt cookie may exist and therefore must be
+/// destroyed when clearing it. The scoped path matches
+/// [`build_login_attempt_cookie`]; the root path is included so that stale
+/// cookies issued under previous (unscoped) cookie settings are also cleared.
+static LOGIN_ATTEMPT_COOKIE_PATHS: [&str; 2] = [LOGIN_ATTEMPT_COOKIE_PATH, "/"];
+
 /// Build the login attempt cookie with consistent attributes.
 /// The `Path` is scoped to the OAuth login endpoints so the cookie is not
 /// sent to unrelated paths on the same domain.
@@ -66,6 +72,33 @@ fn build_login_attempt_cookie<'a>(
     cookie.set_secure(public_url.starts_with("https"));
     cookie.set_max_age(cookie::time::Duration::seconds(max_age_secs));
     cookie
+}
+
+/// Build a cookie that clears the login attempt cookie at the given `path`.
+/// The attributes mirror [`build_login_attempt_cookie`] so that browsers
+/// reliably match and remove the previously set cookie.
+fn build_login_attempt_clear_cookie(path: &str, public_url: &str) -> Cookie<'static> {
+    let mut cookie = Cookie::new(LOGIN_ATTEMPT_COOKIE, String::new());
+    cookie.set_path(path.to_owned());
+    cookie.set_http_only(true);
+    cookie.set_same_site(SameSite::Lax);
+    cookie.set_secure(public_url.starts_with("https"));
+    cookie.set_max_age(cookie::time::Duration::seconds(0));
+    cookie
+}
+
+/// Build the `Set-Cookie` header values that destroy the login attempt cookie
+/// at every path it may have been issued under. This is used to tear down the
+/// attempt cookie on both successful and failed callbacks, and guards against
+/// conflicts caused by stale cookies left over from previous cookie settings.
+fn login_attempt_clear_cookies(public_url: &str) -> Result<Vec<HeaderValue>, HttpError> {
+    LOGIN_ATTEMPT_COOKIE_PATHS
+        .iter()
+        .map(|path| {
+            let cookie = build_login_attempt_clear_cookie(path, public_url);
+            HeaderValue::from_str(&cookie.to_string()).map_err(to_internal_error)
+        })
+        .collect()
 }
 
 // RFC 6749 §5.2 shaped error
@@ -383,9 +416,9 @@ fn verify_csrf(
     request: &RequestInfo,
     query: &OAuthAuthzCodeReturnQuery,
 ) -> Result<TypedUuid<LoginAttemptId>, HttpError> {
-    // If we are missing the expected state parameter then we can not proceed at all with verifying
-    // this callback request. We also do not have a redirect uri to send the user to so we instead
-    // report unauthorized
+    // If we are missing the expected state parameter then we can not proceed at
+    // all with verifying this callback request. We also do not have a redirect
+    // uri to send the user to so we instead report unauthorized
     let attempt_id = query
         .state
         .as_ref()
@@ -399,33 +432,44 @@ fn verify_csrf(
             bad_request("Invalid or missing OAuth state parameter")
         })?;
 
-    // The client must present the attempt cookie at a minimum. Without it we are unable to lookup a
-    // login attempt to match against. Without the cookie to verify the state parameter we can not
-    // determine a redirect uri so we instead report a bad request
-    let attempt_cookie = request
-        .cookie(LOGIN_ATTEMPT_COOKIE)
-        .ok_or_else(|| {
-            tracing::warn!("OAuth callback is missing a login state cookie");
-            bad_request("Invalid or missing OAuth state parameter")
-        })?
-        .value()
-        .parse()
-        .map_err(|err| {
-            tracing::warn!(?err, "Failed to parse state cookie");
-            bad_request("Invalid or missing OAuth state parameter")
-        })?;
+    // The client must present the attempt cookie at a minimum. Without it we
+    // are unable to lookup a login attempt to match against. Without the cookie
+    // to verify the state parameter we can not determine a redirect uri so we
+    // instead report a bad request.
+    //
+    // A client may present more than one cookie with this name if it is holding
+    // stale cookies issued under previous cookie settings. Because the wire
+    // format for request cookies only carries the name and value (never the
+    // Path/Secure/etc. attributes), we cannot distinguish the canonical cookie
+    // by its attributes here. Instead we accept the request only if one of the
+    // presented cookies carries the value we issued for this attempt via
+    // build_login_attempt_cookie (i.e. its value matches the CSRF state); any
+    // stale cookies with mismatched values are ignored.
+    let attempt_cookies = request.cookies(LOGIN_ATTEMPT_COOKIE);
+    if attempt_cookies.is_empty() {
+        tracing::warn!("OAuth callback is missing a login state cookie");
+        return Err(bad_request("Invalid or missing OAuth state parameter"));
+    }
 
-    // Verify that the attempt_id returned from the state matches the expected client value. If they
-    // do not match we can not lookup a redirect uri so we instead return a bad request
-    if attempt_id != attempt_cookie {
+    let has_matching_cookie = attempt_cookies.iter().any(|cookie| {
+        cookie
+            .value()
+            .parse::<TypedUuid<LoginAttemptId>>()
+            .map(|value| value == attempt_id)
+            .unwrap_or(false)
+    });
+
+    // Verify that the attempt_id returned from the state matches one of the
+    // presented cookie values. If none match we can not lookup a redirect uri
+    // so we instead return a bad request.
+    if has_matching_cookie {
+        Ok(attempt_id)
+    } else {
         tracing::warn!(
             ?attempt_id,
-            ?attempt_cookie,
-            "OAuth state does not match expected cookie value"
+            "OAuth state does not match any presented login attempt cookie"
         );
         Err(bad_request("Invalid or missing OAuth state parameter"))
-    } else {
-        Ok(attempt_id)
     }
 }
 
@@ -448,26 +492,46 @@ where
     let ctx = rqctx.v_ctx();
     let path = path.into_inner();
     let query = query.into_inner();
-    let provider = ctx
-        .get_oauth_provider(&path.provider)
-        .await
-        .map_err(ApiError::OAuth)?;
 
-    tracing::debug!(provider = ?provider.name(), "Acquired OAuth provider for authz code exchange");
+    // Build the Set-Cookie headers that destroy every login attempt cookie.
+    // These are attached to both successful and failed responses so that a
+    // completed or failed login never leaves a lingering (or stale) attempt
+    // cookie behind.
+    let clear_cookies = login_attempt_clear_cookies(ctx.public_url())?;
 
-    // Verify and extract the attempt id before performing any work
-    let attempt_id = verify_csrf(&rqctx.request, &query)?;
+    // Run the callback flow. On any failure we still want to destroy the login
+    // attempt cookies, so the clearing headers are attached to the error in the
+    // match below.
+    let result = async {
+        let provider = ctx
+            .get_oauth_provider(&path.provider)
+            .await
+            .map_err(ApiError::OAuth)?;
 
-    // Clear the login attempt cookie
-    let cookie = build_login_attempt_cookie("", ctx.public_url(), 0);
-    let login_cookie = HeaderValue::from_str(&cookie.to_string()).map_err(to_internal_error)?;
+        tracing::debug!(provider = ?provider.name(), "Acquired OAuth provider for authz code exchange");
 
-    let mut redirect = http_response_temporary_redirect(
-        authz_code_callback_op_inner(ctx, &attempt_id, query.code, query.error).await?,
-    )?;
-    redirect.headers_mut().append(SET_COOKIE, login_cookie);
+        // Verify and extract the attempt id before performing any work
+        let attempt_id = verify_csrf(&rqctx.request, &query)?;
+        let location =
+            authz_code_callback_op_inner(ctx, &attempt_id, query.code, query.error).await?;
+        http_response_temporary_redirect(location)
+    }
+    .await;
 
-    Ok(redirect)
+    match result {
+        Ok(mut redirect) => {
+            for cookie in &clear_cookies {
+                redirect.headers_mut().append(SET_COOKIE, cookie.clone());
+            }
+            Ok(redirect)
+        }
+        Err(mut err) => {
+            for cookie in &clear_cookies {
+                err.headers_mut().append(SET_COOKIE, cookie.clone());
+            }
+            Err(err)
+        }
+    }
 }
 
 pub async fn authz_code_callback_op_inner<T>(
@@ -479,8 +543,8 @@ pub async fn authz_code_callback_op_inner<T>(
 where
     T: VAppPermission + PermissionStorage,
 {
-    // We have now verified the attempt id and can use it to look up the rest of the login attempt
-    // material to try and complete the flow
+    // We have now verified the attempt id and can use it to look up the rest of
+    // the login attempt material to try and complete the flow
     let mut attempt = ctx
         .login
         .get_login_attempt(attempt_id)
@@ -2139,6 +2203,81 @@ mod tests {
             clear_cookie.max_age(),
             Some(cookie::time::Duration::seconds(0))
         );
+    }
+
+    #[test]
+    fn test_login_attempt_clear_cookie_matches_set_properties() {
+        // The clearing cookie must carry the same attributes as the set cookie
+        // (aside from an empty value and a zero Max-Age) so that browsers match
+        // and remove it.
+        let set_cookie =
+            super::build_login_attempt_cookie("test-attempt-id", "https://example.com", 600);
+        let clear_cookie = super::build_login_attempt_clear_cookie(
+            super::LOGIN_ATTEMPT_COOKIE_PATH,
+            "https://example.com",
+        );
+
+        assert_eq!(set_cookie.path(), clear_cookie.path());
+        assert_eq!(set_cookie.http_only(), clear_cookie.http_only());
+        assert_eq!(set_cookie.same_site(), clear_cookie.same_site());
+        assert_eq!(set_cookie.secure(), clear_cookie.secure());
+        assert_eq!(clear_cookie.value(), "");
+        assert_eq!(
+            clear_cookie.max_age(),
+            Some(cookie::time::Duration::seconds(0))
+        );
+    }
+
+    #[test]
+    fn test_login_attempt_clear_cookies_cover_all_paths() {
+        // Every path a login attempt cookie may have been issued under must be
+        // cleared so stale cookies from previous settings are destroyed.
+        let headers = super::login_attempt_clear_cookies("https://example.com").unwrap();
+        assert_eq!(headers.len(), super::LOGIN_ATTEMPT_COOKIE_PATHS.len());
+
+        let rendered: Vec<String> = headers
+            .iter()
+            .map(|value| value.to_str().unwrap().to_string())
+            .collect();
+
+        for path in super::LOGIN_ATTEMPT_COOKIE_PATHS {
+            assert!(
+                rendered.iter().any(|header| {
+                    header.contains(&format!("Path={}", path)) && header.contains("Max-Age=0")
+                }),
+                "expected a clearing cookie for path {path}, got {rendered:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_csrf_ignores_stale_cookies() {
+        // A client may present a stale login attempt cookie alongside the
+        // current one. The CSRF check must honour the cookie whose value
+        // matches the state and ignore the stale cookie, regardless of order.
+        let id = TypedUuid::new_v4();
+        let stale = Uuid::new_v4();
+
+        let query = OAuthAuthzCodeReturnQuery {
+            state: Some(id.to_string()),
+            code: None,
+            error: None,
+        };
+
+        for header in [
+            format!("{LOGIN_ATTEMPT_COOKIE}={stale}; {LOGIN_ATTEMPT_COOKIE}={id}"),
+            format!("{LOGIN_ATTEMPT_COOKIE}={id}; {LOGIN_ATTEMPT_COOKIE}={stale}"),
+        ] {
+            let mut rq = hyper::Request::new(Empty::<()>::new());
+            rq.headers_mut()
+                .insert(COOKIE, HeaderValue::from_str(&header).unwrap());
+            let request = RequestInfo::new(
+                &rq,
+                std::net::SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 8888)),
+            );
+
+            assert_eq!(id, verify_csrf(&request, &query).unwrap());
+        }
     }
 
     #[test]
