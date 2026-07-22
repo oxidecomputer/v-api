@@ -55,7 +55,12 @@ static LOGIN_ATTEMPT_COOKIE_PATH: &str = "/login/oauth/";
 /// destroyed when clearing it. The scoped path matches
 /// [`build_login_attempt_cookie`]; the root path is included so that stale
 /// cookies issued under previous (unscoped) cookie settings are also cleared.
-static LOGIN_ATTEMPT_COOKIE_PATHS: [&str; 2] = [LOGIN_ATTEMPT_COOKIE_PATH, "/"];
+static LOGIN_ATTEMPT_COOKIE_PATHS: [&str; 4] = [
+    LOGIN_ATTEMPT_COOKIE_PATH,
+    "/",
+    "/login/oauth/github/code",
+    "/login/oauth/google/code",
+];
 
 /// Build the login attempt cookie with consistent attributes.
 /// The `Path` is scoped to the OAuth login endpoints so the cookie is not
