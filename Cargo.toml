@@ -45,6 +45,7 @@ partial-struct = { git = "https://github.com/oxidecomputer/partial-struct" }
 proc-macro2 = "1"
 progenitor-client = "0.14.0"
 quote = "1"
+ratatui = "0.30"
 rand = "0.10.1"
 rand_core = "0.10.1"
 regex = "1.12.4"

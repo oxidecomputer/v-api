@@ -864,10 +864,12 @@ mod macros {
     #[macro_export]
     macro_rules! v_saga_endpoints {
         ($context_type:ident, $permission_type:ident) => {
+            use dropshot::{EmptyScanParams, PaginationParams, ResultsPage};
             use v_api::endpoints::saga::{
                 list_sagas_op,
                 view_saga_op,
                 SagaDetailView,
+                SagaPageSelector,
                 SagaPath,
             };
             use v_model::saga::view::SagaView;
@@ -879,8 +881,9 @@ mod macros {
             }]
             pub async fn list_sagas(
                 rqctx: RequestContext<$context_type>,
-            ) -> Result<HttpResponseOk<Vec<SagaView>>, HttpError> {
-                unimplemented!()
+                query: Query<PaginationParams<EmptyScanParams, SagaPageSelector>>,
+            ) -> Result<HttpResponseOk<ResultsPage<SagaView>>, HttpError> {
+                list_sagas_op(&rqctx, query.into_inner()).await
             }
 
             /// Get detailed information about a specific saga including its events
@@ -892,7 +895,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<SagaPath>,
             ) -> Result<HttpResponseOk<SagaDetailView>, HttpError> {
-                unimplemented!()
+                view_saga_op(&rqctx, path).await
             }
         }
     }
