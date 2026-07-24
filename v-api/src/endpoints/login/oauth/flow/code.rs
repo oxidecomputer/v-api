@@ -100,7 +100,7 @@ fn build_login_attempt_clear_cookie(
 fn login_attempt_clear_cookies() -> Result<Vec<HeaderValue>, HttpError> {
     LOGIN_ATTEMPT_COOKIE_CONFIGS
         .iter()
-        .map(|config| {
+        .flat_map(|config| {
             [true, false]
                 .iter()
                 .map(|secure| {
@@ -109,7 +109,6 @@ fn login_attempt_clear_cookies() -> Result<Vec<HeaderValue>, HttpError> {
                 })
                 .collect::<Vec<_>>()
         })
-        .flatten()
         .collect()
 }
 
