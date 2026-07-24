@@ -12,7 +12,7 @@ resolver = "2"
 [workspace.package]
 publish = true
 edition = "2024"
-version = "0.4.7"
+version = "0.4.8"
 
 [workspace.dependencies]
 anyhow = "1.0"
