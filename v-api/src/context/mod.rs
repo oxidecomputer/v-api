@@ -381,6 +381,10 @@ where
         self
     }
 
+    pub fn https(&self) -> bool {
+        self.public_url.starts_with("https://")
+    }
+
     pub fn builtin_unauthenticated_caller(&self) -> Caller<T> {
         self.auth.builtin_unauthenticated_caller()
     }
