@@ -15,7 +15,7 @@ use std::{collections::BTreeSet, error::Error as StdError, fmt::Debug};
 use tap::TapFallible;
 use thiserror::Error;
 use v_model::{
-    AccessGroupId, Mapper,
+    AccessGroup, AccessGroupId, Mapper,
     permissions::{Caller, Permissions},
     storage::StoreError,
 };
@@ -64,6 +64,33 @@ pub trait MappingEngine<T>: Send + Sync + 'static {
     fn create_mapping(&self, value: Mapper) -> Result<Box<dyn MapperRule<T>>, MappingEngineError>;
     /// Validates whether the provided data represents a known mapping rule
     fn validate_mapping_data(&self, value: &Value) -> bool;
+}
+
+/// Resolve a rule's configured group names against the known groups. Names are the only
+/// linkage between mapper rules and access groups; a configured name that resolves to
+/// nothing (a typo, or a group id pasted in place of a name) is silently dropped when
+/// the mapper fires, so any unresolved names are logged here.
+pub(crate) fn resolve_mapped_groups<T>(
+    configured: &[String],
+    known: &[AccessGroup<T>],
+) -> BTreeSet<TypedUuid<AccessGroupId>> {
+    let unresolved = configured
+        .iter()
+        .filter(|name| !known.iter().any(|group| &&group.name == name))
+        .collect::<Vec<_>>();
+
+    if !unresolved.is_empty() {
+        tracing::warn!(
+            ?unresolved,
+            "Mapper references one or more groups that do not exist"
+        );
+    }
+
+    known
+        .iter()
+        .filter(|group| configured.contains(&group.name))
+        .map(|group| group.id)
+        .collect()
 }
 
 /// Default implementation of the MappingEngine trait
@@ -144,5 +171,54 @@ where
                 tracing::warn!(?value, ?err, "Failed to parse mapping rule");
             })
             .is_ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use newtype_uuid::TypedUuid;
+    use v_model::{AccessGroup, permissions::Permissions};
+
+    use crate::permissions::VPermission;
+
+    use super::resolve_mapped_groups;
+
+    fn group(name: &str) -> AccessGroup<VPermission> {
+        AccessGroup {
+            id: TypedUuid::new_v4(),
+            name: name.to_string(),
+            permissions: Permissions::new(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            deleted_at: None,
+        }
+    }
+
+    #[test]
+    fn resolves_known_group_names() {
+        let known = vec![group("friend-of-oxide"), group("customer")];
+        let resolved = resolve_mapped_groups(&["friend-of-oxide".to_string()], &known);
+
+        assert_eq!(resolved.len(), 1);
+        assert!(resolved.contains(&known[0].id));
+    }
+
+    // Unresolved names (typos, or group ids pasted in place of names) are dropped.
+    // resolve_mapped_groups logs them; this pins the resolution behavior.
+    #[test]
+    fn drops_unresolved_group_names() {
+        let known = vec![group("friend-of-oxide")];
+        let resolved = resolve_mapped_groups(
+            &[
+                "friend-of-oxid".to_string(),
+                "0e12c84b-dd23-497d-85ef-e32364b1b86f".to_string(),
+                "friend-of-oxide".to_string(),
+            ],
+            &known,
+        );
+
+        assert_eq!(resolved.len(), 1);
+        assert!(resolved.contains(&known[0].id));
     }
 }
