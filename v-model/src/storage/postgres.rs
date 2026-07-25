@@ -1521,23 +1521,54 @@ impl MapperStore for PostgresStore {
             .map(|max| new_mapper.activations.unwrap_or(0) == max)
             .unwrap_or(false);
 
-        let mapper_m: MapperModel = insert_into(mapper::dsl::mapper)
-            .values((
-                mapper::id.eq(new_mapper.id.into_untyped_uuid()),
-                mapper::name.eq(new_mapper.name.clone()),
-                mapper::rule.eq(new_mapper.rule.clone()),
-                mapper::activations.eq(new_mapper.activations),
-                mapper::max_activations.eq(new_mapper.max_activations),
-                mapper::depleted_at.eq(if depleted { Some(Utc::now()) } else { None }),
-            ))
-            .on_conflict(mapper::id)
-            .do_update()
-            .set((
-                mapper::activations.eq(excluded(mapper::activations)),
-                mapper::depleted_at.eq(excluded(mapper::depleted_at)),
-            ))
-            .get_result_async(&*self.pool.get().await?)
-            .await?;
+        // On insert (a brand new mapper) the provided activation count is stored
+        // as-is. On conflict (an existing mapper redeeming an activation) the
+        // count is incremented atomically relative to the *current* row value,
+        // guarded so it can never exceed `max_activations`. Computing the new
+        // value from the committed row (rather than a caller-supplied absolute
+        // value derived from a stale snapshot) closes the read-modify-write race
+        // where two concurrent logins could both redeem a single-use mapper.
+        //
+        // `INSERT ... ON CONFLICT DO UPDATE` takes a row lock, so concurrent
+        // redemptions serialize: the second observes the incremented value and
+        // the `WHERE` guard prevents it from applying. When the guard rejects the
+        // update the statement returns no rows, surfacing as a not-found error
+        // that the caller treats as a depleted mapper.
+        let mapper_m: MapperModel = diesel::sql_query(
+            r#"
+            WITH upserted AS (
+                INSERT INTO mapper (id, name, rule, activations, max_activations, depleted_at)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (id) DO UPDATE
+                SET
+                    activations = COALESCE(mapper.activations, 0) + 1,
+                    depleted_at = CASE
+                        WHEN mapper.max_activations IS NOT NULL
+                             AND COALESCE(mapper.activations, 0) + 1 >= mapper.max_activations
+                        THEN now()
+                        ELSE NULL
+                    END
+                WHERE mapper.max_activations IS NULL
+                   OR COALESCE(mapper.activations, 0) < mapper.max_activations
+                RETURNING *
+            )
+            SELECT * FROM upserted
+            "#,
+        )
+        .bind::<diesel::sql_types::Uuid, _>(new_mapper.id.into_untyped_uuid())
+        .bind::<diesel::sql_types::Text, _>(new_mapper.name.clone())
+        .bind::<diesel::sql_types::Jsonb, _>(new_mapper.rule.clone())
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Integer>, _>(new_mapper.activations)
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Integer>, _>(
+            new_mapper.max_activations,
+        )
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>, _>(if depleted {
+            Some(Utc::now())
+        } else {
+            None
+        })
+        .get_result_async(&*self.pool.get().await?)
+        .await?;
 
         Ok(mapper_m.into())
     }

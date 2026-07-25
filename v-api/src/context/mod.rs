@@ -658,9 +658,24 @@ where
         group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
         let group = self.group.get_group(caller, group_id).await?;
-        if caller.can(&VPermission::ManageGroupMembership(*group_id).into())
-            && caller.can_grant_all(&group.permissions)
-        {
+        let can_manage_membership =
+            caller.can(&VPermission::ManageGroupMembership(*group_id).into());
+        let can_grant_permissions = caller.can_grant_all(&group.permissions);
+
+        if !can_manage_membership || !can_grant_permissions {
+            // This check runs on every login for mapper matched groups. Denials fail the
+            // entire login, so record exactly which check failed and for which group.
+            tracing::warn!(
+                caller = ?caller.id,
+                ?group_id,
+                group_name = ?group.name,
+                can_manage_membership,
+                can_grant_permissions,
+                "Caller is not permitted to add user to group"
+            );
+        }
+
+        if can_manage_membership && can_grant_permissions {
             // TODO: This needs to be wrapped in a transaction. That requires reworking the way the
             // store traits are handled. Ideally we could have an API that still abstracts away the
             // underlying connection management while allowing for transactions. Possibly something

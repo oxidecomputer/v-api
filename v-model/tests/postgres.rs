@@ -16,12 +16,12 @@ use serde::{Deserialize, Serialize};
 use std::ops::{Add, Sub};
 use uuid::Uuid;
 use v_model::{
-    NewApiKey, NewApiUser, NewMagicLink, NewMagicLinkAttempt, UserId,
+    NewApiKey, NewApiUser, NewMagicLink, NewMagicLinkAttempt, NewMapper, UserId,
     migrations::run_migrations,
     schema_ext::MagicLinkAttemptState,
     storage::{
         ApiKeyFilter, ApiKeyStore, ApiUserFilter, ApiUserStore, ListPagination,
-        MagicLinkAttemptStore, MagicLinkStore, postgres::PostgresStore,
+        MagicLinkAttemptStore, MagicLinkStore, MapperStore, postgres::PostgresStore,
     },
 };
 
@@ -513,4 +513,88 @@ async fn test_magic_link_attempt() {
     .unwrap();
 
     assert_eq!(None, expired_attempt_lookup);
+}
+
+// Verifies that a mapper's activation limit is enforced atomically by the
+// store's upsert. A mapper with `max_activations = 1` must be redeemable at
+// most once, even when two redemptions race. This guards against the
+// read-modify-write race where two concurrent logins could both redeem a
+// single-use mapper.
+//
+// Steps:
+//   1. Create a single-use mapper (activations = 0, max_activations = 1)
+//   2. Redeem it once (activations -> 1, depleted_at set)
+//   3. A second sequential redemption is rejected
+//   4. Two concurrent redemptions of a fresh single-use mapper yield exactly
+//      one success, and the persisted counter records a single activation
+#[tokio::test]
+async fn test_mapper_activation_limit() {
+    let db = TestDb::new("test_mapper_activation_limit");
+    let store = PostgresStore::new(&db.url()).await.unwrap();
+
+    // 1. Create a single-use mapper. The insert path stores the provided
+    //    activation count as-is.
+    let mapper_id = TypedUuid::new_v4();
+    let seed = NewMapper {
+        id: mapper_id,
+        name: format!("seq-{}", Uuid::new_v4()),
+        rule: serde_json::json!({ "rule": "default" }),
+        activations: Some(0),
+        max_activations: Some(1),
+    };
+
+    let created = MapperStore::upsert(&store, &seed).await.unwrap();
+    assert_eq!(created.activations, Some(0));
+    assert!(created.depleted_at.is_none());
+
+    // 2. The first redemption increments the counter and depletes the mapper.
+    let consumed = MapperStore::upsert(&store, &seed).await.unwrap();
+    assert_eq!(consumed.activations, Some(1));
+    assert!(consumed.depleted_at.is_some());
+
+    // 3. A second redemption is rejected: the guarded update affects no rows,
+    //    which surfaces as an error.
+    let depleted = MapperStore::upsert(&store, &seed).await;
+    assert!(
+        depleted.is_err(),
+        "a depleted single-use mapper must not be redeemable again, got {:?}",
+        depleted.map(|m| m.activations),
+    );
+
+    // 4. Race two redemptions of a fresh single-use mapper. Regardless of
+    //    interleaving, `INSERT ... ON CONFLICT DO UPDATE` locks the row and the
+    //    `WHERE activations < max_activations` guard ensures exactly one wins.
+    let race_id = TypedUuid::new_v4();
+    let race_seed = NewMapper {
+        id: race_id,
+        name: format!("race-{}", Uuid::new_v4()),
+        rule: serde_json::json!({ "rule": "default" }),
+        activations: Some(0),
+        max_activations: Some(1),
+    };
+    MapperStore::upsert(&store, &race_seed).await.unwrap();
+
+    let (first, second) = tokio::join!(
+        MapperStore::upsert(&store, &race_seed),
+        MapperStore::upsert(&store, &race_seed),
+    );
+
+    let successes = [&first, &second].iter().filter(|r| r.is_ok()).count();
+    assert_eq!(
+        successes,
+        1,
+        "exactly one of two concurrent redemptions of a max_activations=1 mapper should succeed, \
+         got first={:?} second={:?}",
+        first.as_ref().map(|m| m.activations),
+        second.as_ref().map(|m| m.activations),
+    );
+
+    // The persisted counter reflects exactly one activation, and the mapper is
+    // marked depleted.
+    let final_mapper = MapperStore::get(&store, &race_id, true, false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(final_mapper.activations, Some(1));
+    assert!(final_mapper.depleted_at.is_some());
 }
