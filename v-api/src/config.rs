@@ -258,7 +258,7 @@ impl AsymmetricKey {
                 AsymmetricKey::LocalSigner { private, .. } => {
                     let private_key =
                         RsaPrivateKey::from_pkcs8_pem(private.resolve(path)?.expose_secret())
-                            .unwrap();
+                            .map_err(SigningKeyError::InvalidPrivateKey)?;
                     let signing_key = SigningKey::new(private_key);
                     SignerKey::Local(LocalSigningKey::new(signing_key))
                 }
