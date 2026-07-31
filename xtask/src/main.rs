@@ -152,7 +152,16 @@ fn bump_on_pr_branch(
     bump_package_versions(root_path, &new_version)?;
 
     let commit_message = format!("Bump to v{}", new_version);
-    git_status(root_path, ["add", "Cargo.toml", "Cargo.lock"])?;
+    git_status(
+        root_path,
+        [
+            "add",
+            "Cargo.toml",
+            "Cargo.lock",
+            "remix-auth-vapi/package.json",
+            "remix-auth-vapi/package-lock.json",
+        ],
+    )?;
     git_status(root_path, ["commit", "-m", commit_message.as_str()])?;
     git_status(root_path, ["checkout", &original_branch])?;
 
@@ -175,6 +184,7 @@ fn bump_on_pr_branch(
 
 fn bump_package_versions(root_path: &Path, version: &Version) -> Result<(), String> {
     update_workspace_version(root_path, version)?;
+    update_npm_package_version(root_path, version)?;
 
     println!("Running cargo check to update Cargo.lock...");
     let status = Command::new("cargo")
@@ -187,6 +197,25 @@ fn bump_package_versions(root_path: &Path, version: &Version) -> Result<(), Stri
         return Err("cargo check failed".to_string());
     }
 
+    Ok(())
+}
+
+fn update_npm_package_version(root_path: &Path, version: &Version) -> Result<(), String> {
+    let package_dir = root_path.join("remix-auth-vapi");
+    println!("Running npm version to update remix-auth-vapi's package.json/package-lock.json...");
+    let status = Command::new("npm")
+        .args([
+            "version",
+            &version.to_string(),
+            "--no-git-tag-version",
+            "--allow-same-version",
+        ])
+        .current_dir(&package_dir)
+        .status()
+        .map_err(|e| format!("failed to run npm version: {}", e))?;
+    if !status.success() {
+        return Err("npm version failed".to_string());
+    }
     Ok(())
 }
 
