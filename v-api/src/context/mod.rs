@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use auth::AuthContext;
 use chrono::{TimeDelta, Utc};
 use dropshot::{ClientErrorStatusCode, HttpError, RequestContext, ServerContext};
-use futures::future::join_all;
 use jsonwebtoken::jwk::JwkSet;
 use newtype_uuid::{GenericUuid, TypedUuid};
 use serde::{Deserialize, Serialize};
@@ -39,7 +38,7 @@ use v_model::{
 
 use crate::{
     authn::{
-        AuthError, AuthToken, Sign, VerificationResult, Verify,
+        AuthError, AuthToken, Sign, SigningKeyError, VerificationResult, Verify,
         jwt::{Claims, DEFAULT_JWT_EXPIRATION, JwtSigner, JwtSignerError},
     },
     config::{AsymmetricKey, JwtConfig},
@@ -785,6 +784,12 @@ pub enum VContextBuilderError {
     DuplicateMapperRule(String),
     #[error("Invalid mapper rule")]
     InvalidMapperRule(String),
+    #[error("Failed to resolve key {kid}: {source}")]
+    KeyResolution {
+        kid: String,
+        #[source]
+        source: SigningKeyError,
+    },
     #[error("{0} must be set to build a VContext")]
     MissingRequiredConfiguration(String),
     #[error("Failed to connect to storage")]
@@ -933,26 +938,62 @@ where
             ))?;
 
         // `keys` is a list of key components, where each one is either a signer or a verifier.
-        // Therefore when constructing our lists we omit any keys from each list which is unable
-        // to be resolved into the needed kind.
-        let jwks = JwkSet {
-            keys: keys
-                .iter()
-                .filter_map(|key| key.resolve_jwk(param_path.as_deref()).ok())
-                .collect::<Vec<_>>(),
-        };
-        let signers = keys
-            .iter()
-            .filter_map(|key| key.resolve_signer(param_path.as_deref()).ok())
-            .collect::<Vec<_>>();
-        let verifiers = join_all(
-            keys.iter()
-                .map(|key| key.resolve_verifier(param_path.as_deref())),
-        )
-        .await
-        .into_iter()
-        .filter_map(|key| key.ok())
-        .collect::<Vec<_>>();
+        // A key is skipped for a list it does not support (a signer can not act as a verifier
+        // and vice versa), but any other resolution failure aborts construction. Silently
+        // dropping a key would leave the server running but unable to verify otherwise valid
+        // secrets and tokens.
+        let mut jwks = vec![];
+        let mut signers = vec![];
+        let mut verifiers = vec![];
+        for key in &keys {
+            match key.resolve_jwk(param_path.as_deref()) {
+                Ok(jwk) => jwks.push(jwk),
+                Err(SigningKeyError::KeyDoesNotSupportFunction) => (),
+                Err(source) => {
+                    return Err(VContextBuilderError::KeyResolution {
+                        kid: key.kid().to_string(),
+                        source,
+                    });
+                }
+            }
+            match key.resolve_signer(param_path.as_deref()) {
+                Ok(signer) => signers.push(signer),
+                Err(SigningKeyError::KeyDoesNotSupportFunction) => (),
+                Err(source) => {
+                    return Err(VContextBuilderError::KeyResolution {
+                        kid: key.kid().to_string(),
+                        source,
+                    });
+                }
+            }
+            match key.resolve_verifier(param_path.as_deref()).await {
+                Ok(verifier) => verifiers.push(verifier),
+                Err(SigningKeyError::KeyDoesNotSupportFunction) => (),
+                Err(source) => {
+                    return Err(VContextBuilderError::KeyResolution {
+                        kid: key.kid().to_string(),
+                        source,
+                    });
+                }
+            }
+        }
+        if signers.is_empty() {
+            return Err(VContextBuilderError::MissingRequiredConfiguration(
+                "signing key".to_string(),
+            ));
+        }
+        if verifiers.is_empty() {
+            return Err(VContextBuilderError::MissingRequiredConfiguration(
+                "verification key".to_string(),
+            ));
+        }
+        tracing::info!(
+            jwks = jwks.len(),
+            signers = signers.len(),
+            verifiers = verifiers.len(),
+            "Resolved signing and verification keys"
+        );
+        let jwks = JwkSet { keys: jwks };
         let auth_ctx = AuthContext::new(
             jwt,
             jwks,
