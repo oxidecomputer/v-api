@@ -14,6 +14,7 @@ use newtype_uuid::{GenericUuid, TypedUuid};
 use std::{collections::BTreeMap, time::Duration};
 use thiserror::Error;
 use tracing::instrument;
+use uuid::Uuid;
 
 use crate::{
     AccessGroup, AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUser,
@@ -880,24 +881,29 @@ impl OAuthClientStore for PostgresStore {
             .fold(
                 BTreeMap::new(),
                 |mut clients, (client, secret, redirect)| {
+                    // The joins produce a row per secret x redirect uri combination, so each
+                    // list is keyed by id to drop the duplicate entries
                     let value = clients.entry(client.id).or_insert((
                         client,
-                        Vec::<OAuthClientSecret>::new(),
-                        Vec::<OAuthClientRedirectUri>::new(),
+                        BTreeMap::<Uuid, OAuthClientSecret>::new(),
+                        BTreeMap::<Uuid, OAuthClientRedirectUri>::new(),
                     ));
 
                     // Only include secrets that have not been deleted
                     if let Some(secret) = secret
                         && secret.deleted_at.is_none()
                     {
-                        value.1.push(secret.into());
+                        value.1.entry(secret.id).or_insert_with(|| secret.into());
                     }
 
                     // Only include redirect URIs that have not been deleted
                     if let Some(redirect) = redirect
                         && redirect.deleted_at.is_none()
                     {
-                        value.2.push(redirect.into());
+                        value
+                            .2
+                            .entry(redirect.id)
+                            .or_insert_with(|| redirect.into());
                     }
 
                     clients
@@ -905,7 +911,11 @@ impl OAuthClientStore for PostgresStore {
             )
             .into_iter()
             .map(|(_, (client, secrets, redirect_uris))| {
-                OAuthClient::new(client, secrets, redirect_uris)
+                OAuthClient::new(
+                    client,
+                    secrets.into_values().collect(),
+                    redirect_uris.into_values().collect(),
+                )
             })
             .skip(pagination.offset as usize)
             .take(pagination.limit as usize)
@@ -1095,18 +1105,23 @@ impl MagicLinkStore for PostgresStore {
             .fold(
                 BTreeMap::new(),
                 |mut clients, (client, secret, redirect)| {
+                    // The joins produce a row per secret x redirect uri combination, so each
+                    // list is keyed by id to drop the duplicate entries
                     let value = clients.entry(client.id).or_insert((
                         client,
-                        Vec::<MagicLinkSecret>::new(),
-                        Vec::<MagicLinkRedirectUri>::new(),
+                        BTreeMap::<Uuid, MagicLinkSecret>::new(),
+                        BTreeMap::<Uuid, MagicLinkRedirectUri>::new(),
                     ));
 
                     if let Some(secret) = secret {
-                        value.1.push(secret.into());
+                        value.1.entry(secret.id).or_insert_with(|| secret.into());
                     }
 
                     if let Some(redirect) = redirect {
-                        value.2.push(redirect.into());
+                        value
+                            .2
+                            .entry(redirect.id)
+                            .or_insert_with(|| redirect.into());
                     }
 
                     clients
@@ -1114,7 +1129,11 @@ impl MagicLinkStore for PostgresStore {
             )
             .into_iter()
             .map(|(_, (client, secrets, redirect_uris))| {
-                MagicLink::new(client, secrets, redirect_uris)
+                MagicLink::new(
+                    client,
+                    secrets.into_values().collect(),
+                    redirect_uris.into_values().collect(),
+                )
             })
             .skip(pagination.offset as usize)
             .take(pagination.limit as usize)

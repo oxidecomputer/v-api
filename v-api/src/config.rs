@@ -29,7 +29,7 @@ use v_model::OAuthClientId;
 use crate::{
     authn::{
         CloudKmsError, CloudKmsSigningKey, CloudKmsVerifyingKey, LocalSigningKey,
-        LocalVerifyingKey, Signer, SignerKey, SigningKeyError, Verifier, jwt::JwtSignerError,
+        LocalVerifyingKey, Signer, SignerKey, SigningKeyError, Verifier,
     },
     util::cloud_kms_client,
 };
@@ -258,7 +258,7 @@ impl AsymmetricKey {
                 AsymmetricKey::LocalSigner { private, .. } => {
                     let private_key =
                         RsaPrivateKey::from_pkcs8_pem(private.resolve(path)?.expose_secret())
-                            .unwrap();
+                            .map_err(SigningKeyError::InvalidPrivateKey)?;
                     let signing_key = SigningKey::new(private_key);
                     SignerKey::Local(LocalSigningKey::new(signing_key))
                 }
@@ -283,9 +283,9 @@ impl AsymmetricKey {
         })
     }
 
-    pub fn resolve_jwk(&self, path: Option<&Path>) -> Result<Jwk, JwtSignerError> {
+    pub fn resolve_jwk(&self, path: Option<&Path>) -> Result<Jwk, SigningKeyError> {
         let key_id = self.kid();
-        let public_key = self.public_key(path).map_err(JwtSignerError::InvalidKey)?;
+        let public_key = self.public_key(path)?;
 
         Ok(Jwk {
             common: CommonParameters {

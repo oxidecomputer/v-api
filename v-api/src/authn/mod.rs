@@ -120,6 +120,8 @@ pub enum SigningKeyError {
     CloudKmsError(#[from] Box<CloudKmsError>),
     #[error("Failed to immediately verify generated signature")]
     GeneratedInvalidSignature,
+    #[error("Failed to parse private key: {0}")]
+    InvalidPrivateKey(#[from] rsa::pkcs8::Error),
     #[error("Failed to parse public key: {0}")]
     InvalidPublicKey(#[from] rsa::pkcs8::spki::Error),
     #[error("Key does not support the requested function")]
