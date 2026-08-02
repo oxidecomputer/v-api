@@ -17,7 +17,7 @@ version = "0.4.10"
 [workspace.dependencies]
 anyhow = "1.0"
 async-bb8-diesel = "0.3"
-async-trait = "0.1.89"
+async-trait = "0.1.91"
 base64 = "0.22"
 bb8 = "0.9"
 chrono = "0.4"
