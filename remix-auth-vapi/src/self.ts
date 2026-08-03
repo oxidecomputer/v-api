@@ -14,8 +14,8 @@ import type { GetUserResponse } from './types'
  * `Permission` should be the consuming service's own permission string union.
  */
 export async function getSelf<Permission extends string = string>(
-    host: string,
-    token: string,
+  host: string,
+  token: string,
 ): Promise<GetUserResponse<Permission>> {
-    return vApiRequest<GetUserResponse<Permission>>(host, '/self', { method: 'GET', token })
+  return vApiRequest<GetUserResponse<Permission>>(host, '/self', { method: 'GET', token })
 }

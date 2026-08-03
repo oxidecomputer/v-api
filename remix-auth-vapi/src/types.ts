@@ -11,29 +11,29 @@
 // `Permission` type parameter varies per consuming service.
 
 export type VApiUserProvider = {
-    id: string
-    userId: string
-    provider: string
-    providerId: string
-    emails: string[]
-    displayNames: string[]
-    createdAt: string
-    updatedAt: string
-    deletedAt?: string | null
+  id: string
+  userId: string
+  provider: string
+  providerId: string
+  emails: string[]
+  displayNames: string[]
+  createdAt: string
+  updatedAt: string
+  deletedAt?: string | null
 }
 
 export type VApiUser<Permission extends string = string> = {
-    id: string
-    permissions: Permission[]
-    groups: string[]
-    createdAt: string
-    updatedAt: string
-    deletedAt?: string | null
+  id: string
+  permissions: Permission[]
+  groups: string[]
+  createdAt: string
+  updatedAt: string
+  deletedAt?: string | null
 }
 
 export type GetUserResponse<Permission extends string = string> = {
-    info: VApiUser<Permission>
-    providers: VApiUserProvider[]
+  info: VApiUser<Permission>
+  providers: VApiUserProvider[]
 }
 
 /**
@@ -41,12 +41,12 @@ export type GetUserResponse<Permission extends string = string> = {
  * space-delimited string on the wire, not an array.
  */
 export type VApiAccessTokenClaims = {
-    iss: string
-    aud: string
-    sub: string
-    prv: string
-    scp: string
-    exp: number
-    nbf: number
-    jti: string
+  iss: string
+  aud: string
+  sub: string
+  prv: string
+  scp: string
+  exp: number
+  nbf: number
+  jti: string
 }

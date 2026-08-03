@@ -28,6 +28,6 @@ jobs:
           cache: npm
           cache-dependency-path: remix-auth-vapi/package-lock.json
       - run: npm ci
-      # - run: npm run fmt:check
+      - run: npm run fmt:check
       # - run: npm run lint
       - run: npm test
