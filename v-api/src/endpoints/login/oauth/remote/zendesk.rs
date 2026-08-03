@@ -60,15 +60,16 @@ impl ZendeskOAuthProvider {
                 revocation_endpoint: None,
             },
         });
-        let authz_code_pkce_flow_info = config
-            .proxy_web
-            .and_then(|proxy| authz_code_flow_info.as_ref().map(|web| (web, proxy)))
-            .map(|(web, proxy)| OAuthProviderAuthorizationCodePkceInfo {
-                client_id: proxy.client_id,
-                redirect_endpoint: proxy.redirect_uri,
-                proxy_port: proxy.proxy_port,
-                web: web.clone(),
-            });
+        let authz_code_pkce_flow_info =
+            authz_code_flow_info
+                .as_ref()
+                .zip(config.proxy_web)
+                .map(|(web, proxy)| OAuthProviderAuthorizationCodePkceInfo {
+                    client_id: proxy.client_id,
+                    redirect_endpoint: proxy.redirect_uri,
+                    proxy_port: proxy.proxy_port,
+                    web: web.clone(),
+                });
 
         Self {
             authz_code_flow_info,

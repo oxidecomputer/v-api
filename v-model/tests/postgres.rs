@@ -108,7 +108,7 @@ impl TestDb {
         // Connect to the builtin postgres database since we know it exists.
         // This makes it easier to deal with postgres instances stood up as
         // part of a dev environment manager such as flox.dev
-        let url = format!("{}/postgres", &self.db_base);
+        let url = format!("{}/postgres", self.db_base);
         let conn: ConnectionManager<PgConnection> = ConnectionManager::new(&url);
         conn.connect().unwrap()
     }
