@@ -16,6 +16,14 @@ import {
 const HOST = 'http://vapi.test'
 
 type TestUser = { id: string; email: string; token: string; returnTo?: string }
+type MagicLinkSendRequestBody = {
+    medium: 'email'
+    recipient: string
+    secret: string
+    expires_in: number
+    scope: string
+    redirect_uri: string
+}
 
 function buildStrategy(
     verify: (params: VApiMagicLinkVerifyParams) => Promise<TestUser>,
@@ -91,9 +99,9 @@ describe('VApiMagicLinkStrategy', () => {
     })
 
     it('sends a magic link, storing the attempt in session and redirecting to pendingPath', async () => {
-        let sentBody: unknown
+        let sentBody: MagicLinkSendRequestBody | undefined
         server.use(
-            http.post(`${HOST}/login/magic/login/send`, async ({ request }) => {
+            http.post<never, MagicLinkSendRequestBody>(`${HOST}/login/magic/login/send`, async ({ request }) => {
                 sentBody = await request.json()
                 return HttpResponse.json({ attempt_id: 'attempt-1' })
             }),
@@ -324,9 +332,9 @@ describe('VApiMagicLinkStrategy', () => {
     })
 
     it('uses http:// for the redirect URI when the host is localhost', async () => {
-        let sentBody: any
+        let sentBody: MagicLinkSendRequestBody | undefined
         server.use(
-            http.post(`${HOST}/login/magic/login/send`, async ({ request }) => {
+            http.post<never, MagicLinkSendRequestBody>(`${HOST}/login/magic/login/send`, async ({ request }) => {
                 sentBody = await request.json()
                 return HttpResponse.json({ attempt_id: 'attempt-1' })
             }),
@@ -341,6 +349,8 @@ describe('VApiMagicLinkStrategy', () => {
 
         await strategy.authenticate(request).catch(() => undefined)
 
-        expect(sentBody.redirect_uri).toBe('http://localhost:3000/auth/magic/callback')
+        expect(sentBody).toMatchObject({
+            redirect_uri: 'http://localhost:3000/auth/magic/callback',
+        })
     })
 })
