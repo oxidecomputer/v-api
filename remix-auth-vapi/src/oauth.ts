@@ -13,76 +13,76 @@ import { Strategy } from 'remix-auth/strategy'
 export type VApiOAuthProvider = 'google' | 'github' | 'zendesk'
 
 export type VApiOAuthStrategyOptions<
-    Provider extends string = VApiOAuthProvider,
-    Scope extends string = string,
+  Provider extends string = VApiOAuthProvider,
+  Scope extends string = string,
 > = {
-    /**
-     * Name this strategy is registered under with the remix-auth `Authenticator`.
-     * @default `v-api-${remoteProvider}`
-     */
-    name?: string
-    /** Base URL of the v-api based service to authenticate against. */
-    host: string
-    clientId: string
-    clientSecret: string
-    redirectURI: string
-    remoteProvider: Provider
-    /**
-     * @default ["user:info:r"]
-     */
-    scopes?: Scope[]
-    /**
-     * Custom host for the authorization endpoint. Overrides `host` when
-     * constructing the authorization URL.
-     * @default host
-     */
-    authorizationHost?: string
-    /**
-     * Custom host for the token endpoint. Overrides `host` when
-     * constructing the token URL.
-     * @default host
-     */
-    tokenHost?: string
+  /**
+   * Name this strategy is registered under with the remix-auth `Authenticator`.
+   * @default `v-api-${remoteProvider}`
+   */
+  name?: string
+  /** Base URL of the v-api based service to authenticate against. */
+  host: string
+  clientId: string
+  clientSecret: string
+  redirectURI: string
+  remoteProvider: Provider
+  /**
+   * @default ["user:info:r"]
+   */
+  scopes?: Scope[]
+  /**
+   * Custom host for the authorization endpoint. Overrides `host` when
+   * constructing the authorization URL.
+   * @default host
+   */
+  authorizationHost?: string
+  /**
+   * Custom host for the token endpoint. Overrides `host` when
+   * constructing the token URL.
+   * @default host
+   */
+  tokenHost?: string
 }
 
 export type ExpiringUser = {
-    expiresAt: Date
+  expiresAt: Date
 }
 
 export type VApiVerifyCallback<T> = Strategy.VerifyFunction<T, OAuth2Strategy.VerifyOptions>
 
 export class VApiOAuthStrategy<User extends ExpiringUser> extends OAuth2Strategy<User> {
-    public name: string
-    protected readonly userInfoUrl: string
-    protected readonly host: string
+  public name: string
+  protected readonly userInfoUrl: string
+  protected readonly host: string
 
-    constructor(
-        {
-            host,
-            clientId,
-            clientSecret,
-            redirectURI,
-            remoteProvider,
-            scopes,
-            authorizationHost,
-            tokenHost,
-            name,
-        }: VApiOAuthStrategyOptions,
-        verify: VApiVerifyCallback<User>,
-    ) {
-        super(
-            {
-                clientId,
-                clientSecret,
-                redirectURI,
-                authorizationEndpoint: `${authorizationHost ?? host}/login/oauth/${remoteProvider}/code/authorize`,
-                tokenEndpoint: `${tokenHost ?? host}/login/oauth/${remoteProvider}/code/token`,
-                scopes: scopes ?? ['user:info:r'],
-            },
-            verify,
-        )
-        this.name = name ?? `v-api-${remoteProvider}`
-        this.host = host
-        this.userInfoUrl = `${host}/self`
-    }
+  constructor(
+    {
+      host,
+      clientId,
+      clientSecret,
+      redirectURI,
+      remoteProvider,
+      scopes,
+      authorizationHost,
+      tokenHost,
+      name,
+    }: VApiOAuthStrategyOptions,
+    verify: VApiVerifyCallback<User>,
+  ) {
+    super(
+      {
+        clientId,
+        clientSecret,
+        redirectURI,
+        authorizationEndpoint: `${authorizationHost ?? host}/login/oauth/${remoteProvider}/code/authorize`,
+        tokenEndpoint: `${tokenHost ?? host}/login/oauth/${remoteProvider}/code/token`,
+        scopes: scopes ?? ['user:info:r'],
+      },
+      verify,
+    )
+    this.name = name ?? `v-api-${remoteProvider}`
+    this.host = host
+    this.userInfoUrl = `${host}/self`
+  }
 }
