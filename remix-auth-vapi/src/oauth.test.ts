@@ -6,6 +6,16 @@ type TestUser = ExpiringUser & { id: string }
 
 const verify = async () => ({ id: 'user-1', expiresAt: new Date() }) as TestUser
 
+class TestVApiOAuthStrategy extends VApiOAuthStrategy<TestUser> {
+  get testOptions() {
+    return this.options
+  }
+
+  get testUserInfoUrl() {
+    return this.userInfoUrl
+  }
+}
+
 const baseOptions = {
   host: 'https://api.example.com',
   clientId: 'client-id',
@@ -28,23 +38,22 @@ describe('VApiOAuthStrategy', () => {
   })
 
   it('builds authorization/token endpoints and userInfoUrl from host', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const strategy = new VApiOAuthStrategy(
+    const strategy = new TestVApiOAuthStrategy(
       { ...baseOptions, remoteProvider: 'google' },
       verify,
-    ) as any
+    )
 
-    expect(strategy.options.authorizationEndpoint).toBe(
+    expect(strategy.testOptions.authorizationEndpoint).toBe(
       'https://api.example.com/login/oauth/google/code/authorize',
     )
-    expect(strategy.options.tokenEndpoint).toBe(
+    expect(strategy.testOptions.tokenEndpoint).toBe(
       'https://api.example.com/login/oauth/google/code/token',
     )
-    expect(strategy.userInfoUrl).toBe('https://api.example.com/self')
+    expect(strategy.testUserInfoUrl).toBe('https://api.example.com/self')
   })
 
   it('honors authorizationHost/tokenHost overrides independently of host', () => {
-    const strategy = new VApiOAuthStrategy(
+    const strategy = new TestVApiOAuthStrategy(
       {
         ...baseOptions,
         remoteProvider: 'google',
@@ -52,25 +61,23 @@ describe('VApiOAuthStrategy', () => {
         tokenHost: 'https://token.example.com',
       },
       verify,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ) as any
+    )
 
-    expect(strategy.options.authorizationEndpoint).toBe(
+    expect(strategy.testOptions.authorizationEndpoint).toBe(
       'https://auth.example.com/login/oauth/google/code/authorize',
     )
-    expect(strategy.options.tokenEndpoint).toBe(
+    expect(strategy.testOptions.tokenEndpoint).toBe(
       'https://token.example.com/login/oauth/google/code/token',
     )
     // userInfoUrl always follows `host`, not the authorization/token overrides
-    expect(strategy.userInfoUrl).toBe('https://api.example.com/self')
+    expect(strategy.testUserInfoUrl).toBe('https://api.example.com/self')
   })
 
   it('defaults scopes to ["user:info:r"] when none are given', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const strategy = new VApiOAuthStrategy(
+    const strategy = new TestVApiOAuthStrategy(
       { ...baseOptions, remoteProvider: 'google' },
       verify,
-    ) as any
-    expect(strategy.options.scopes).toEqual(['user:info:r'])
+    )
+    expect(strategy.testOptions.scopes).toEqual(['user:info:r'])
   })
 })
