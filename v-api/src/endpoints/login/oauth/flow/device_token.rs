@@ -27,7 +27,7 @@ use crate::{
     permissions::VAppPermission, response::internal_error, util::response::bad_request,
 };
 
-use super::complete_exchange;
+use super::{UpstreamTokens, complete_exchange};
 use crate::endpoints::login::oauth::OAuthProviderDeviceInfo;
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -421,7 +421,15 @@ where
 
             tracing::debug!("Verified and validated OAuth user via device flow");
 
-            let response = complete_exchange(ctx, info, &*provider, &attempt, false, None).await?;
+            let response = complete_exchange(
+                ctx,
+                info,
+                &*provider,
+                &attempt,
+                false,
+                UpstreamTokens::default(),
+            )
+            .await?;
 
             let exchange_response = response.0;
 
