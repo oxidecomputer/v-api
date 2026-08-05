@@ -344,7 +344,7 @@ where
     tracing::info!(?attempt.id, "Created login attempt");
 
     oauth_redirect_response(
-        ctx.public_url(),
+        ctx.https(),
         &*provider,
         &attempt,
         remote_pkce_challenge,
@@ -352,7 +352,7 @@ where
 }
 
 fn oauth_redirect_response(
-    public_url: &str,
+    secure: bool,
     provider: &dyn OAuthProvider,
     attempt: &LoginAttempt,
     code_challenge: Option<PkceCodeChallenge>,
@@ -366,7 +366,7 @@ fn oauth_redirect_response(
     // Create an attempt cookie header for storing the login attempt. This also acts as our csrf
     // check
     let attempt_id_str = attempt.id.to_string();
-    let cookie = build_login_attempt_cookie(&attempt_id_str, public_url.starts_with("https"), 600);
+    let cookie = build_login_attempt_cookie(&attempt_id_str, secure, 600);
     let login_cookie = HeaderValue::from_str(&cookie.to_string()).map_err(to_internal_error)?;
 
     // Generate the url to the remote provider that the user will be redirected to
@@ -394,6 +394,7 @@ fn oauth_redirect_response(
 fn verify_csrf(
     request: &RequestInfo,
     query: &OAuthAuthzCodeReturnQuery,
+    cookie: &str,
 ) -> Result<TypedUuid<LoginAttemptId>, HttpError> {
     // If we are missing the expected state parameter then we can not proceed at
     // all with verifying this callback request. We also do not have a redirect
@@ -420,13 +421,7 @@ fn verify_csrf(
     // do not have this guarantee, and require the developer to ensure cookies
     // are handled correctly.
     let attempt_cookie = request
-        .cookie(cookie_name(
-            request
-                .uri()
-                .scheme()
-                .map(|s| s == "https")
-                .unwrap_or(false),
-        ))
+        .cookie(cookie)
         .ok_or_else(|| {
             tracing::warn!("OAuth callback is missing a login state cookie");
             bad_request("Invalid or missing OAuth state parameter")
@@ -493,7 +488,7 @@ where
         tracing::debug!(provider = ?provider.name(), "Acquired OAuth provider for authz code exchange");
 
         // Verify and extract the attempt id before performing any work
-        let attempt_id = verify_csrf(&rqctx.request, &query)?;
+        let attempt_id = verify_csrf(&rqctx.request, &query, cookie_name(ctx.https()))?;
         let location =
             authz_code_callback_op_inner(ctx, &attempt_id, query.code, query.error).await?;
         http_response_temporary_redirect(location)
@@ -1218,7 +1213,7 @@ mod tests {
         };
 
         let response = oauth_redirect_response(
-            ctx.public_url(),
+            ctx.https(),
             &*ctx
                 .get_oauth_provider(&OAuthProviderName::Google)
                 .await
@@ -1274,7 +1269,7 @@ mod tests {
             code: None,
             error: None,
         };
-        assert_eq!(id, verify_csrf(&with_valid_cookie, &query).unwrap());
+        assert_eq!(id, verify_csrf(&with_valid_cookie, &query, cookie_name(true)).unwrap());
 
         let query = OAuthAuthzCodeReturnQuery {
             state: None,
@@ -1283,7 +1278,7 @@ mod tests {
         };
         assert_eq!(
             StatusCode::BAD_REQUEST,
-            verify_csrf(&with_valid_cookie, &query)
+            verify_csrf(&with_valid_cookie, &query, cookie_name(true))
                 .unwrap_err()
                 .status_code
         );
@@ -1304,7 +1299,7 @@ mod tests {
         };
         assert_eq!(
             StatusCode::BAD_REQUEST,
-            verify_csrf(&with_invalid_cookie, &query)
+            verify_csrf(&with_invalid_cookie, &query, cookie_name(true))
                 .unwrap_err()
                 .status_code
         );
@@ -1321,7 +1316,7 @@ mod tests {
         };
         assert_eq!(
             StatusCode::BAD_REQUEST,
-            verify_csrf(&with_missing_cookie, &query)
+            verify_csrf(&with_missing_cookie, &query, cookie_name(true))
                 .unwrap_err()
                 .status_code
         );
