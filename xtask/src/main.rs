@@ -158,8 +158,6 @@ fn bump_on_pr_branch(
             "add",
             "Cargo.toml",
             "Cargo.lock",
-            "remix-auth-vapi/package.json",
-            "remix-auth-vapi/package-lock.json",
         ],
     )?;
     git_status(root_path, ["commit", "-m", commit_message.as_str()])?;
@@ -201,20 +199,25 @@ fn bump_package_versions(root_path: &Path, version: &Version) -> Result<(), Stri
 }
 
 fn update_npm_package_version(root_path: &Path, version: &Version) -> Result<(), String> {
-    let package_dir = root_path.join("remix-auth-vapi");
-    println!("Running npm version to update remix-auth-vapi's package.json/package-lock.json...");
-    let status = Command::new("npm")
-        .args([
-            "version",
-            &version.to_string(),
-            "--no-git-tag-version",
-            "--allow-same-version",
-        ])
-        .current_dir(&package_dir)
-        .status()
-        .map_err(|e| format!("failed to run npm version: {}", e))?;
-    if !status.success() {
-        return Err("npm version failed".to_string());
+    // We currently do not version any npm packages. Notable remix-auth-vapi is not versioned along
+    // with the rest of the packages.
+    let packages: Vec<String> = vec![];
+    for package in packages {
+        let package_dir = root_path.join(&package);
+        println!("Running npm version to update {package}'s package.json/package-lock.json...");
+        let status = Command::new("npm")
+            .args([
+                "version",
+                &version.to_string(),
+                "--no-git-tag-version",
+                "--allow-same-version",
+            ])
+            .current_dir(&package_dir)
+            .status()
+            .map_err(|e| format!("failed to run npm version: {}", e))?;
+        if !status.success() {
+            return Err("npm version failed".to_string());
+        }
     }
     Ok(())
 }
