@@ -152,14 +152,7 @@ fn bump_on_pr_branch(
     bump_package_versions(root_path, &new_version)?;
 
     let commit_message = format!("Bump to v{}", new_version);
-    git_status(
-        root_path,
-        [
-            "add",
-            "Cargo.toml",
-            "Cargo.lock",
-        ],
-    )?;
+    git_status(root_path, ["add", "Cargo.toml", "Cargo.lock"])?;
     git_status(root_path, ["commit", "-m", commit_message.as_str()])?;
     git_status(root_path, ["checkout", &original_branch])?;
 
