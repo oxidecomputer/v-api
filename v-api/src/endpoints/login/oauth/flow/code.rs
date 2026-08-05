@@ -30,6 +30,7 @@ use v_model::{
 };
 
 use super::super::{OAuthProvider, OAuthProviderNameParam};
+use super::UpstreamTokens;
 use crate::endpoints::login::UserInfoProvider;
 use crate::{
     authn::key::RawKey,
@@ -656,7 +657,14 @@ pub struct OAuthAuthzCodeExchangeResponse {
     /// The scope granted to the access token per RFC 6749 §5.1. An empty
     /// string indicates no permissions. Use "full" for all permissions.
     pub scope: String,
+    /// Access token issued by the upstream identity provider. Only returned
+    /// when the caller requested it and holds the `RetrieveRemoteAccessToken`
+    /// permission.
     pub idp_token: Option<String>,
+    /// Refresh token issued by the upstream identity provider. Returned under
+    /// the same conditions as `idp_token`, and only when the provider issued
+    /// one.
+    pub idp_refresh_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
@@ -796,9 +804,9 @@ where
 
     // Now that the attempt has been claimed, use it to fetch user information from the
     // remote provider. If this fails, the attempt is already consumed and the user must
-    // re-authenticate. The upstream access token is always preserved here so that
+    // re-authenticate. The upstream tokens are always preserved here so that
     // revocation can be deferred until after the permission check.
-    let (info, upstream_token) = fetch_user_info(ctx.public_url(), &*provider, &attempt).await?;
+    let (info, upstream) = fetch_user_info(ctx.public_url(), &*provider, &attempt).await?;
 
     tracing::debug!("Retrieved user information from remote provider");
 
@@ -808,7 +816,7 @@ where
         &*provider,
         &attempt,
         query.request_idp_token,
-        upstream_token,
+        upstream,
     )
     .await
 }
@@ -932,7 +940,7 @@ async fn fetch_user_info(
     public_url: &str,
     provider: &dyn OAuthProvider,
     attempt: &LoginAttempt,
-) -> Result<(UserInfo, Option<String>), HttpError> {
+) -> Result<(UserInfo, UpstreamTokens), HttpError> {
     // Exchange the stored authorization code with the remote provider for a remote access token
     let client = provider.as_web_client().map_err(to_internal_error)?;
 
@@ -971,11 +979,19 @@ async fn fetch_user_info(
 
     tracing::info!("Fetched user info from remote service");
 
-    // Return the upstream access token alongside the user info so the caller
-    // can decide whether to revoke it after the permission check.
-    let upstream_token = Some(response.access_token().secret().to_string());
+    // Return the upstream tokens alongside the user info so the caller can
+    // decide whether to hand them back or revoke them after the permission
+    // check. A refresh token is only present when the provider issued one.
+    let upstream = UpstreamTokens {
+        access_token: Some(SecretString::from(
+            response.access_token().secret().as_str(),
+        )),
+        refresh_token: response
+            .refresh_token()
+            .map(|token| SecretString::from(token.secret().as_str())),
+    };
 
-    Ok((info, upstream_token))
+    Ok((info, upstream))
 }
 
 #[cfg(test)]
@@ -1034,7 +1050,7 @@ mod tests {
         permissions::VPermission,
     };
 
-    use super::super::complete_exchange;
+    use super::super::{UpstreamTokens, complete_exchange};
     use super::{authorize_code_exchange, get_oauth_client, oauth_redirect_response};
 
     /// A minimal no-op `OAuthProvider` for unit tests that need to pass a
@@ -2493,6 +2509,14 @@ mod tests {
         }
     }
 
+    /// Upstream tokens as returned by a provider that issues a refresh token.
+    fn mock_upstream_tokens() -> UpstreamTokens {
+        UpstreamTokens {
+            access_token: Some(SecretBox::from("secret-upstream-token")),
+            refresh_token: Some(SecretBox::from("secret-upstream-refresh-token")),
+        }
+    }
+
     #[tokio::test]
     async fn test_exchange_returns_idp_token_when_requested_and_permitted() {
         let storage = mock_exchange_storage(vec![
@@ -2510,7 +2534,7 @@ mod tests {
             &provider,
             &attempt,
             true,
-            Some("secret-upstream-token".to_string()),
+            mock_upstream_tokens(),
         )
         .await
         .unwrap()
@@ -2520,6 +2544,68 @@ mod tests {
             response.idp_token,
             Some("secret-upstream-token".to_string()),
             "IdP token must be returned when requested and user has RetrieveRemoteAccessToken"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_exchange_returns_idp_refresh_token_when_requested_and_permitted() {
+        let storage = mock_exchange_storage(vec![
+            VPermission::CreateAccessToken,
+            VPermission::RetrieveRemoteAccessToken,
+        ]);
+        let ctx = mock_context(Arc::new(storage)).await;
+        let attempt = mock_completed_attempt();
+        let info = mock_user_info_with_idp_token();
+        let provider = NoOpOAuthProvider::new();
+
+        let response = complete_exchange(
+            &ctx,
+            info,
+            &provider,
+            &attempt,
+            true,
+            mock_upstream_tokens(),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(
+            response.idp_refresh_token,
+            Some("secret-upstream-refresh-token".to_string()),
+            "IdP refresh token must be returned alongside the IdP token when permitted"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_exchange_omits_idp_refresh_token_when_provider_issues_none() {
+        let storage = mock_exchange_storage(vec![
+            VPermission::CreateAccessToken,
+            VPermission::RetrieveRemoteAccessToken,
+        ]);
+        let ctx = mock_context(Arc::new(storage)).await;
+        let attempt = mock_completed_attempt();
+        let info = mock_user_info_with_idp_token();
+        let provider = NoOpOAuthProvider::new();
+
+        // A provider that does not issue refresh tokens leaves the field unset.
+        let upstream = UpstreamTokens {
+            access_token: Some(SecretBox::from("secret-upstream-token")),
+            refresh_token: None,
+        };
+
+        let response = complete_exchange(&ctx, info, &provider, &attempt, true, upstream)
+            .await
+            .unwrap()
+            .0;
+
+        assert_eq!(
+            response.idp_token,
+            Some("secret-upstream-token".to_string())
+        );
+        assert_eq!(
+            response.idp_refresh_token, None,
+            "No refresh token should be returned when the provider did not issue one"
         );
     }
 
@@ -2540,7 +2626,7 @@ mod tests {
             &provider,
             &attempt,
             true,
-            Some("secret-upstream-token".to_string()),
+            mock_upstream_tokens(),
         )
         .await
         .unwrap()
@@ -2549,6 +2635,10 @@ mod tests {
         assert_eq!(
             response.idp_token, None,
             "IdP token must NOT be returned when user lacks RetrieveRemoteAccessToken"
+        );
+        assert_eq!(
+            response.idp_refresh_token, None,
+            "IdP refresh token must NOT be returned when user lacks RetrieveRemoteAccessToken"
         );
     }
 
@@ -2659,10 +2749,17 @@ mod tests {
 
         let provider = NoOpOAuthProvider::new();
 
-        let response = complete_exchange(&ctx, info, &provider, &attempt, false, None)
-            .await
-            .unwrap()
-            .0;
+        let response = complete_exchange(
+            &ctx,
+            info,
+            &provider,
+            &attempt,
+            false,
+            UpstreamTokens::default(),
+        )
+        .await
+        .unwrap()
+        .0;
 
         // Serialize the response to JSON and check for a "scope" field.
         // Per RFC 6749 §5.1, the authorization server SHOULD include the scope
@@ -2695,7 +2792,7 @@ mod tests {
             &provider,
             &attempt,
             false,
-            Some("secret-upstream-token".to_string()),
+            mock_upstream_tokens(),
         )
         .await
         .unwrap()
@@ -2704,6 +2801,10 @@ mod tests {
         assert_eq!(
             response.idp_token, None,
             "IdP token must NOT be returned when not requested, even with permission"
+        );
+        assert_eq!(
+            response.idp_refresh_token, None,
+            "IdP refresh token must NOT be returned when not requested, even with permission"
         );
     }
 
@@ -2905,10 +3006,17 @@ mod tests {
         };
         let provider = NoOpOAuthProvider::new();
 
-        let response = complete_exchange(&ctx, info, &provider, &attempt, false, None)
-            .await
-            .unwrap()
-            .0;
+        let response = complete_exchange(
+            &ctx,
+            info,
+            &provider,
+            &attempt,
+            false,
+            UpstreamTokens::default(),
+        )
+        .await
+        .unwrap()
+        .0;
 
         assert_eq!(
             response.scope, "",
@@ -2945,10 +3053,17 @@ mod tests {
         };
         let provider = NoOpOAuthProvider::new();
 
-        let response = complete_exchange(&ctx, info, &provider, &attempt, false, None)
-            .await
-            .unwrap()
-            .0;
+        let response = complete_exchange(
+            &ctx,
+            info,
+            &provider,
+            &attempt,
+            false,
+            UpstreamTokens::default(),
+        )
+        .await
+        .unwrap()
+        .0;
 
         assert_eq!(
             response.scope, "full",
@@ -2985,10 +3100,17 @@ mod tests {
         };
         let provider = NoOpOAuthProvider::new();
 
-        let response = complete_exchange(&ctx, info, &provider, &attempt, false, None)
-            .await
-            .unwrap()
-            .0;
+        let response = complete_exchange(
+            &ctx,
+            info,
+            &provider,
+            &attempt,
+            false,
+            UpstreamTokens::default(),
+        )
+        .await
+        .unwrap()
+        .0;
 
         assert_eq!(
             response.scope, "user:info:r",

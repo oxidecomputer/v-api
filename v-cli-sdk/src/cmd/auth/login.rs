@@ -14,7 +14,8 @@ use crate::{
 
 pub trait CliAdapterToken {
     fn access_token(&self) -> &str;
-    fn idp_token(&self) -> Option<&str>;
+    fn idp_access_token(&self) -> Option<&str>;
+    fn idp_refresh_token(&self) -> Option<&str>;
 }
 
 pub trait CliConsumerLoginProvider: Into<LoginProvider> + Subcommand + Debug + Clone {}
@@ -48,12 +49,18 @@ where
         ctx.config_mut().save()?;
 
         // If we are acquiring an IdP token, present it to the user.
-        if let Some(idp_token) = idp_token {
+        if let Some(idp_access_token) = idp_token
+            .as_ref()
+            .and_then(|token| token.access_token.as_ref())
+        {
             println!(
                 "\nYou can now additionally authenticate against the requested remote service API \
                 with the following token."
             );
-            println!("IdP token: {}", idp_token);
+            println!("IdP Access token: {}", idp_access_token);
+            if let Some(refresh_token) = idp_token.and_then(|token| token.refresh_token) {
+                println!("IdP Refresh token: {}", refresh_token);
+            }
             println!();
             println!(
                 "Please note that this should be kept secure as calls made with this token are \
@@ -93,6 +100,11 @@ where
     },
 }
 
+pub struct UpstreamTokens {
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+}
+
 #[derive(Copy, Clone)]
 pub enum LoginProvider {
     Google,
@@ -120,7 +132,7 @@ where
         &self,
         ctx: &T,
         mode: AuthenticationMode,
-    ) -> Result<(String, Option<String>)>
+    ) -> Result<(String, Option<UpstreamTokens>)>
     where
         T: VCliContext<C, R>,
         <T as VCliContext<C, R>>::Error: StdError + Send + Sync + 'static,
@@ -206,7 +218,7 @@ where
         mode: AuthenticationMode,
         request_idp_token: bool,
         adapter: V,
-    ) -> Result<(String, Option<String>)>
+    ) -> Result<(String, Option<UpstreamTokens>)>
     where
         T: CliOAuthProviderInfo,
         V: CliOAuthAdapter + Send + Sync + 'static,
@@ -229,7 +241,10 @@ where
         };
 
         let idp_token = if request_idp_token {
-            identity_token.idp_token().map(|s| s.to_string())
+            Some(UpstreamTokens {
+                access_token: identity_token.idp_access_token().map(|s| s.to_string()),
+                refresh_token: identity_token.idp_refresh_token().map(|s| s.to_string()),
+            })
         } else {
             None
         };
