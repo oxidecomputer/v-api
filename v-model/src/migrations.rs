@@ -6,7 +6,9 @@ use diesel::{
     PgConnection,
     r2d2::{ConnectionManager, ManageConnection},
 };
-use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
+use diesel_migrations::{
+    EmbeddedMigrations, HarnessWithOutput, MigrationHarness, embed_migrations,
+};
 
 /// Core v-model migrations that are always applied.
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
@@ -34,6 +36,8 @@ pub fn run_migrations(url: &str) {
     let mut conn = conn.connect().unwrap();
 
     for migrations in all_migrations() {
-        conn.run_pending_migrations(migrations).unwrap();
+        HarnessWithOutput::write_to_stdout(&mut conn)
+            .run_pending_migrations(migrations)
+            .unwrap();
     }
 }
