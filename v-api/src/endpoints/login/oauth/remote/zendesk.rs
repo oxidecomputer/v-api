@@ -100,7 +100,7 @@ struct ZendeskUser {
     name: String,
     email: String,
     verified: bool,
-    suspended: bool,
+    suspended: Option<bool>,
 }
 
 impl ExtractUserInfo for ZendeskOAuthProvider {
@@ -108,7 +108,7 @@ impl ExtractUserInfo for ZendeskOAuthProvider {
         let response: ZendeskUserResponse = serde_json::from_slice(&data[0])?;
         let user = response.user;
 
-        if user.suspended {
+        if user.suspended.unwrap_or(false) {
             return Err(UserInfoError::Locked);
         }
 
