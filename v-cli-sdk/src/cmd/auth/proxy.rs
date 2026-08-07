@@ -74,7 +74,13 @@ async fn serve_loop(
                                 .take();
 
                             match handler {
-                                Some(f) => f(req).await,
+                                Some(f) => {
+                                    let resp = f(req).await;
+                                    resp.map_err(|err| {
+                                        eprintln!("Handler error: {:?}", err);
+                                        err
+                                    })
+                                },
                                 None => Ok(Response::builder()
                                     .status(StatusCode::GONE)
                                     .body(Full::new(Bytes::from(
