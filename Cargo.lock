@@ -3530,6 +3530,7 @@ dependencies = [
 name = "v-api-param"
 version = "0.4.13"
 dependencies = [
+ "newtype-uuid",
  "secrecy",
  "serde",
  "serde_json",
