@@ -23,7 +23,7 @@ use serde::{
 };
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use v_api_param::{ParamResolutionError, StringParam};
+use v_api_param::{ParamResolutionError, Raw, SerializedParam, StringParam};
 use v_model::OAuthClientId;
 
 use crate::{
@@ -171,8 +171,10 @@ pub struct OAuthConfig {
 #[partial(ResolvedOAuthDeviceConfig)]
 #[derive(Clone, Debug, Deserialize)]
 pub struct OAuthDeviceConfig {
-    pub client_id: TypedUuid<OAuthClientId>,
-    pub remote_client_id: String,
+    #[partial(ResolvedOAuthDeviceConfig(retype = TypedUuid<OAuthClientId>))]
+    pub client_id: SerializedParam<TypedUuid<OAuthClientId>, Raw>,
+    #[partial(ResolvedOAuthDeviceConfig(retype = String))]
+    pub remote_client_id: StringParam,
     #[partial(ResolvedOAuthDeviceConfig(retype = SecretString))]
     pub remote_client_secret: StringParam,
 }
@@ -180,7 +182,8 @@ pub struct OAuthDeviceConfig {
 #[partial(ResolvedOAuthWebConfig)]
 #[derive(Clone, Debug, Deserialize)]
 pub struct OAuthWebConfig {
-    pub remote_client_id: String,
+    #[partial(ResolvedOAuthWebConfig(retype = String))]
+    pub remote_client_id: StringParam,
     #[partial(ResolvedOAuthWebConfig(retype = SecretString))]
     pub remote_client_secret: StringParam,
 }
@@ -219,8 +222,12 @@ impl OAuthDeviceConfig {
     ) -> Result<ResolvedOAuthDeviceConfig, ParamResolutionError> {
         let remote_client_secret = self.remote_client_secret.resolve(base)?;
         Ok(ResolvedOAuthDeviceConfig {
-            client_id: self.client_id,
-            remote_client_id: self.remote_client_id.clone(),
+            client_id: self.client_id.resolve(base)?,
+            remote_client_id: self
+                .remote_client_id
+                .resolve(base)?
+                .expose_secret()
+                .to_string(),
             remote_client_secret,
         })
     }
@@ -232,7 +239,11 @@ impl OAuthWebConfig {
     ) -> Result<ResolvedOAuthWebConfig, ParamResolutionError> {
         let remote_client_secret = self.remote_client_secret.resolve(base)?;
         Ok(ResolvedOAuthWebConfig {
-            remote_client_id: self.remote_client_id.clone(),
+            remote_client_id: self
+                .remote_client_id
+                .resolve(base)?
+                .expose_secret()
+                .to_string(),
             remote_client_secret,
         })
     }
