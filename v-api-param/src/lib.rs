@@ -412,7 +412,7 @@ mod tests {
         // A file holding nothing but the value, with trailing whitespace as a
         // file written by `echo` would have.
         let mut file = NamedTempFile::new().unwrap();
-        write!(file, "  raw-value\n").unwrap();
+        writeln!(file, "  raw-value").unwrap();
 
         let param: RawParam<String> = SerializedParam::from_path(file.path());
         assert_eq!(param.resolve(None).unwrap(), "raw-value");
@@ -456,7 +456,7 @@ mod tests {
 
         let raw = "1a1e02f3-5d09-4b7f-b8f1-7b8a2c4d5e6f";
         let mut file = NamedTempFile::new().unwrap();
-        write!(file, "{}\n", raw).unwrap();
+        writeln!(file, "{}", raw).unwrap();
 
         let param: RawParam<TypedUuid<TestKind>> = SerializedParam::from_path(file.path());
         assert_eq!(param.resolve(None).unwrap().to_string(), raw);
