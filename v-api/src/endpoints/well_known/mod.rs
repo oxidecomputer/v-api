@@ -29,12 +29,18 @@ where
     T: VAppPermission + PermissionStorage,
 {
     Ok(HttpResponseOk(OpenIdConfiguration {
-        issuer: format!("{}", rqctx.v_ctx().public_url()),
+        issuer: rqctx.v_ctx().public_url().to_string(),
         jwks_uri: format!("{}/.well-known/jwks.json", rqctx.v_ctx().public_url()),
         response_types_supported: vec!["id_token".to_string()],
         subject_types_supported: vec!["public".to_string()],
         id_token_signing_alg_values_supported: vec!["RS256".to_string()],
-        claims_supported: vec!["iss".to_string(), "sub".to_string(), "aud".to_string(), "exp".to_string(), "iat".to_string()],
+        claims_supported: vec![
+            "iss".to_string(),
+            "sub".to_string(),
+            "aud".to_string(),
+            "exp".to_string(),
+            "iat".to_string(),
+        ],
     }))
 }
 
