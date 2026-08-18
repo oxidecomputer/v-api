@@ -17,7 +17,7 @@ use std::ops::{Add, Sub};
 use uuid::Uuid;
 use v_model::{
     NewApiKey, NewApiUser, NewMagicLink, NewMagicLinkAttempt, NewMapper, UserId,
-    migrations::run_migrations,
+    migrations::run_migrations_quiet,
     schema_ext::MagicLinkAttemptState,
     storage::{
         ApiKeyFilter, ApiKeyStore, ApiUserFilter, ApiUserStore, ListPagination,
@@ -94,7 +94,7 @@ impl TestDb {
         println!("Created database {:?}", create_result);
 
         println!("Running migrations on {}", db.url());
-        run_migrations(&db.url());
+        run_migrations_quiet(&db.url());
         println!("Ran migrtations on {}", db.url());
 
         db
