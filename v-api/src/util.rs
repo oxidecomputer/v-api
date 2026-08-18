@@ -267,7 +267,7 @@ pub mod tests {
         pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding},
     };
 
-    use crate::config::AsymmetricKey;
+    use crate::config::ResolvedAsymmetricKey;
 
     pub fn get_status<T>(res: &Result<T, HttpError>) -> StatusCode
     where
@@ -280,8 +280,8 @@ pub mod tests {
     }
 
     pub struct MockKey {
-        pub signer: AsymmetricKey,
-        pub verifier: AsymmetricKey,
+        pub signer: ResolvedAsymmetricKey,
+        pub verifier: ResolvedAsymmetricKey,
     }
 
     pub fn mock_key(kid: &str) -> MockKey {
@@ -291,7 +291,7 @@ pub mod tests {
         let pub_key = RsaPublicKey::from(&priv_key);
 
         MockKey {
-            signer: AsymmetricKey::LocalSigner {
+            signer: ResolvedAsymmetricKey::LocalSigner {
                 kid: hex::encode(kid),
                 private: String::from_utf8(
                     priv_key
@@ -303,7 +303,7 @@ pub mod tests {
                 .unwrap()
                 .into(),
             },
-            verifier: AsymmetricKey::LocalVerifier {
+            verifier: ResolvedAsymmetricKey::LocalVerifier {
                 kid: hex::encode(kid),
                 public: String::from_utf8(
                     pub_key

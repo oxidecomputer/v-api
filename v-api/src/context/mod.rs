@@ -41,7 +41,7 @@ use crate::{
         AuthError, AuthToken, Sign, SigningKeyError, VerificationResult, Verify,
         jwt::{Claims, DEFAULT_JWT_EXPIRATION, JwtSigner, JwtSignerError},
     },
-    config::{AsymmetricKey, JwtConfig},
+    config::{JwtConfig, ResolvedAsymmetricKey},
     endpoints::login::{
         UserInfo,
         oauth::{
@@ -805,7 +805,7 @@ pub struct VContextBuilder<T> {
     public_url: Option<String>,
     storage: Option<Arc<dyn VApiStorage<T>>>,
     storage_url: Option<String>,
-    keys: Option<Vec<AsymmetricKey>>,
+    keys: Option<Vec<ResolvedAsymmetricKey>>,
     mappers: Vec<PresetMapperConfig>,
     #[cfg(feature = "sagas")]
     saga: Option<(TypedUuid<SagaExecNodeId>, Option<Logger>)>,
@@ -871,7 +871,7 @@ where
         self
     }
 
-    pub fn with_keys(mut self, keys: Vec<AsymmetricKey>) -> Self {
+    pub fn with_keys(mut self, keys: Vec<ResolvedAsymmetricKey>) -> Self {
         self.keys = Some(keys);
         self
     }
