@@ -151,14 +151,12 @@ pub enum ResolvedAsymmetricKey {
 impl AsymmetricKey {
     pub fn resolve(self, base: Option<&Path>) -> Result<ResolvedAsymmetricKey, SigningKeyError> {
         Ok(match self {
-            Self::LocalVerifier { kid, public } => ResolvedAsymmetricKey::LocalVerifier {
-                kid: kid,
-                public: public,
-            },
-            Self::LocalSigner { kid, private } => ResolvedAsymmetricKey::LocalSigner {
-                kid: kid,
-                private: private,
-            },
+            Self::LocalVerifier { kid, public } => {
+                ResolvedAsymmetricKey::LocalVerifier { kid, public }
+            }
+            Self::LocalSigner { kid, private } => {
+                ResolvedAsymmetricKey::LocalSigner { kid, private }
+            }
             Self::CkmsVerifier {
                 kid,
                 version,
@@ -168,7 +166,7 @@ impl AsymmetricKey {
                 project,
             } => ResolvedAsymmetricKey::CkmsVerifier {
                 kid: kid.resolve(base)?.expose_secret().to_string(),
-                version: version,
+                version,
                 key: key.resolve(base)?.expose_secret().to_string(),
                 keyring: keyring.resolve(base)?.expose_secret().to_string(),
                 location: location.resolve(base)?.expose_secret().to_string(),
@@ -183,7 +181,7 @@ impl AsymmetricKey {
                 project,
             } => ResolvedAsymmetricKey::CkmsSigner {
                 kid: kid.resolve(base)?.expose_secret().to_string(),
-                version: version,
+                version,
                 key: key.resolve(base)?.expose_secret().to_string(),
                 keyring: keyring.resolve(base)?.expose_secret().to_string(),
                 location: location.resolve(base)?.expose_secret().to_string(),
