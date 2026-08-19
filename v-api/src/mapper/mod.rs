@@ -178,7 +178,7 @@ where
 mod tests {
     use chrono::Utc;
     use newtype_uuid::TypedUuid;
-    use v_model::{AccessGroup, permissions::Permissions};
+    use v_model::{AccessGroup, AccessGroupSource, permissions::Permissions};
 
     use crate::permissions::VPermission;
 
@@ -189,6 +189,7 @@ mod tests {
             id: TypedUuid::new_v4(),
             name: name.to_string(),
             permissions: Permissions::new(),
+            source: AccessGroupSource::Dynamic,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             deleted_at: None,

@@ -132,6 +132,26 @@ impl Display for MagicLinkAttemptState {
     }
 }
 
+/// Where an access group is defined. Groups loaded from service configuration are
+/// immutable at runtime; only their membership can change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AccessGroupSource {
+    /// Created via the API and persisted in the database
+    Dynamic,
+    /// Loaded from service configuration, in-memory only, name and permissions are fixed
+    Preset,
+}
+
+impl Display for AccessGroupSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AccessGroupSource::Dynamic => write!(f, "dynamic"),
+            AccessGroupSource::Preset => write!(f, "preset"),
+        }
+    }
+}
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, FromSqlRow, AsExpression, Serialize, Deserialize, JsonSchema,
 )]
