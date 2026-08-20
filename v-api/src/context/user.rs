@@ -92,6 +92,7 @@ where
 pub struct UserContext<T> {
     caller_extension_handlers: Vec<Arc<dyn CallerExtension<T>>>,
     storage: Arc<dyn VApiStorage<T>>,
+    preset_groups: Arc<Vec<AccessGroup<T>>>,
 }
 
 impl<T> UserContext<T>
@@ -102,11 +103,16 @@ where
         Self {
             caller_extension_handlers: Vec::new(),
             storage,
+            preset_groups: Arc::new(Vec::new()),
         }
     }
 
     pub fn set_storage(&mut self, storage: Arc<dyn VApiStorage<T>>) {
         self.storage = storage;
+    }
+
+    pub fn set_preset_groups(&mut self, groups: Vec<AccessGroup<T>>) {
+        self.preset_groups = Arc::new(groups);
     }
 
     pub fn add_extension_handler(&mut self, handler: Arc<dyn CallerExtension<T>>) {
@@ -299,7 +305,7 @@ where
     ) -> Result<Permissions<T>, StoreError> {
         tracing::trace!("Expanding groups into permissions");
 
-        let groups = AccessGroupStore::list(
+        let mut groups = AccessGroupStore::list(
             &*self.storage,
             AccessGroupFilter {
                 id: Some(user.groups.iter().copied().collect()),
@@ -308,6 +314,13 @@ where
             &ListPagination::unlimited(),
         )
         .await?;
+
+        groups.extend(
+            self.preset_groups
+                .iter()
+                .filter(|group| user.groups.contains(&group.id))
+                .cloned(),
+        );
 
         tracing::trace!(?groups, "Found groups to map to permissions");
 

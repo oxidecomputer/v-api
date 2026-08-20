@@ -108,7 +108,7 @@ mod tests {
     use chrono::Utc;
     use newtype_uuid::TypedUuid;
     use v_model::{
-        AccessGroup,
+        AccessGroup, AccessGroupSource,
         permissions::{Caller, Permissions},
         storage::MockAccessGroupStore,
     };
@@ -133,6 +133,7 @@ mod tests {
             id: group_id,
             name: group_name.to_string(),
             permissions: Permissions::<VPermission>::new(),
+            source: AccessGroupSource::Dynamic,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             deleted_at: None,

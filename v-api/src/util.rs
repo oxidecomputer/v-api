@@ -184,6 +184,10 @@ pub mod response {
         ResourceResult::Err(ResourceError::DoesNotExist)
     }
 
+    pub fn resource_conflict<T, E>() -> ResourceResult<T, E> {
+        ResourceResult::Err(ResourceError::Conflict)
+    }
+
     pub fn resource_restricted<T, E>() -> ResourceResult<T, E> {
         ResourceResult::Err(ResourceError::Restricted)
     }
