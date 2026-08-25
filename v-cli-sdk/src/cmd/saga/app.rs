@@ -339,7 +339,11 @@ where
             })
             .collect();
 
-        let more = if self.end_reached { "" } else { " (more available)" };
+        let more = if self.end_reached {
+            ""
+        } else {
+            " (more available)"
+        };
         let title = format!(" Sagas — {}{} ", self.sagas.len(), more);
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL).title(title))
@@ -375,10 +379,7 @@ where
         if let Some(detail) = &self.detail {
             let header = Paragraph::new(vec![
                 Line::from(vec![
-                    Span::styled(
-                        detail.name(),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
+                    Span::styled(detail.name(), Style::default().add_modifier(Modifier::BOLD)),
                     Span::raw("  "),
                     Span::styled(detail.state(), state_style(&detail.state())),
                 ]),
@@ -463,16 +464,17 @@ where
                     for event in events {
                         lines.push(Line::from(vec![
                             Span::styled(
-                                event.event_type().split_once("(").map(|(name, _)| name.to_string()).unwrap_or(event.event_type()),
+                                event
+                                    .event_type()
+                                    .split_once("(")
+                                    .map(|(name, _)| name.to_string())
+                                    .unwrap_or(event.event_type()),
                                 Style::default()
                                     .fg(Color::Cyan)
                                     .add_modifier(Modifier::BOLD),
                             ),
                             Span::raw("  "),
-                            Span::styled(
-                                event.created_at(),
-                                Style::default().fg(Color::DarkGray),
-                            ),
+                            Span::styled(event.created_at(), Style::default().fg(Color::DarkGray)),
                         ]));
                         let data = serde_json::to_string_pretty(event.event_data())
                             .unwrap_or_else(|_| event.event_data().to_string());
@@ -513,7 +515,11 @@ fn bordered(title: &str, focused: bool) -> Block<'_> {
         .borders(Borders::ALL)
         .title(title.to_string());
     if focused {
-        block = block.border_style(Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD));
+        block = block.border_style(
+            Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+        );
     }
     block
 }

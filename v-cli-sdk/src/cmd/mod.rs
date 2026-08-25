@@ -4,5 +4,5 @@
 
 pub mod auth;
 pub mod config;
-#[cfg(feature = "sagas")]
+#[cfg(all(feature = "sagas", feature = "experimental"))]
 pub mod saga;

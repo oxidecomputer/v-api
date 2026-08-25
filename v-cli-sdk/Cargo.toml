@@ -27,4 +27,6 @@ uuid = { workspace = true }
 # Enables the interactive saga browser command and the `saga_adapter` method on
 # `VCliContext`. Off by default so existing consumers are unaffected.
 default = ["sagas"]
+
 sagas = ["dep:ratatui"]
+experimental = []

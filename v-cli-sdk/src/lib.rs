@@ -66,7 +66,7 @@ pub trait VCliContext<C, P> {
     /// Adapter used by the interactive saga browser to fetch sagas and their
     /// details. Consumers implement [`crate::cmd::saga::CliSagaAdapter`] on
     /// their own generated types and return it here.
-    #[cfg(feature = "sagas")]
+    #[cfg(all(feature = "sagas", feature = "experimental"))]
     fn saga_adapter(&self) -> impl crate::cmd::saga::CliSagaAdapter + Send + Sync + 'static;
 }
 
