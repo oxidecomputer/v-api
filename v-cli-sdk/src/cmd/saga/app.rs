@@ -119,12 +119,11 @@ where
         loop {
             terminal.draw(|frame| self.render(frame))?;
 
-            if event::poll(INPUT_POLL)? {
-                if let Event::Key(key) = event::read()?
-                    && key.kind == KeyEventKind::Press
-                {
-                    self.handle_key(key.code).await;
-                }
+            if event::poll(INPUT_POLL)?
+                && let Event::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                self.handle_key(key.code).await;
             }
 
             if self.should_quit {
