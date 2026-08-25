@@ -30,7 +30,7 @@ pub mod storage;
 
 pub use {
     permissions::{ArcMap, Permissions},
-    schema_ext::{LoginAttemptState, MapperSource},
+    schema_ext::{AccessGroupSource, LoginAttemptState, MapperSource},
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -683,6 +683,8 @@ pub struct AccessGroup<T> {
     pub name: String,
     pub permissions: Permissions<T>,
     #[partial(NewAccessGroup(skip))]
+    pub source: AccessGroupSource,
+    #[partial(NewAccessGroup(skip))]
     pub created_at: DateTime<Utc>,
     #[partial(NewAccessGroup(skip))]
     pub updated_at: DateTime<Utc>,
@@ -696,6 +698,8 @@ impl<T> From<AccessGroupModel<T>> for AccessGroup<T> {
             id: TypedUuid::from_untyped_uuid(value.id),
             name: value.name,
             permissions: value.permissions,
+            // By definition a stored group is dynamic
+            source: AccessGroupSource::Dynamic,
             created_at: value.created_at,
             updated_at: value.updated_at,
             deleted_at: value.deleted_at,

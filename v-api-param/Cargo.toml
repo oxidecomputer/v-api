@@ -17,5 +17,6 @@ json = ["dep:serde_json"]
 toml = ["dep:toml"]
 
 [dev-dependencies]
+newtype-uuid = { workspace = true }
 tempfile = { workspace = true }
 toml = { workspace = true }

@@ -36,25 +36,22 @@ pub mod request {
     use http::header::COOKIE;
 
     pub trait RequestCookies {
-        fn cookie(&'_ self, name: &str) -> Option<Cookie<'_>>;
+        /// Return every cookie with the given name. A client may present more
+        /// than one cookie with the same name (for example when it is holding
+        /// stale cookies issued under previous cookie settings).
+        fn cookies(&'_ self, name: &str) -> Vec<Cookie<'_>>;
     }
 
     impl RequestCookies for RequestInfo {
-        fn cookie(&'_ self, name: &str) -> Option<Cookie<'_>> {
-            let cookie_header = self.headers().get(COOKIE)?;
-
-            Cookie::split_parse(String::from_utf8(cookie_header.as_bytes().to_vec()).unwrap())
-                .filter_map(|cookie| match cookie {
-                    Ok(cookie) => {
-                        if cookie.name() == name {
-                            Some(cookie)
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                })
-                .nth(0)
+        fn cookies(&'_ self, name: &str) -> Vec<Cookie<'_>> {
+            self.headers()
+                .get_all(COOKIE)
+                .iter()
+                .filter_map(|value| value.to_str().ok())
+                .flat_map(|header| Cookie::split_parse(header.to_string()))
+                .filter_map(Result::ok)
+                .filter(|cookie| cookie.name() == name)
+                .collect()
         }
     }
 }
@@ -187,6 +184,10 @@ pub mod response {
         ResourceResult::Err(ResourceError::DoesNotExist)
     }
 
+    pub fn resource_conflict<T, E>() -> ResourceResult<T, E> {
+        ResourceResult::Err(ResourceError::Conflict)
+    }
+
     pub fn resource_restricted<T, E>() -> ResourceResult<T, E> {
         ResourceResult::Err(ResourceError::Restricted)
     }
@@ -270,7 +271,7 @@ pub mod tests {
         pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding},
     };
 
-    use crate::config::AsymmetricKey;
+    use crate::config::ResolvedAsymmetricKey;
 
     pub fn get_status<T>(res: &Result<T, HttpError>) -> StatusCode
     where
@@ -283,8 +284,8 @@ pub mod tests {
     }
 
     pub struct MockKey {
-        pub signer: AsymmetricKey,
-        pub verifier: AsymmetricKey,
+        pub signer: ResolvedAsymmetricKey,
+        pub verifier: ResolvedAsymmetricKey,
     }
 
     pub fn mock_key(kid: &str) -> MockKey {
@@ -294,7 +295,7 @@ pub mod tests {
         let pub_key = RsaPublicKey::from(&priv_key);
 
         MockKey {
-            signer: AsymmetricKey::LocalSigner {
+            signer: ResolvedAsymmetricKey::LocalSigner {
                 kid: hex::encode(kid),
                 private: String::from_utf8(
                     priv_key
@@ -306,7 +307,7 @@ pub mod tests {
                 .unwrap()
                 .into(),
             },
-            verifier: AsymmetricKey::LocalVerifier {
+            verifier: ResolvedAsymmetricKey::LocalVerifier {
                 kid: hex::encode(kid),
                 public: String::from_utf8(
                     pub_key

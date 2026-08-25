@@ -175,6 +175,7 @@ fn bump_on_pr_branch(
 
 fn bump_package_versions(root_path: &Path, version: &Version) -> Result<(), String> {
     update_workspace_version(root_path, version)?;
+    update_npm_package_version(root_path, version)?;
 
     println!("Running cargo check to update Cargo.lock...");
     let status = Command::new("cargo")
@@ -187,6 +188,30 @@ fn bump_package_versions(root_path: &Path, version: &Version) -> Result<(), Stri
         return Err("cargo check failed".to_string());
     }
 
+    Ok(())
+}
+
+fn update_npm_package_version(root_path: &Path, version: &Version) -> Result<(), String> {
+    // We currently do not version any npm packages. Notable remix-auth-vapi is not versioned along
+    // with the rest of the packages.
+    let packages: Vec<String> = vec![];
+    for package in packages {
+        let package_dir = root_path.join(&package);
+        println!("Running npm version to update {package}'s package.json/package-lock.json...");
+        let status = Command::new("npm")
+            .args([
+                "version",
+                &version.to_string(),
+                "--no-git-tag-version",
+                "--allow-same-version",
+            ])
+            .current_dir(&package_dir)
+            .status()
+            .map_err(|e| format!("failed to run npm version: {}", e))?;
+        if !status.success() {
+            return Err("npm version failed".to_string());
+        }
+    }
     Ok(())
 }
 

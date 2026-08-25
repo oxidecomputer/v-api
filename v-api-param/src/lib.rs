@@ -13,7 +13,9 @@
 //! - [`SerializedParam`] resolves to an arbitrary `T`, deserializing the file
 //!   contents using a [`ParamFormat`] marker (for example [`Json`] or
 //!   [`Toml`]). This is useful when the file contents are themselves a
-//!   structured document whose shape and size are only known at runtime.
+//!   structured document whose shape and size are only known at runtime. The
+//!   [`Raw`] marker covers the simpler case of a file holding a single bare
+//!   value such as a uuid.
 //!
 //! # TOML Usage
 //!
@@ -239,6 +241,8 @@ pub trait ParamFormat {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum FormatError {
+    #[error("Failed to deserialize as a raw value")]
+    Raw(#[from] serde::de::value::Error),
     #[cfg(feature = "json")]
     #[error("Failed to deserialize as JSON")]
     Json(#[from] serde_json::Error),
@@ -246,6 +250,20 @@ pub enum FormatError {
     #[error("Failed to deserialize as TOML")]
     Toml(#[from] toml::de::Error),
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct Raw;
+
+impl ParamFormat for Raw {
+    fn deserialize_str<T: DeserializeOwned>(content: &str) -> Result<T, FormatError> {
+        let deserializer =
+            serde::de::value::StrDeserializer::<serde::de::value::Error>::new(content.trim());
+        Ok(T::deserialize(deserializer)?)
+    }
+}
+
+/// A [`SerializedParam`] that reads its file contents as a single raw value.
+pub type RawParam<T> = SerializedParam<T, Raw>;
 
 /// Marker type selecting JSON deserialization for a [`SerializedParam`].
 #[cfg(feature = "json")]
@@ -297,7 +315,7 @@ fn read_to_string(path: &Path) -> Result<String, ParamResolutionError> {
 mod tests {
     use super::*;
     use secrecy::ExposeSecret;
-    use std::io::Write;
+    use std::{io::Write, str::FromStr};
     use tempfile::NamedTempFile;
 
     #[test]
@@ -387,6 +405,61 @@ mod tests {
             config.key.resolve(None).unwrap().expose_secret(),
             "path-value"
         );
+    }
+
+    #[test]
+    fn test_serialized_raw_from_path() {
+        // A file holding nothing but the value, with trailing whitespace as a
+        // file written by `echo` would have.
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "  raw-value").unwrap();
+
+        let param: RawParam<String> = SerializedParam::from_path(file.path());
+        assert_eq!(param.resolve(None).unwrap(), "raw-value");
+    }
+
+    #[test]
+    fn test_serialized_raw_inline() {
+        use newtype_uuid::{TypedUuid, TypedUuidKind, TypedUuidTag};
+
+        enum TestKind {}
+        impl TypedUuidKind for TestKind {
+            fn tag() -> TypedUuidTag {
+                const TAG: TypedUuidTag = TypedUuidTag::new("test");
+                TAG
+            }
+        }
+
+        #[derive(Deserialize)]
+        struct Config {
+            key: RawParam<TypedUuid<TestKind>>,
+        }
+
+        let raw = "1a1e02f3-5d09-4b7f-b8f1-7b8a2c4d5e6f";
+        let parsed = TypedUuid::from_str(raw).unwrap();
+
+        let config: Config = toml::from_str(&format!("key = \"{}\"", raw)).unwrap();
+        assert_eq!(config.key.resolve(None).unwrap(), parsed);
+    }
+
+    #[test]
+    fn test_serialized_raw_typed_uuid() {
+        use newtype_uuid::{TypedUuid, TypedUuidKind, TypedUuidTag};
+
+        enum TestKind {}
+        impl TypedUuidKind for TestKind {
+            fn tag() -> TypedUuidTag {
+                const TAG: TypedUuidTag = TypedUuidTag::new("test");
+                TAG
+            }
+        }
+
+        let raw = "1a1e02f3-5d09-4b7f-b8f1-7b8a2c4d5e6f";
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "{}", raw).unwrap();
+
+        let param: RawParam<TypedUuid<TestKind>> = SerializedParam::from_path(file.path());
+        assert_eq!(param.resolve(None).unwrap().to_string(), raw);
     }
 
     #[cfg(feature = "json")]

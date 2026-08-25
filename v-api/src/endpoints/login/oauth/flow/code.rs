@@ -30,6 +30,7 @@ use v_model::{
 };
 
 use super::super::{OAuthProvider, OAuthProviderNameParam};
+use super::UpstreamTokens;
 use crate::endpoints::login::UserInfoProvider;
 use crate::{
     authn::key::RawKey,
@@ -51,6 +52,12 @@ use crate::{
 static LOGIN_ATTEMPT_COOKIE: &str = "__v_login";
 static LOGIN_ATTEMPT_COOKIE_PATH: &str = "/login/oauth/";
 
+/// All paths under which a login attempt cookie may exist and therefore must be
+/// destroyed when clearing it. The scoped path matches
+/// [`build_login_attempt_cookie`]; the root path is included so that stale
+/// cookies issued under previous (unscoped) cookie settings are also cleared.
+static LOGIN_ATTEMPT_COOKIE_PATHS: [&str; 2] = [LOGIN_ATTEMPT_COOKIE_PATH, "/"];
+
 /// Build the login attempt cookie with consistent attributes.
 /// The `Path` is scoped to the OAuth login endpoints so the cookie is not
 /// sent to unrelated paths on the same domain.
@@ -66,6 +73,33 @@ fn build_login_attempt_cookie<'a>(
     cookie.set_secure(public_url.starts_with("https"));
     cookie.set_max_age(cookie::time::Duration::seconds(max_age_secs));
     cookie
+}
+
+/// Build a cookie that clears the login attempt cookie at the given `path`.
+/// The attributes mirror [`build_login_attempt_cookie`] so that browsers
+/// reliably match and remove the previously set cookie.
+fn build_login_attempt_clear_cookie(path: &str, public_url: &str) -> Cookie<'static> {
+    let mut cookie = Cookie::new(LOGIN_ATTEMPT_COOKIE, String::new());
+    cookie.set_path(path.to_owned());
+    cookie.set_http_only(true);
+    cookie.set_same_site(SameSite::Lax);
+    cookie.set_secure(public_url.starts_with("https"));
+    cookie.set_max_age(cookie::time::Duration::seconds(0));
+    cookie
+}
+
+/// Build the `Set-Cookie` header values that destroy the login attempt cookie
+/// at every path it may have been issued under. This is used to tear down the
+/// attempt cookie on both successful and failed callbacks, and guards against
+/// conflicts caused by stale cookies left over from previous cookie settings.
+fn login_attempt_clear_cookies(public_url: &str) -> Result<Vec<HeaderValue>, HttpError> {
+    LOGIN_ATTEMPT_COOKIE_PATHS
+        .iter()
+        .map(|path| {
+            let cookie = build_login_attempt_clear_cookie(path, public_url);
+            HeaderValue::from_str(&cookie.to_string()).map_err(to_internal_error)
+        })
+        .collect()
 }
 
 // RFC 6749 §5.2 shaped error
@@ -383,9 +417,9 @@ fn verify_csrf(
     request: &RequestInfo,
     query: &OAuthAuthzCodeReturnQuery,
 ) -> Result<TypedUuid<LoginAttemptId>, HttpError> {
-    // If we are missing the expected state parameter then we can not proceed at all with verifying
-    // this callback request. We also do not have a redirect uri to send the user to so we instead
-    // report unauthorized
+    // If we are missing the expected state parameter then we can not proceed at
+    // all with verifying this callback request. We also do not have a redirect
+    // uri to send the user to so we instead report unauthorized
     let attempt_id = query
         .state
         .as_ref()
@@ -399,33 +433,44 @@ fn verify_csrf(
             bad_request("Invalid or missing OAuth state parameter")
         })?;
 
-    // The client must present the attempt cookie at a minimum. Without it we are unable to lookup a
-    // login attempt to match against. Without the cookie to verify the state parameter we can not
-    // determine a redirect uri so we instead report a bad request
-    let attempt_cookie = request
-        .cookie(LOGIN_ATTEMPT_COOKIE)
-        .ok_or_else(|| {
-            tracing::warn!("OAuth callback is missing a login state cookie");
-            bad_request("Invalid or missing OAuth state parameter")
-        })?
-        .value()
-        .parse()
-        .map_err(|err| {
-            tracing::warn!(?err, "Failed to parse state cookie");
-            bad_request("Invalid or missing OAuth state parameter")
-        })?;
+    // The client must present the attempt cookie at a minimum. Without it we
+    // are unable to lookup a login attempt to match against. Without the cookie
+    // to verify the state parameter we can not determine a redirect uri so we
+    // instead report a bad request.
+    //
+    // A client may present more than one cookie with this name if it is holding
+    // stale cookies issued under previous cookie settings. Because the wire
+    // format for request cookies only carries the name and value (never the
+    // Path/Secure/etc. attributes), we cannot distinguish the canonical cookie
+    // by its attributes here. Instead we accept the request only if one of the
+    // presented cookies carries the value we issued for this attempt via
+    // build_login_attempt_cookie (i.e. its value matches the CSRF state); any
+    // stale cookies with mismatched values are ignored.
+    let attempt_cookies = request.cookies(LOGIN_ATTEMPT_COOKIE);
+    if attempt_cookies.is_empty() {
+        tracing::warn!("OAuth callback is missing a login state cookie");
+        return Err(bad_request("Invalid or missing OAuth state parameter"));
+    }
 
-    // Verify that the attempt_id returned from the state matches the expected client value. If they
-    // do not match we can not lookup a redirect uri so we instead return a bad request
-    if attempt_id != attempt_cookie {
+    let has_matching_cookie = attempt_cookies.iter().any(|cookie| {
+        cookie
+            .value()
+            .parse::<TypedUuid<LoginAttemptId>>()
+            .map(|value| value == attempt_id)
+            .unwrap_or(false)
+    });
+
+    // Verify that the attempt_id returned from the state matches one of the
+    // presented cookie values. If none match we can not lookup a redirect uri
+    // so we instead return a bad request.
+    if has_matching_cookie {
+        Ok(attempt_id)
+    } else {
         tracing::warn!(
             ?attempt_id,
-            ?attempt_cookie,
-            "OAuth state does not match expected cookie value"
+            "OAuth state does not match any presented login attempt cookie"
         );
         Err(bad_request("Invalid or missing OAuth state parameter"))
-    } else {
-        Ok(attempt_id)
     }
 }
 
@@ -448,26 +493,46 @@ where
     let ctx = rqctx.v_ctx();
     let path = path.into_inner();
     let query = query.into_inner();
-    let provider = ctx
-        .get_oauth_provider(&path.provider)
-        .await
-        .map_err(ApiError::OAuth)?;
 
-    tracing::debug!(provider = ?provider.name(), "Acquired OAuth provider for authz code exchange");
+    // Build the Set-Cookie headers that destroy every login attempt cookie.
+    // These are attached to both successful and failed responses so that a
+    // completed or failed login never leaves a lingering (or stale) attempt
+    // cookie behind.
+    let clear_cookies = login_attempt_clear_cookies(ctx.public_url())?;
 
-    // Verify and extract the attempt id before performing any work
-    let attempt_id = verify_csrf(&rqctx.request, &query)?;
+    // Run the callback flow. On any failure we still want to destroy the login
+    // attempt cookies, so the clearing headers are attached to the error in the
+    // match below.
+    let result = async {
+        let provider = ctx
+            .get_oauth_provider(&path.provider)
+            .await
+            .map_err(ApiError::OAuth)?;
 
-    // Clear the login attempt cookie
-    let cookie = build_login_attempt_cookie("", ctx.public_url(), 0);
-    let login_cookie = HeaderValue::from_str(&cookie.to_string()).map_err(to_internal_error)?;
+        tracing::debug!(provider = ?provider.name(), "Acquired OAuth provider for authz code exchange");
 
-    let mut redirect = http_response_temporary_redirect(
-        authz_code_callback_op_inner(ctx, &attempt_id, query.code, query.error).await?,
-    )?;
-    redirect.headers_mut().append(SET_COOKIE, login_cookie);
+        // Verify and extract the attempt id before performing any work
+        let attempt_id = verify_csrf(&rqctx.request, &query)?;
+        let location =
+            authz_code_callback_op_inner(ctx, &attempt_id, query.code, query.error).await?;
+        http_response_temporary_redirect(location)
+    }
+    .await;
 
-    Ok(redirect)
+    match result {
+        Ok(mut redirect) => {
+            for cookie in &clear_cookies {
+                redirect.headers_mut().append(SET_COOKIE, cookie.clone());
+            }
+            Ok(redirect)
+        }
+        Err(mut err) => {
+            for cookie in &clear_cookies {
+                err.headers_mut().append(SET_COOKIE, cookie.clone());
+            }
+            Err(err)
+        }
+    }
 }
 
 pub async fn authz_code_callback_op_inner<T>(
@@ -479,8 +544,8 @@ pub async fn authz_code_callback_op_inner<T>(
 where
     T: VAppPermission + PermissionStorage,
 {
-    // We have now verified the attempt id and can use it to look up the rest of the login attempt
-    // material to try and complete the flow
+    // We have now verified the attempt id and can use it to look up the rest of
+    // the login attempt material to try and complete the flow
     let mut attempt = ctx
         .login
         .get_login_attempt(attempt_id)
@@ -592,7 +657,14 @@ pub struct OAuthAuthzCodeExchangeResponse {
     /// The scope granted to the access token per RFC 6749 §5.1. An empty
     /// string indicates no permissions. Use "full" for all permissions.
     pub scope: String,
+    /// Access token issued by the upstream identity provider. Only returned
+    /// when the caller requested it and holds the `RetrieveRemoteAccessToken`
+    /// permission.
     pub idp_token: Option<String>,
+    /// Refresh token issued by the upstream identity provider. Returned under
+    /// the same conditions as `idp_token`, and only when the provider issued
+    /// one.
+    pub idp_refresh_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
@@ -600,7 +672,7 @@ pub struct OAuthAuthzCodeIdpToken {
     pub token: String,
 }
 
-#[instrument(skip(rqctx), err(Debug))]
+#[instrument(skip(rqctx, body), err(Debug))]
 pub async fn authz_code_exchange_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     query: Query<OAuthAuthzCodeExchangeQuery>,
@@ -654,11 +726,7 @@ where
     // We of course deny underspecifying credentials, but we also want to disallow over specifying
     // them. For example, if the client provides both basic auth and a client id/secret in the
     // request body, we should reject the request.
-    tracing::debug!(
-        ?basic_credentials,
-        ?body_credentials,
-        "Extracted credentials from request"
-    );
+    tracing::debug!("Extracted credentials from request");
     let (client_id, client_secret) = match (basic_credentials, body_credentials) {
         (Some(_), (Some(_), _)) => Err(bad_request(
             "Cannot provide both basic auth and client credentials",
@@ -736,9 +804,9 @@ where
 
     // Now that the attempt has been claimed, use it to fetch user information from the
     // remote provider. If this fails, the attempt is already consumed and the user must
-    // re-authenticate. The upstream access token is always preserved here so that
+    // re-authenticate. The upstream tokens are always preserved here so that
     // revocation can be deferred until after the permission check.
-    let (info, upstream_token) = fetch_user_info(ctx.public_url(), &*provider, &attempt).await?;
+    let (info, upstream) = fetch_user_info(ctx.public_url(), &*provider, &attempt).await?;
 
     tracing::debug!("Retrieved user information from remote provider");
 
@@ -748,7 +816,7 @@ where
         &*provider,
         &attempt,
         query.request_idp_token,
-        upstream_token,
+        upstream,
     )
     .await
 }
@@ -872,7 +940,7 @@ async fn fetch_user_info(
     public_url: &str,
     provider: &dyn OAuthProvider,
     attempt: &LoginAttempt,
-) -> Result<(UserInfo, Option<String>), HttpError> {
+) -> Result<(UserInfo, UpstreamTokens), HttpError> {
     // Exchange the stored authorization code with the remote provider for a remote access token
     let client = provider.as_web_client().map_err(to_internal_error)?;
 
@@ -911,11 +979,19 @@ async fn fetch_user_info(
 
     tracing::info!("Fetched user info from remote service");
 
-    // Return the upstream access token alongside the user info so the caller
-    // can decide whether to revoke it after the permission check.
-    let upstream_token = Some(response.access_token().secret().to_string());
+    // Return the upstream tokens alongside the user info so the caller can
+    // decide whether to hand them back or revoke them after the permission
+    // check. A refresh token is only present when the provider issued one.
+    let upstream = UpstreamTokens {
+        access_token: Some(SecretString::from(
+            response.access_token().secret().as_str(),
+        )),
+        refresh_token: response
+            .refresh_token()
+            .map(|token| SecretString::from(token.secret().as_str())),
+    };
 
-    Ok((info, upstream_token))
+    Ok((info, upstream))
 }
 
 #[cfg(test)]
@@ -974,7 +1050,7 @@ mod tests {
         permissions::VPermission,
     };
 
-    use super::super::complete_exchange;
+    use super::super::{UpstreamTokens, complete_exchange};
     use super::{authorize_code_exchange, get_oauth_client, oauth_redirect_response};
 
     /// A minimal no-op `OAuthProvider` for unit tests that need to pass a
@@ -2142,6 +2218,81 @@ mod tests {
     }
 
     #[test]
+    fn test_login_attempt_clear_cookie_matches_set_properties() {
+        // The clearing cookie must carry the same attributes as the set cookie
+        // (aside from an empty value and a zero Max-Age) so that browsers match
+        // and remove it.
+        let set_cookie =
+            super::build_login_attempt_cookie("test-attempt-id", "https://example.com", 600);
+        let clear_cookie = super::build_login_attempt_clear_cookie(
+            super::LOGIN_ATTEMPT_COOKIE_PATH,
+            "https://example.com",
+        );
+
+        assert_eq!(set_cookie.path(), clear_cookie.path());
+        assert_eq!(set_cookie.http_only(), clear_cookie.http_only());
+        assert_eq!(set_cookie.same_site(), clear_cookie.same_site());
+        assert_eq!(set_cookie.secure(), clear_cookie.secure());
+        assert_eq!(clear_cookie.value(), "");
+        assert_eq!(
+            clear_cookie.max_age(),
+            Some(cookie::time::Duration::seconds(0))
+        );
+    }
+
+    #[test]
+    fn test_login_attempt_clear_cookies_cover_all_paths() {
+        // Every path a login attempt cookie may have been issued under must be
+        // cleared so stale cookies from previous settings are destroyed.
+        let headers = super::login_attempt_clear_cookies("https://example.com").unwrap();
+        assert_eq!(headers.len(), super::LOGIN_ATTEMPT_COOKIE_PATHS.len());
+
+        let rendered: Vec<String> = headers
+            .iter()
+            .map(|value| value.to_str().unwrap().to_string())
+            .collect();
+
+        for path in super::LOGIN_ATTEMPT_COOKIE_PATHS {
+            assert!(
+                rendered.iter().any(|header| {
+                    header.contains(&format!("Path={}", path)) && header.contains("Max-Age=0")
+                }),
+                "expected a clearing cookie for path {path}, got {rendered:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_csrf_ignores_stale_cookies() {
+        // A client may present a stale login attempt cookie alongside the
+        // current one. The CSRF check must honour the cookie whose value
+        // matches the state and ignore the stale cookie, regardless of order.
+        let id = TypedUuid::new_v4();
+        let stale = Uuid::new_v4();
+
+        let query = OAuthAuthzCodeReturnQuery {
+            state: Some(id.to_string()),
+            code: None,
+            error: None,
+        };
+
+        for header in [
+            format!("{LOGIN_ATTEMPT_COOKIE}={stale}; {LOGIN_ATTEMPT_COOKIE}={id}"),
+            format!("{LOGIN_ATTEMPT_COOKIE}={id}; {LOGIN_ATTEMPT_COOKIE}={stale}"),
+        ] {
+            let mut rq = hyper::Request::new(Empty::<()>::new());
+            rq.headers_mut()
+                .insert(COOKIE, HeaderValue::from_str(&header).unwrap());
+            let request = RequestInfo::new(
+                &rq,
+                std::net::SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 8888)),
+            );
+
+            assert_eq!(id, verify_csrf(&request, &query).unwrap());
+        }
+    }
+
+    #[test]
     fn test_valid_response_type_is_accepted() {
         assert!(super::validate_response_type("code").is_ok());
     }
@@ -2358,6 +2509,14 @@ mod tests {
         }
     }
 
+    /// Upstream tokens as returned by a provider that issues a refresh token.
+    fn mock_upstream_tokens() -> UpstreamTokens {
+        UpstreamTokens {
+            access_token: Some(SecretBox::from("secret-upstream-token")),
+            refresh_token: Some(SecretBox::from("secret-upstream-refresh-token")),
+        }
+    }
+
     #[tokio::test]
     async fn test_exchange_returns_idp_token_when_requested_and_permitted() {
         let storage = mock_exchange_storage(vec![
@@ -2375,7 +2534,7 @@ mod tests {
             &provider,
             &attempt,
             true,
-            Some("secret-upstream-token".to_string()),
+            mock_upstream_tokens(),
         )
         .await
         .unwrap()
@@ -2385,6 +2544,68 @@ mod tests {
             response.idp_token,
             Some("secret-upstream-token".to_string()),
             "IdP token must be returned when requested and user has RetrieveRemoteAccessToken"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_exchange_returns_idp_refresh_token_when_requested_and_permitted() {
+        let storage = mock_exchange_storage(vec![
+            VPermission::CreateAccessToken,
+            VPermission::RetrieveRemoteAccessToken,
+        ]);
+        let ctx = mock_context(Arc::new(storage)).await;
+        let attempt = mock_completed_attempt();
+        let info = mock_user_info_with_idp_token();
+        let provider = NoOpOAuthProvider::new();
+
+        let response = complete_exchange(
+            &ctx,
+            info,
+            &provider,
+            &attempt,
+            true,
+            mock_upstream_tokens(),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(
+            response.idp_refresh_token,
+            Some("secret-upstream-refresh-token".to_string()),
+            "IdP refresh token must be returned alongside the IdP token when permitted"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_exchange_omits_idp_refresh_token_when_provider_issues_none() {
+        let storage = mock_exchange_storage(vec![
+            VPermission::CreateAccessToken,
+            VPermission::RetrieveRemoteAccessToken,
+        ]);
+        let ctx = mock_context(Arc::new(storage)).await;
+        let attempt = mock_completed_attempt();
+        let info = mock_user_info_with_idp_token();
+        let provider = NoOpOAuthProvider::new();
+
+        // A provider that does not issue refresh tokens leaves the field unset.
+        let upstream = UpstreamTokens {
+            access_token: Some(SecretBox::from("secret-upstream-token")),
+            refresh_token: None,
+        };
+
+        let response = complete_exchange(&ctx, info, &provider, &attempt, true, upstream)
+            .await
+            .unwrap()
+            .0;
+
+        assert_eq!(
+            response.idp_token,
+            Some("secret-upstream-token".to_string())
+        );
+        assert_eq!(
+            response.idp_refresh_token, None,
+            "No refresh token should be returned when the provider did not issue one"
         );
     }
 
@@ -2405,7 +2626,7 @@ mod tests {
             &provider,
             &attempt,
             true,
-            Some("secret-upstream-token".to_string()),
+            mock_upstream_tokens(),
         )
         .await
         .unwrap()
@@ -2414,6 +2635,10 @@ mod tests {
         assert_eq!(
             response.idp_token, None,
             "IdP token must NOT be returned when user lacks RetrieveRemoteAccessToken"
+        );
+        assert_eq!(
+            response.idp_refresh_token, None,
+            "IdP refresh token must NOT be returned when user lacks RetrieveRemoteAccessToken"
         );
     }
 
@@ -2524,10 +2749,17 @@ mod tests {
 
         let provider = NoOpOAuthProvider::new();
 
-        let response = complete_exchange(&ctx, info, &provider, &attempt, false, None)
-            .await
-            .unwrap()
-            .0;
+        let response = complete_exchange(
+            &ctx,
+            info,
+            &provider,
+            &attempt,
+            false,
+            UpstreamTokens::default(),
+        )
+        .await
+        .unwrap()
+        .0;
 
         // Serialize the response to JSON and check for a "scope" field.
         // Per RFC 6749 §5.1, the authorization server SHOULD include the scope
@@ -2560,7 +2792,7 @@ mod tests {
             &provider,
             &attempt,
             false,
-            Some("secret-upstream-token".to_string()),
+            mock_upstream_tokens(),
         )
         .await
         .unwrap()
@@ -2569,6 +2801,10 @@ mod tests {
         assert_eq!(
             response.idp_token, None,
             "IdP token must NOT be returned when not requested, even with permission"
+        );
+        assert_eq!(
+            response.idp_refresh_token, None,
+            "IdP refresh token must NOT be returned when not requested, even with permission"
         );
     }
 
@@ -2770,10 +3006,17 @@ mod tests {
         };
         let provider = NoOpOAuthProvider::new();
 
-        let response = complete_exchange(&ctx, info, &provider, &attempt, false, None)
-            .await
-            .unwrap()
-            .0;
+        let response = complete_exchange(
+            &ctx,
+            info,
+            &provider,
+            &attempt,
+            false,
+            UpstreamTokens::default(),
+        )
+        .await
+        .unwrap()
+        .0;
 
         assert_eq!(
             response.scope, "",
@@ -2810,10 +3053,17 @@ mod tests {
         };
         let provider = NoOpOAuthProvider::new();
 
-        let response = complete_exchange(&ctx, info, &provider, &attempt, false, None)
-            .await
-            .unwrap()
-            .0;
+        let response = complete_exchange(
+            &ctx,
+            info,
+            &provider,
+            &attempt,
+            false,
+            UpstreamTokens::default(),
+        )
+        .await
+        .unwrap()
+        .0;
 
         assert_eq!(
             response.scope, "full",
@@ -2850,10 +3100,17 @@ mod tests {
         };
         let provider = NoOpOAuthProvider::new();
 
-        let response = complete_exchange(&ctx, info, &provider, &attempt, false, None)
-            .await
-            .unwrap()
-            .0;
+        let response = complete_exchange(
+            &ctx,
+            info,
+            &provider,
+            &attempt,
+            false,
+            UpstreamTokens::default(),
+        )
+        .await
+        .unwrap()
+        .0;
 
         assert_eq!(
             response.scope, "user:info:r",

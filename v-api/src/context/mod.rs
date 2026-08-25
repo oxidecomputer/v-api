@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use auth::AuthContext;
 use chrono::{TimeDelta, Utc};
 use dropshot::{ClientErrorStatusCode, HttpError, RequestContext, ServerContext};
-use futures::future::join_all;
 use jsonwebtoken::jwk::JwkSet;
 use newtype_uuid::{GenericUuid, TypedUuid};
 use serde::{Deserialize, Serialize};
@@ -24,25 +23,27 @@ use v_model::saga::{
     view::SagaExecNodeId,
 };
 use v_model::{
-    AccessGroupId, ApiUserInfo, ApiUserProvider, LinkRequest, Mapper, MapperSource, NewApiUser,
-    NewApiUserProvider, NewLinkRequest, UserId, UserProviderId,
+    AccessGroup, AccessGroupId, AccessGroupSource, ApiUserInfo, ApiUserProvider, LinkRequest,
+    Mapper, MapperSource, NewApiUser, NewApiUserProvider, NewLinkRequest, Permissions, UserId,
+    UserProviderId,
     permissions::{Caller, Permission},
     storage::{
-        AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore, ApiUserFilter,
-        ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, LinkRequestStore,
-        ListPagination, LoginAttemptStore, MagicLinkAttemptStore, MagicLinkRedirectUriStore,
-        MagicLinkSecretStore, MagicLinkStore, MapperEventStore, MapperStore,
-        OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore, StoreError,
+        AccessGroupFilter, AccessGroupStore, AccessTokenStore, ApiKeyStore,
+        ApiUserContactEmailStore, ApiUserFilter, ApiUserProviderFilter, ApiUserProviderStore,
+        ApiUserStore, LinkRequestStore, ListPagination, LoginAttemptStore, MagicLinkAttemptStore,
+        MagicLinkRedirectUriStore, MagicLinkSecretStore, MagicLinkStore, MapperEventStore,
+        MapperStore, OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore,
+        StoreError,
         postgres::{PostgresError, PostgresStore},
     },
 };
 
 use crate::{
     authn::{
-        AuthError, AuthToken, Sign, VerificationResult, Verify,
+        AuthError, AuthToken, Sign, SigningKeyError, VerificationResult, Verify,
         jwt::{Claims, DEFAULT_JWT_EXPIRATION, JwtSigner, JwtSignerError},
     },
-    config::{AsymmetricKey, JwtConfig},
+    config::{JwtConfig, ResolvedAsymmetricKey},
     endpoints::login::{
         UserInfo,
         oauth::{
@@ -658,9 +659,24 @@ where
         group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
         let group = self.group.get_group(caller, group_id).await?;
-        if caller.can(&VPermission::ManageGroupMembership(*group_id).into())
-            && caller.can_grant_all(&group.permissions)
-        {
+        let can_manage_membership =
+            caller.can(&VPermission::ManageGroupMembership(*group_id).into());
+        let can_grant_permissions = caller.can_grant_all(&group.permissions);
+
+        if !can_manage_membership || !can_grant_permissions {
+            // This check runs on every login for mapper matched groups. Denials fail the
+            // entire login, so record exactly which check failed and for which group.
+            tracing::warn!(
+                caller = ?caller.id,
+                ?group_id,
+                group_name = ?group.name,
+                can_manage_membership,
+                can_grant_permissions,
+                "Caller is not permitted to add user to group"
+            );
+        }
+
+        if can_manage_membership && can_grant_permissions {
             // TODO: This needs to be wrapped in a transaction. That requires reworking the way the
             // store traits are handled. Ideally we could have an API that still abstracts away the
             // underlying connection management while allowing for transactions. Possibly something
@@ -762,16 +778,50 @@ pub struct PresetMapperConfig {
     pub rule: Value,
 }
 
+/// Configuration for a preset access group that is loaded from service configuration.
+///
+/// Preset groups exist only in memory for the lifetime of the process. Their name and
+/// permissions are fixed by configuration and can not be changed via the API, and they
+/// can not be deleted. Membership is still managed at runtime and is persisted against
+/// the user, exactly as it is for dynamic groups.
+///
+/// Because a preset group is not persisted, removing it from configuration removes the
+/// permissions it granted. Memberships that were recorded against it remain stored on
+/// the users, and resolve again if the group is later returned to configuration.
+///
+/// Names must be unique across both preset groups and stored groups. Context creation
+/// fails if a preset group shares its name with another preset group or with a group that
+/// is held in storage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PresetGroupConfig<T> {
+    /// Human-readable name for this group. Mapper rules reference groups by name
+    pub name: String,
+    /// The permissions granted to members of this group
+    pub permissions: Permissions<T>,
+}
+
 #[derive(Debug, Error)]
 pub enum VContextBuilderError {
     #[error("Conflicting configuration, only one of {0} and {1} can be set")]
     ConfigConflict(String, String),
+    #[error("Preset group {0} conflicts with a stored group that has the same name")]
+    ConflictingGroupName(String),
+    #[error("Duplicate preset group name {0}")]
+    DuplicateGroupName(String),
     #[error("Duplicate mapper rule")]
     DuplicateMapperRule(String),
     #[error("Invalid mapper rule")]
     InvalidMapperRule(String),
+    #[error("Failed to resolve key {kid}: {source}")]
+    KeyResolution {
+        kid: String,
+        #[source]
+        source: SigningKeyError,
+    },
     #[error("{0} must be set to build a VContext")]
     MissingRequiredConfiguration(String),
+    #[error("Failed to read from storage")]
+    Store(#[from] StoreError),
     #[error("Failed to connect to storage")]
     Storage(#[from] PostgresError),
     #[error("Failed to build VContext")]
@@ -785,8 +835,9 @@ pub struct VContextBuilder<T> {
     public_url: Option<String>,
     storage: Option<Arc<dyn VApiStorage<T>>>,
     storage_url: Option<String>,
-    keys: Option<Vec<AsymmetricKey>>,
+    keys: Option<Vec<ResolvedAsymmetricKey>>,
     mappers: Vec<PresetMapperConfig>,
+    groups: Vec<PresetGroupConfig<T>>,
     #[cfg(feature = "sagas")]
     saga: Option<(TypedUuid<SagaExecNodeId>, Option<Logger>)>,
     additional_builtin_permissions: Vec<T>,
@@ -815,6 +866,7 @@ where
             storage_url: None,
             keys: None,
             mappers: Vec::new(),
+            groups: Vec::new(),
             #[cfg(feature = "sagas")]
             saga: None,
             additional_builtin_permissions: Vec::new(),
@@ -851,13 +903,18 @@ where
         self
     }
 
-    pub fn with_keys(mut self, keys: Vec<AsymmetricKey>) -> Self {
+    pub fn with_keys(mut self, keys: Vec<ResolvedAsymmetricKey>) -> Self {
         self.keys = Some(keys);
         self
     }
 
     pub fn with_mappers(mut self, mappers: Vec<PresetMapperConfig>) -> Self {
         self.mappers = mappers;
+        self
+    }
+
+    pub fn with_groups(mut self, groups: Vec<PresetGroupConfig<T>>) -> Self {
+        self.groups = groups;
         self
     }
 
@@ -918,26 +975,62 @@ where
             ))?;
 
         // `keys` is a list of key components, where each one is either a signer or a verifier.
-        // Therefore when constructing our lists we omit any keys from each list which is unable
-        // to be resolved into the needed kind.
-        let jwks = JwkSet {
-            keys: keys
-                .iter()
-                .filter_map(|key| key.resolve_jwk(param_path.as_deref()).ok())
-                .collect::<Vec<_>>(),
-        };
-        let signers = keys
-            .iter()
-            .filter_map(|key| key.resolve_signer(param_path.as_deref()).ok())
-            .collect::<Vec<_>>();
-        let verifiers = join_all(
-            keys.iter()
-                .map(|key| key.resolve_verifier(param_path.as_deref())),
-        )
-        .await
-        .into_iter()
-        .filter_map(|key| key.ok())
-        .collect::<Vec<_>>();
+        // A key is skipped for a list it does not support (a signer can not act as a verifier
+        // and vice versa), but any other resolution failure aborts construction. Silently
+        // dropping a key would leave the server running but unable to verify otherwise valid
+        // secrets and tokens.
+        let mut jwks = vec![];
+        let mut signers = vec![];
+        let mut verifiers = vec![];
+        for key in &keys {
+            match key.resolve_jwk(param_path.as_deref()) {
+                Ok(jwk) => jwks.push(jwk),
+                Err(SigningKeyError::KeyDoesNotSupportFunction) => (),
+                Err(source) => {
+                    return Err(VContextBuilderError::KeyResolution {
+                        kid: key.kid().to_string(),
+                        source,
+                    });
+                }
+            }
+            match key.resolve_signer(param_path.as_deref()) {
+                Ok(signer) => signers.push(signer),
+                Err(SigningKeyError::KeyDoesNotSupportFunction) => (),
+                Err(source) => {
+                    return Err(VContextBuilderError::KeyResolution {
+                        kid: key.kid().to_string(),
+                        source,
+                    });
+                }
+            }
+            match key.resolve_verifier(param_path.as_deref()).await {
+                Ok(verifier) => verifiers.push(verifier),
+                Err(SigningKeyError::KeyDoesNotSupportFunction) => (),
+                Err(source) => {
+                    return Err(VContextBuilderError::KeyResolution {
+                        kid: key.kid().to_string(),
+                        source,
+                    });
+                }
+            }
+        }
+        if signers.is_empty() {
+            return Err(VContextBuilderError::MissingRequiredConfiguration(
+                "signing key".to_string(),
+            ));
+        }
+        if verifiers.is_empty() {
+            return Err(VContextBuilderError::MissingRequiredConfiguration(
+                "verification key".to_string(),
+            ));
+        }
+        tracing::info!(
+            jwks = jwks.len(),
+            signers = signers.len(),
+            verifiers = verifiers.len(),
+            "Resolved signing and verification keys"
+        );
+        let jwks = JwkSet { keys: jwks };
         let auth_ctx = AuthContext::new(
             jwt,
             jwks,
@@ -949,7 +1042,95 @@ where
             tracing::error!(?err, "Auth context construction failed");
             VContextError::InternalAuthContext
         })?;
-        let group_ctx = GroupContext::new(storage.clone());
+        let mut group_ctx = GroupContext::new(storage.clone());
+        let mut user_ctx = UserContext::new(storage.clone());
+
+        // Preset groups rae given Uuidv5 ids as they need to be deterministic. The id is stored in
+        // the database for tracking group memberships.
+        let preset_groups: Vec<AccessGroup<T>> = self
+            .groups
+            .into_iter()
+            .map(|config| {
+                let id = Uuid::new_v5(&Uuid::NAMESPACE_URL, config.name.as_bytes());
+                AccessGroup {
+                    id: TypedUuid::from_untyped_uuid(id),
+                    name: config.name,
+                    permissions: config.permissions,
+                    source: AccessGroupSource::Preset,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    deleted_at: None,
+                }
+            })
+            .collect();
+
+        if !preset_groups.is_empty() {
+            tracing::info!(
+                count = preset_groups.len(),
+                "Loaded preset groups from configuration"
+            );
+
+            // Two preset groups with the same name would resolve to the same id, and mapper
+            // rules could not distinguish between them
+            let (_, duplicates) = preset_groups.iter().map(|g| &g.name).fold(
+                (BTreeSet::default(), BTreeSet::default()),
+                |(mut names, mut duplicates), name| {
+                    if names.contains(&name) {
+                        duplicates.insert(name);
+                    } else {
+                        names.insert(name);
+                    }
+                    (names, duplicates)
+                },
+            );
+
+            if !duplicates.is_empty() {
+                return Err(VContextBuilderError::DuplicateGroupName(
+                    duplicates.first().unwrap().to_string(),
+                ));
+            }
+
+            // Creating a dynamic group with the name of a preset group is rejected, but a
+            // stored group may predate the preset configuration. Mapper rules resolve groups
+            // by name and would match both, so the ambiguity is not allowed to exist. A
+            // failure to read stored groups is also fatal, as the check can not be skipped.
+            let stored = AccessGroupStore::list(
+                &*storage,
+                AccessGroupFilter {
+                    name: Some(preset_groups.iter().map(|g| g.name.clone()).collect()),
+                    ..Default::default()
+                },
+                &ListPagination::unlimited(),
+            )
+            .await
+            .map_err(|err| {
+                tracing::error!(
+                    ?err,
+                    "Failed to check stored groups for preset group name conflicts"
+                );
+                err
+            })?;
+
+            for group in &stored {
+                tracing::error!(
+                    group_name = ?group.name,
+                    stored_group_id = ?group.id,
+                    "A stored group shares its name with a preset group. Mappers that \
+                     reference this name would resolve to both groups. Either rename the \
+                     preset group, or delete the stored group."
+                );
+            }
+
+            if let Some(group) = stored.first() {
+                return Err(VContextBuilderError::ConflictingGroupName(
+                    group.name.clone(),
+                ));
+            }
+
+            group_ctx.set_preset_groups(preset_groups.clone());
+            user_ctx.set_preset_groups(preset_groups);
+        }
+
         let mut mapping_ctx = MappingContext::new(storage.clone());
         mapping_ctx.set_engine(Some(Arc::new(DefaultMappingEngine::new(
             auth_ctx.builtin_registration_user(),
@@ -1035,7 +1216,7 @@ where
             magic_link: MagicLinkContext::new(storage.clone()),
             mapping: mapping_ctx,
             oauth: OAuthContext::new(storage.clone()),
-            user: UserContext::new(storage.clone()),
+            user: user_ctx,
             #[cfg(feature = "sagas")]
             saga,
         })
@@ -1046,14 +1227,16 @@ where
 mod tests {
     use chrono::{TimeDelta, Utc};
     use mockall::predicate::eq;
-    use newtype_uuid::TypedUuid;
+    use newtype_uuid::{GenericUuid, TypedUuid};
     use std::{collections::BTreeSet, ops::Add, sync::Arc};
+    use uuid::Uuid;
     use v_model::{
-        AccessGroup, AccessToken, AccessTokenId, ApiUser, ApiUserInfo, ApiUserProvider, UserId,
-        permissions::Permissions,
+        AccessGroup, AccessGroupId, AccessGroupSource, AccessToken, AccessTokenId, ApiUser,
+        ApiUserInfo, ApiUserProvider, UserId,
+        permissions::{Caller, Permissions},
         storage::{
             AccessGroupFilter, ListPagination, MockAccessGroupStore, MockAccessTokenStore,
-            MockApiUserStore,
+            MockApiUserStore, StoreError,
         },
     };
 
@@ -1065,11 +1248,12 @@ mod tests {
         },
         context::user::UserContextError,
         permissions::VPermission,
+        util::tests::{MockKey, mock_key},
     };
 
     use super::{
-        VContext, VContextCallerError,
-        test_mocks::{MockStorage, mock_context},
+        PresetGroupConfig, VContext, VContextCallerError,
+        test_mocks::{MockStorage, build_ctx_with_groups, mock_context, mock_context_with_groups},
     };
 
     async fn create_token(
@@ -1125,6 +1309,7 @@ mod tests {
             id: group_id,
             name: "TestGroup".to_string(),
             permissions: group_permissions.clone(),
+            source: AccessGroupSource::Dynamic,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             deleted_at: None,
@@ -1261,6 +1446,261 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_preset_group_membership_grants_permissions() {
+        let mut storage = MockStorage::new();
+
+        // The preset group is not in storage, and so the store returns nothing for it
+        let mut group_store = MockAccessGroupStore::new();
+        group_store.expect_list().returning(|_, _| Ok(vec![]));
+
+        let group_id: TypedUuid<AccessGroupId> =
+            TypedUuid::from_untyped_uuid(Uuid::new_v5(&Uuid::NAMESPACE_URL, b"admins"));
+
+        let user_id = TypedUuid::new_v4();
+        let user = ApiUserInfo {
+            user: ApiUser {
+                id: user_id,
+                permissions: Permissions::new(),
+                groups: BTreeSet::from([group_id]),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                deleted_at: None,
+            },
+            email: None,
+            providers: vec![],
+        };
+
+        let mut user_store = MockApiUserStore::new();
+        user_store
+            .expect_get()
+            .with(eq(user_id), eq(false))
+            .returning(move |_, _| Ok(Some(user.clone())));
+
+        let token_id = TypedUuid::new_v4();
+        let mut token_store = MockAccessTokenStore::new();
+        token_store
+            .expect_get()
+            .with(eq(token_id), eq(false))
+            .returning(move |_, _| {
+                Ok(Some(AccessToken {
+                    id: token_id,
+                    user_id,
+                    revoked_at: None,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                }))
+            });
+
+        storage.access_group_store = Some(Arc::new(group_store));
+        storage.api_user_store = Some(Arc::new(user_store));
+        storage.access_token_store = Some(Arc::new(token_store));
+
+        let ctx = mock_context_with_groups(
+            Arc::new(storage),
+            vec![PresetGroupConfig {
+                name: "admins".to_string(),
+                permissions: vec![VPermission::CreateGroup].into(),
+            }],
+        )
+        .await;
+
+        // The group is installed as a preset group with an id derived from its name
+        let presets = ctx.group.preset_groups();
+        assert_eq!(1, presets.len());
+        assert_eq!(group_id, presets[0].id);
+        assert_eq!(AccessGroupSource::Preset, presets[0].source);
+
+        let token = create_token(&ctx, token_id, user_id, vec!["group:info:w".to_string()]).await;
+        let caller = ctx.get_caller_from_token(Some(&token)).await.unwrap();
+
+        assert_eq!(
+            Permissions::<VPermission>::from(vec![VPermission::CreateGroup]),
+            caller.permissions
+        );
+    }
+
+    /// Membership of a preset group is managed at runtime and stored against the user, and
+    /// so users can be added to and removed from a group that only exists in configuration.
+    #[tokio::test]
+    async fn test_preset_group_membership_can_be_changed() {
+        let group_id: TypedUuid<AccessGroupId> =
+            TypedUuid::from_untyped_uuid(Uuid::new_v5(&Uuid::NAMESPACE_URL, b"admins"));
+        let user_id = TypedUuid::new_v4();
+
+        // Build a context whose stored user holds the supplied group memberships. The preset
+        // group itself is never in storage.
+        let ctx_with_memberships = |groups: BTreeSet<TypedUuid<AccessGroupId>>| async move {
+            let user = ApiUserInfo {
+                user: ApiUser {
+                    id: user_id,
+                    permissions: Permissions::<VPermission>::new(),
+                    groups,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    deleted_at: None,
+                },
+                email: None,
+                providers: vec![],
+            };
+
+            let mut user_store = MockApiUserStore::new();
+            user_store
+                .expect_get()
+                .with(eq(user_id), eq(false))
+                .returning(move |_, _| Ok(Some(user.clone())));
+            user_store.expect_upsert().returning(|update| {
+                Ok(ApiUserInfo {
+                    user: ApiUser {
+                        id: update.id,
+                        permissions: update.permissions,
+                        groups: update.groups,
+                        created_at: Utc::now(),
+                        updated_at: Utc::now(),
+                        deleted_at: None,
+                    },
+                    email: None,
+                    providers: vec![],
+                })
+            });
+
+            let mut group_store = MockAccessGroupStore::new();
+            group_store.expect_list().returning(|_, _| Ok(vec![]));
+
+            let mut storage = MockStorage::new();
+            storage.api_user_store = Some(Arc::new(user_store));
+            storage.access_group_store = Some(Arc::new(group_store));
+
+            mock_context_with_groups(
+                Arc::new(storage),
+                vec![PresetGroupConfig {
+                    name: "admins".to_string(),
+                    permissions: vec![VPermission::CreateGroup].into(),
+                }],
+            )
+            .await
+        };
+
+        let caller = Caller {
+            id: user_id,
+            permissions: vec![
+                VPermission::GetGroupsAll,
+                VPermission::ManageGroupMembershipsAll,
+                // Required to grant the permissions held by the group
+                VPermission::CreateGroup,
+            ]
+            .into(),
+            extensions: Default::default(),
+        };
+
+        let ctx = ctx_with_memberships(BTreeSet::new()).await;
+        let added = ctx
+            .add_api_user_to_group(&caller, &user_id, &group_id)
+            .await
+            .unwrap();
+        assert_eq!(BTreeSet::from([group_id]), added.user.groups);
+
+        let ctx = ctx_with_memberships(BTreeSet::from([group_id])).await;
+        let removed = ctx
+            .remove_api_user_from_group(&caller, &user_id, &group_id)
+            .await
+            .unwrap();
+        assert!(removed.user.groups.is_empty());
+    }
+
+    /// Two preset groups with the same name resolve to the same id, and mapper rules could
+    /// not distinguish between them
+    #[tokio::test]
+    async fn test_duplicate_preset_group_names_are_rejected() {
+        let MockKey { signer, verifier } = mock_key("test");
+        let group = |name: &str| PresetGroupConfig {
+            name: name.to_string(),
+            permissions: Permissions::<VPermission>::new(),
+        };
+
+        let builder = VContextBuilder::<VPermission>::new()
+            .with_public_url("https://test_public_url".to_string())
+            .with_storage(Arc::new(MockStorage::new()))
+            .with_keys(vec![signer, verifier])
+            .with_groups(vec![group("admins"), group("admins")]);
+        #[cfg(feature = "sagas")]
+        let builder = builder.with_saga_backend(TypedUuid::new_v4(), None);
+
+        match builder.build().await {
+            Err(VContextBuilderError::DuplicateGroupName(name)) => assert_eq!("admins", name),
+            other => panic!(
+                "Expected to receive VContextBuilderError::DuplicateGroupName error. Instead found {:?}",
+                other.map(|_| ())
+            ),
+        }
+    }
+
+    /// A stored group that shares its name with a preset group makes the group that a mapper
+    /// rule refers to ambiguous, and can not be resolved at runtime
+    #[tokio::test]
+    async fn test_preset_group_name_conflicting_with_stored_group_is_rejected() {
+        let mut group_store = MockAccessGroupStore::new();
+        group_store.expect_list().returning(|_, _| {
+            Ok(vec![AccessGroup {
+                id: TypedUuid::new_v4(),
+                name: "admins".to_string(),
+                permissions: Permissions::<VPermission>::new(),
+                source: AccessGroupSource::Dynamic,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                deleted_at: None,
+            }])
+        });
+
+        let mut storage = MockStorage::new();
+        storage.access_group_store = Some(Arc::new(group_store));
+
+        match build_ctx_with_groups(
+            Arc::new(storage),
+            vec![PresetGroupConfig {
+                name: "admins".to_string(),
+                permissions: Permissions::<VPermission>::new(),
+            }],
+        )
+        .await
+        {
+            Err(VContextBuilderError::ConflictingGroupName(name)) => assert_eq!("admins", name),
+            other => panic!(
+                "Expected to receive VContextBuilderError::ConflictingGroupName error. Instead found {:?}",
+                other.map(|_| ())
+            ),
+        }
+    }
+
+    /// The check for stored groups that conflict with preset groups can not be skipped, and
+    /// so a storage failure fails context creation
+    #[tokio::test]
+    async fn test_preset_group_conflict_check_failure_is_fatal() {
+        let mut group_store = MockAccessGroupStore::new();
+        group_store
+            .expect_list()
+            .returning(|_, _| Err(StoreError::Unknown));
+
+        let mut storage = MockStorage::new();
+        storage.access_group_store = Some(Arc::new(group_store));
+
+        match build_ctx_with_groups(
+            Arc::new(storage),
+            vec![PresetGroupConfig {
+                name: "admins".to_string(),
+                permissions: Permissions::<VPermission>::new(),
+            }],
+        )
+        .await
+        {
+            Err(VContextBuilderError::Store(_)) => (),
+            other => panic!(
+                "Expected to receive VContextBuilderError::Store error. Instead found {:?}",
+                other.map(|_| ())
+            ),
+        }
+    }
+
+    #[tokio::test]
     async fn test_must_specify_storage_pool_or_url() {
         let result = VContextBuilder::<VPermission>::new().build().await;
 
@@ -1344,7 +1784,7 @@ pub(crate) mod test_mocks {
     };
 
     use crate::{
-        VContextBuilder,
+        VContextBuilder, VContextBuilderError,
         config::{
             JwtConfig, ResolvedOAuthConfig, ResolvedOAuthWebConfig, ResolvedOAuthWebProxyConfig,
         },
@@ -1357,19 +1797,36 @@ pub(crate) mod test_mocks {
         util::tests::{MockKey, mock_key},
     };
 
-    use super::VContext;
+    use super::{PresetGroupConfig, VContext};
 
     // Construct a mock context that can be used in tests
     pub async fn mock_context(storage: Arc<MockStorage>) -> VContext<VPermission> {
+        mock_context_with_groups(storage, Vec::new()).await
+    }
+
+    // Attempt to construct a context that has been configured with preset groups
+    pub async fn build_ctx_with_groups(
+        storage: Arc<MockStorage>,
+        groups: Vec<PresetGroupConfig<VPermission>>,
+    ) -> Result<VContext<VPermission>, VContextBuilderError> {
         let MockKey { signer, verifier } = mock_key("test");
-        let ctx = VContextBuilder::<VPermission>::new()
+        let builder = VContextBuilder::<VPermission>::new()
             .with_public_url("https://test_public_url".to_string())
             .with_storage(storage)
             .with_jwt_expiration(JwtConfig::default().default_expiration)
+            .with_groups(groups)
             .with_keys(vec![signer, verifier]);
         #[cfg(feature = "sagas")]
-        let ctx = ctx.with_saga_backend(TypedUuid::new_v4(), None);
-        let mut ctx = ctx.build().await.unwrap();
+        let builder = builder.with_saga_backend(TypedUuid::new_v4(), None);
+        builder.build().await
+    }
+
+    // Construct a mock context that has been configured with preset groups
+    pub async fn mock_context_with_groups(
+        storage: Arc<MockStorage>,
+        groups: Vec<PresetGroupConfig<VPermission>>,
+    ) -> VContext<VPermission> {
+        let mut ctx = build_ctx_with_groups(storage, groups).await.unwrap();
 
         let mapping_engine = Arc::new(DefaultMappingEngine::new(
             ctx.builtin_registration_user(),

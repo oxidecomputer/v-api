@@ -1,0 +1,14 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { includeIgnoreFile } from '@eslint/compat'
+import eslint from '@eslint/js'
+import tseslint from 'typescript-eslint'
+
+const parentDir = path.dirname(fileURLToPath(import.meta.url))
+const gitignorePath = path.resolve(parentDir, '.gitignore')
+
+export default tseslint.config(
+  includeIgnoreFile(gitignorePath),
+  eslint.configs.recommended,
+  ...tseslint.configs.recommended,
+)

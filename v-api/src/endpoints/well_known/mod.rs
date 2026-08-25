@@ -13,7 +13,12 @@ use crate::{context::ApiContext, permissions::VAppPermission};
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct OpenIdConfiguration {
+    issuer: String,
     jwks_uri: String,
+    response_types_supported: Vec<String>,
+    subject_types_supported: Vec<String>,
+    id_token_signing_alg_values_supported: Vec<String>,
+    claims_supported: Vec<String>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -24,7 +29,18 @@ where
     T: VAppPermission + PermissionStorage,
 {
     Ok(HttpResponseOk(OpenIdConfiguration {
+        issuer: rqctx.v_ctx().public_url().to_string(),
         jwks_uri: format!("{}/.well-known/jwks.json", rqctx.v_ctx().public_url()),
+        response_types_supported: vec!["id_token".to_string()],
+        subject_types_supported: vec!["public".to_string()],
+        id_token_signing_alg_values_supported: vec!["RS256".to_string()],
+        claims_supported: vec![
+            "iss".to_string(),
+            "sub".to_string(),
+            "aud".to_string(),
+            "exp".to_string(),
+            "iat".to_string(),
+        ],
     }))
 }
 

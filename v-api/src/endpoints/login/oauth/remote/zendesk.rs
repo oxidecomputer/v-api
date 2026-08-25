@@ -60,15 +60,16 @@ impl ZendeskOAuthProvider {
                 revocation_endpoint: None,
             },
         });
-        let authz_code_pkce_flow_info = config
-            .proxy_web
-            .and_then(|proxy| authz_code_flow_info.as_ref().map(|web| (web, proxy)))
-            .map(|(web, proxy)| OAuthProviderAuthorizationCodePkceInfo {
-                client_id: proxy.client_id,
-                redirect_endpoint: proxy.redirect_uri,
-                proxy_port: proxy.proxy_port,
-                web: web.clone(),
-            });
+        let authz_code_pkce_flow_info =
+            authz_code_flow_info
+                .as_ref()
+                .zip(config.proxy_web)
+                .map(|(web, proxy)| OAuthProviderAuthorizationCodePkceInfo {
+                    client_id: proxy.client_id,
+                    redirect_endpoint: proxy.redirect_uri,
+                    proxy_port: proxy.proxy_port,
+                    web: web.clone(),
+                });
 
         Self {
             authz_code_flow_info,
@@ -99,7 +100,7 @@ struct ZendeskUser {
     name: String,
     email: String,
     verified: bool,
-    suspended: bool,
+    suspended: Option<bool>,
 }
 
 impl ExtractUserInfo for ZendeskOAuthProvider {
@@ -107,7 +108,7 @@ impl ExtractUserInfo for ZendeskOAuthProvider {
         let response: ZendeskUserResponse = serde_json::from_slice(&data[0])?;
         let user = response.user;
 
-        if user.suspended {
+        if user.suspended.unwrap_or(false) {
             return Err(UserInfoError::Locked);
         }
 
@@ -139,9 +140,8 @@ impl OAuthProvider for ZendeskOAuthProvider {
     }
 
     fn expires_in(&self) -> Option<u64> {
-        // This is the maximum token duration that Zendesk supports. In the future we should make
-        // this configurable
-        Some(172800)
+        // In the future we should make this configurable
+        Some(86400)
     }
     fn default_scopes(&self) -> &[String] {
         &self.default_scopes

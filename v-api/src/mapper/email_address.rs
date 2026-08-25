@@ -78,21 +78,15 @@ where
             .any(|email| email == &self.data.email);
 
         if found_email {
-            let groups = self
+            let known_groups = self
                 .group
                 .list_groups(&self.caller, AccessGroupFilter::default())
-                .await?
-                .into_iter()
-                .filter_map(|group| {
-                    tracing::trace!(?group, "Processing group for email address mapper");
-                    if self.data.groups.contains(&group.name) {
-                        Some(group.id)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            Ok(groups)
+                .await?;
+
+            Ok(super::resolve_mapped_groups(
+                &self.data.groups,
+                &known_groups,
+            ))
         } else {
             Ok(BTreeSet::new())
         }

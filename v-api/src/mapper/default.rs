@@ -61,21 +61,14 @@ where
         _user: &UserInfo,
     ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError> {
         tracing::trace!("Running default mapper");
-        let groups = self
+        let known_groups = self
             .group
             .list_groups(&self.caller, AccessGroupFilter::default())
-            .await?
-            .into_iter()
-            .filter_map(|group| {
-                tracing::trace!(?group, "Processing group for default mapper");
-                if self.data.groups.contains(&group.name) {
-                    Some(group.id)
-                } else {
-                    None
-                }
-            })
-            .collect();
+            .await?;
 
-        Ok(groups)
+        Ok(super::resolve_mapped_groups(
+            &self.data.groups,
+            &known_groups,
+        ))
     }
 }

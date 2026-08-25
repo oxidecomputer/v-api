@@ -83,20 +83,15 @@ where
                 .map(|u| u == &self.data.github_username)
                 .unwrap_or(false)
             {
-                let groups = self
+                let known_groups = self
                     .group
                     .list_groups(&self.caller, AccessGroupFilter::default())
-                    .await?
-                    .into_iter()
-                    .filter_map(|group| {
-                        if self.data.groups.contains(&group.name) {
-                            Some(group.id)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                Ok(groups)
+                    .await?;
+
+                Ok(super::resolve_mapped_groups(
+                    &self.data.groups,
+                    &known_groups,
+                ))
             } else {
                 Ok(BTreeSet::new())
             }
@@ -113,7 +108,7 @@ mod tests {
     use chrono::Utc;
     use newtype_uuid::TypedUuid;
     use v_model::{
-        AccessGroup,
+        AccessGroup, AccessGroupSource,
         permissions::{Caller, Permissions},
         storage::MockAccessGroupStore,
     };
@@ -138,6 +133,7 @@ mod tests {
             id: group_id,
             name: group_name.to_string(),
             permissions: Permissions::<VPermission>::new(),
+            source: AccessGroupSource::Dynamic,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             deleted_at: None,

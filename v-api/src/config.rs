@@ -23,13 +23,13 @@ use serde::{
 };
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use v_api_param::{ParamResolutionError, StringParam};
+use v_api_param::{ParamResolutionError, Raw, SerializedParam, StringParam};
 use v_model::OAuthClientId;
 
 use crate::{
     authn::{
         CloudKmsError, CloudKmsSigningKey, CloudKmsVerifyingKey, LocalSigningKey,
-        LocalVerifyingKey, Signer, SignerKey, SigningKeyError, Verifier, jwt::JwtSignerError,
+        LocalVerifyingKey, Signer, SignerKey, SigningKeyError, Verifier,
     },
     util::cloud_kms_client,
 };
@@ -102,6 +102,35 @@ pub enum AsymmetricKey {
         private: StringParam,
     },
     CkmsVerifier {
+        kid: StringParam,
+        version: u16,
+        key: StringParam,
+        keyring: StringParam,
+        location: StringParam,
+        project: StringParam,
+    },
+    CkmsSigner {
+        kid: StringParam,
+        version: u16,
+        key: StringParam,
+        keyring: StringParam,
+        location: StringParam,
+        project: StringParam,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ResolvedAsymmetricKey {
+    LocalVerifier {
+        kid: String,
+        public: StringParam,
+    },
+    LocalSigner {
+        kid: String,
+        private: StringParam,
+    },
+    CkmsVerifier {
         kid: String,
         version: u16,
         key: String,
@@ -120,6 +149,49 @@ pub enum AsymmetricKey {
 }
 
 impl AsymmetricKey {
+    pub fn resolve(self, base: Option<&Path>) -> Result<ResolvedAsymmetricKey, SigningKeyError> {
+        Ok(match self {
+            Self::LocalVerifier { kid, public } => {
+                ResolvedAsymmetricKey::LocalVerifier { kid, public }
+            }
+            Self::LocalSigner { kid, private } => {
+                ResolvedAsymmetricKey::LocalSigner { kid, private }
+            }
+            Self::CkmsVerifier {
+                kid,
+                version,
+                key,
+                keyring,
+                location,
+                project,
+            } => ResolvedAsymmetricKey::CkmsVerifier {
+                kid: kid.resolve(base)?.expose_secret().to_string(),
+                version,
+                key: key.resolve(base)?.expose_secret().to_string(),
+                keyring: keyring.resolve(base)?.expose_secret().to_string(),
+                location: location.resolve(base)?.expose_secret().to_string(),
+                project: project.resolve(base)?.expose_secret().to_string(),
+            },
+            Self::CkmsSigner {
+                kid,
+                version,
+                key,
+                keyring,
+                location,
+                project,
+            } => ResolvedAsymmetricKey::CkmsSigner {
+                kid: kid.resolve(base)?.expose_secret().to_string(),
+                version,
+                key: key.resolve(base)?.expose_secret().to_string(),
+                keyring: keyring.resolve(base)?.expose_secret().to_string(),
+                location: location.resolve(base)?.expose_secret().to_string(),
+                project: project.resolve(base)?.expose_secret().to_string(),
+            },
+        })
+    }
+}
+
+impl ResolvedAsymmetricKey {
     pub fn kid(&self) -> &str {
         match self {
             Self::LocalVerifier { kid, .. } => kid,
@@ -171,8 +243,10 @@ pub struct OAuthConfig {
 #[partial(ResolvedOAuthDeviceConfig)]
 #[derive(Clone, Debug, Deserialize)]
 pub struct OAuthDeviceConfig {
-    pub client_id: TypedUuid<OAuthClientId>,
-    pub remote_client_id: String,
+    #[partial(ResolvedOAuthDeviceConfig(retype = TypedUuid<OAuthClientId>))]
+    pub client_id: SerializedParam<TypedUuid<OAuthClientId>, Raw>,
+    #[partial(ResolvedOAuthDeviceConfig(retype = String))]
+    pub remote_client_id: StringParam,
     #[partial(ResolvedOAuthDeviceConfig(retype = SecretString))]
     pub remote_client_secret: StringParam,
 }
@@ -180,7 +254,8 @@ pub struct OAuthDeviceConfig {
 #[partial(ResolvedOAuthWebConfig)]
 #[derive(Clone, Debug, Deserialize)]
 pub struct OAuthWebConfig {
-    pub remote_client_id: String,
+    #[partial(ResolvedOAuthWebConfig(retype = String))]
+    pub remote_client_id: StringParam,
     #[partial(ResolvedOAuthWebConfig(retype = SecretString))]
     pub remote_client_secret: StringParam,
 }
@@ -219,8 +294,12 @@ impl OAuthDeviceConfig {
     ) -> Result<ResolvedOAuthDeviceConfig, ParamResolutionError> {
         let remote_client_secret = self.remote_client_secret.resolve(base)?;
         Ok(ResolvedOAuthDeviceConfig {
-            client_id: self.client_id,
-            remote_client_id: self.remote_client_id.clone(),
+            client_id: self.client_id.resolve(base)?,
+            remote_client_id: self
+                .remote_client_id
+                .resolve(base)?
+                .expose_secret()
+                .to_string(),
             remote_client_secret,
         })
     }
@@ -232,7 +311,11 @@ impl OAuthWebConfig {
     ) -> Result<ResolvedOAuthWebConfig, ParamResolutionError> {
         let remote_client_secret = self.remote_client_secret.resolve(base)?;
         Ok(ResolvedOAuthWebConfig {
-            remote_client_id: self.remote_client_id.clone(),
+            remote_client_id: self
+                .remote_client_id
+                .resolve(base)?
+                .expose_secret()
+                .to_string(),
             remote_client_secret,
         })
     }
@@ -250,19 +333,19 @@ impl OAuthWebProxyConfig {
     }
 }
 
-impl AsymmetricKey {
+impl ResolvedAsymmetricKey {
     pub fn resolve_signer(&self, path: Option<&Path>) -> Result<Signer, SigningKeyError> {
         Ok(Signer::new(
             self.kid().to_string(),
             match self {
-                AsymmetricKey::LocalSigner { private, .. } => {
+                Self::LocalSigner { private, .. } => {
                     let private_key =
                         RsaPrivateKey::from_pkcs8_pem(private.resolve(path)?.expose_secret())
-                            .unwrap();
+                            .map_err(SigningKeyError::InvalidPrivateKey)?;
                     let signing_key = SigningKey::new(private_key);
                     SignerKey::Local(LocalSigningKey::new(signing_key))
                 }
-                AsymmetricKey::CkmsSigner { .. } => SignerKey::Ckms(CloudKmsSigningKey::new(
+                Self::CkmsSigner { .. } => SignerKey::Ckms(CloudKmsSigningKey::new(
                     block_on(cloud_kms_client())?,
                     self.cloud_kms_key_name().unwrap(),
                 )),
@@ -273,19 +356,19 @@ impl AsymmetricKey {
 
     pub async fn resolve_verifier(&self, path: Option<&Path>) -> Result<Verifier, SigningKeyError> {
         Ok(match self {
-            AsymmetricKey::LocalVerifier { .. } => Verifier::Local(LocalVerifyingKey::new(
+            Self::LocalVerifier { .. } => Verifier::Local(LocalVerifyingKey::new(
                 VerifyingKey::new(self.public_key(path)?),
             )),
-            AsymmetricKey::CkmsVerifier { .. } => Verifier::Ckms(CloudKmsVerifyingKey::new(
+            Self::CkmsVerifier { .. } => Verifier::Ckms(CloudKmsVerifyingKey::new(
                 VerifyingKey::new(self.public_key(path)?),
             )),
             _ => Err(SigningKeyError::KeyDoesNotSupportFunction)?,
         })
     }
 
-    pub fn resolve_jwk(&self, path: Option<&Path>) -> Result<Jwk, JwtSignerError> {
+    pub fn resolve_jwk(&self, path: Option<&Path>) -> Result<Jwk, SigningKeyError> {
         let key_id = self.kid();
-        let public_key = self.public_key(path).map_err(JwtSignerError::InvalidKey)?;
+        let public_key = self.public_key(path)?;
 
         Ok(Jwk {
             common: CommonParameters {
@@ -308,10 +391,10 @@ impl AsymmetricKey {
 
     fn public_key(&self, path: Option<&Path>) -> Result<RsaPublicKey, SigningKeyError> {
         Ok(match self {
-            AsymmetricKey::LocalVerifier { public, .. } => {
+            Self::LocalVerifier { public, .. } => {
                 RsaPublicKey::from_public_key_pem(public.resolve(path)?.expose_secret())?
             }
-            AsymmetricKey::CkmsVerifier { .. } => {
+            Self::CkmsVerifier { .. } => {
                 let public_key = block_on(async {
                     let kms_client = cloud_kms_client().await?;
 
@@ -341,7 +424,7 @@ impl AsymmetricKey {
 
     fn cloud_kms_key_name(&self) -> Option<String> {
         match self {
-            AsymmetricKey::CkmsSigner {
+            Self::CkmsSigner {
                 version,
                 key,
                 keyring,
@@ -352,7 +435,7 @@ impl AsymmetricKey {
                 "projects/{}/locations/{}/keyRings/{}/cryptoKeys/{}/cryptoKeyVersions/{}",
                 project, location, keyring, key, version
             )),
-            AsymmetricKey::CkmsVerifier {
+            Self::CkmsVerifier {
                 version,
                 key,
                 keyring,

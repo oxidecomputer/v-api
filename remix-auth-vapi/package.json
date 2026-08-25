@@ -1,0 +1,69 @@
+{
+  "name": "@oxide/remix-auth-vapi",
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    "import": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "require": {
+      "types": "./dist/index.d.cts",
+      "default": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "fmt": "prettier --write --ignore-path ./.gitignore .",
+    "fmt:check": "prettier --check --ignore-path ./.gitignore .",
+    "lint": "eslint .",
+    "prepublishOnly": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "tsc": "tsc"
+  },
+  "keywords": [
+    "react-router",
+    "remix",
+    "remix-auth",
+    "v-api",
+    "auth",
+    "authentication",
+    "strategy"
+  ],
+  "author": "Oxide Computer Company",
+  "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oxidecomputer/v-api.git"
+  },
+  "peerDependencies": {
+    "react-router": "^8.3.0",
+    "remix-auth": "^4.0.0"
+  },
+  "devDependencies": {
+    "@eslint/compat": "^2.1.0",
+    "@eslint/js": "^10.0.1",
+    "@ianvs/prettier-plugin-sort-imports": "^4.1.1",
+    "eslint": "^10.8.0",
+    "eslint-config-prettier": "^8.8.0",
+    "eslint-plugin-prettier": "^5.0.0",
+    "msw": "^2.6.0",
+    "prettier": "^3.9.6",
+    "tsdown": "^0.22.14",
+    "typescript": "^6.0.0",
+    "typescript-eslint": "^8.65.0",
+    "vitest": "^4.0.15"
+  },
+  "dependencies": {
+    "remix-auth-oauth2": "^3.4.0"
+  }
+}

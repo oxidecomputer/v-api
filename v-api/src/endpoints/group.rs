@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use dropshot::{HttpError, HttpResponseCreated, HttpResponseOk, RequestContext};
+use dropshot::{
+    ClientErrorStatusCode, HttpError, HttpResponseCreated, HttpResponseOk, RequestContext,
+};
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -17,6 +19,7 @@ use v_model::{
 use crate::{
     context::{ApiContext, VContextWithCaller},
     permissions::VAppPermission,
+    response::client_error,
 };
 
 fn into_group_response<T, U>(group: AccessGroup<T>) -> AccessGroup<U>
@@ -32,6 +35,7 @@ where
             .into_iter()
             .map(|p| p.into())
             .collect::<Permissions<U>>(),
+        source: group.source,
         created_at: group.created_at,
         updated_at: group.updated_at,
         deleted_at: group.deleted_at,
@@ -104,6 +108,14 @@ where
     U: From<T> + Permission + JsonSchema,
 {
     let (ctx, caller) = rqctx.as_ctx().await?;
+
+    if ctx.group.is_preset(&path.group_id) {
+        return Err(client_error(
+            ClientErrorStatusCode::CONFLICT,
+            "Preset groups are managed via service configuration and cannot be updated at runtime",
+        ));
+    }
+
     Ok(HttpResponseOk(
         ctx.group
             .update_group(
@@ -129,6 +141,14 @@ where
     U: From<T> + Permission + JsonSchema,
 {
     let (ctx, caller) = rqctx.as_ctx().await?;
+
+    if ctx.group.is_preset(&path.group_id) {
+        return Err(client_error(
+            ClientErrorStatusCode::CONFLICT,
+            "Preset groups are managed via service configuration and cannot be deleted at runtime",
+        ));
+    }
+
     Ok(HttpResponseOk(
         ctx.group
             .delete_group(&caller, &path.group_id)
