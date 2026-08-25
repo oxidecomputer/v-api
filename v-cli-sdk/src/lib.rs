@@ -62,6 +62,12 @@ pub trait VCliContext<C, P> {
     fn mlink_adapter(
         &self,
     ) -> impl CliMagicLinkAdapter<Token = Self::LongToken, Error = Self::Error> + Send + Sync + 'static;
+
+    /// Adapter used by the interactive saga browser to fetch sagas and their
+    /// details. Consumers implement [`crate::cmd::saga::CliSagaAdapter`] on
+    /// their own generated types and return it here.
+    #[cfg(all(feature = "sagas", feature = "experimental"))]
+    fn saga_adapter(&self) -> impl crate::cmd::saga::CliSagaAdapter + Send + Sync + 'static;
 }
 
 pub trait VApiErrorMessage {

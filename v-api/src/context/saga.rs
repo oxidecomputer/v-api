@@ -118,13 +118,13 @@ where
         &self,
         caller: &Caller<T>,
         filter: SagaFilter,
+        pagination: &ListPagination,
     ) -> ResourceResult<Vec<SagaView>, SagaCtxError> {
         if caller.can(&VPermission::GetSagasAll.into()) {
-            let models =
-                SagaStore::list(&*self.storage, vec![filter], &ListPagination::unlimited())
-                    .await
-                    .map_err(ResourceError::InternalError)
-                    .inner_err_into()?;
+            let models = SagaStore::list(&*self.storage, vec![filter], pagination)
+                .await
+                .map_err(ResourceError::InternalError)
+                .inner_err_into()?;
             Ok(models.into_iter().map(SagaView::from).collect())
         } else {
             resource_restricted()

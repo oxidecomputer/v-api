@@ -3,7 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use chrono::{DateTime, Utc};
-use dropshot::{HttpError, HttpResponseOk, Path, RequestContext};
+use dropshot::{
+    EmptyScanParams, HttpError, HttpResponseOk, PaginationParams, Path, RequestContext,
+    ResultsPage, WhichPage,
+};
 use newtype_uuid::{GenericUuid, TypedUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -15,6 +18,7 @@ use v_model::{
         storage::SagaFilter,
         view::{SagaExecNodeId, SagaId, SagaView},
     },
+    storage::ListPagination,
 };
 
 use crate::{ApiContext, permissions::VAppPermission};
@@ -72,24 +76,56 @@ fn get_node_name_from_dag(dag: &SagaDag, node_id: i64) -> Option<String> {
         .map(|entry| entry.name().as_ref().to_string())
 }
 
+/// Page selector used to paginate through the list of sagas.
+///
+/// Sagas are returned in a stable order (oldest first), and pagination is
+/// tracked via the offset of the next page of results.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SagaPageSelector {
+    /// The offset into the full result set at which the next page begins
+    offset: u64,
+}
+
 pub async fn list_sagas_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
-) -> Result<HttpResponseOk<Vec<SagaView>>, HttpError>
+    query: PaginationParams<EmptyScanParams, SagaPageSelector>,
+) -> Result<HttpResponseOk<ResultsPage<SagaView>>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
 {
     let caller = rqctx.v_ctx().get_caller(rqctx).await?;
+
+    let limit = rqctx.page_limit(&query)?.get();
+    let offset = match &query.page {
+        WhichPage::First(_) => 0,
+        WhichPage::Next(SagaPageSelector { offset }) => *offset,
+    };
+
+    let pagination = ListPagination::default()
+        .offset(offset as i64)
+        .limit(limit as i64);
+
     let sagas = rqctx
         .v_ctx()
         .saga
-        .list_sagas(&caller, SagaFilter::default())
+        .list_sagas(&caller, SagaFilter::default(), &pagination)
         .await
         .map_err(|err| {
             tracing::error!(?err, "Failed to list sagas");
             HttpError::for_internal_error("Failed to list sagas".to_string())
         })?;
 
-    Ok(HttpResponseOk(sagas))
+    // The next page begins immediately after the last item returned in this
+    // page. Because `ResultsPage::new` only uses the selector produced for the
+    // final item, computing the next offset up front is sufficient.
+    let next_offset = offset + sagas.len() as u64;
+    let page = ResultsPage::new(sagas, &EmptyScanParams {}, |_saga, _scan| {
+        SagaPageSelector {
+            offset: next_offset,
+        }
+    })?;
+
+    Ok(HttpResponseOk(page))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
