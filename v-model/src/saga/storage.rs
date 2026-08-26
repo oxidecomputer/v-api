@@ -12,7 +12,7 @@ use crate::{
         db::{ModelSagaCachedState, NewSagaEventModel, NewSagaModel, SagaEventModel, SagaModel},
         view::{SagaExecNodeId, SagaId},
     },
-    storage::{ListPagination, StoreError},
+    storage::{ListPagination, SortDirection, StoreError},
 };
 
 /// Filter for querying sagas.
@@ -64,11 +64,13 @@ pub trait SagaStore {
     /// Get a saga by ID.
     async fn get(&self, saga_id: TypedUuid<SagaId>) -> Result<Option<SagaModel>, StoreError>;
 
-    /// List sagas matching the given filters.
+    /// List sagas matching the given filters, sorted by their creation time in the
+    /// requested direction.
     async fn list(
         &self,
         filters: Vec<SagaFilter>,
         pagination: &ListPagination,
+        sort: SortDirection,
     ) -> Result<Vec<SagaModel>, StoreError>;
 
     /// Create a new saga record.

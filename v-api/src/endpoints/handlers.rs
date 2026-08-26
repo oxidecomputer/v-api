@@ -864,13 +864,14 @@ mod macros {
     #[macro_export]
     macro_rules! v_saga_endpoints {
         ($context_type:ident, $permission_type:ident) => {
-            use dropshot::{EmptyScanParams, PaginationParams, ResultsPage};
+            use dropshot::{PaginationParams, ResultsPage};
             use v_api::endpoints::saga::{
                 list_sagas_op,
                 view_saga_op,
                 SagaDetailView,
                 SagaPageSelector,
                 SagaPath,
+                SagaScanParams,
             };
             use v_model::saga::view::SagaView;
 
@@ -881,7 +882,7 @@ mod macros {
             }]
             pub async fn list_sagas(
                 rqctx: RequestContext<$context_type>,
-                query: Query<PaginationParams<EmptyScanParams, SagaPageSelector>>,
+                query: Query<PaginationParams<SagaScanParams, SagaPageSelector>>,
             ) -> Result<HttpResponseOk<ResultsPage<SagaView>>, HttpError> {
                 list_sagas_op(&rqctx, query.into_inner()).await
             }

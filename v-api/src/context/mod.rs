@@ -1758,6 +1758,8 @@ pub(crate) mod test_mocks {
         },
         view::{SagaExecNodeId, SagaId},
     };
+    #[cfg(feature = "sagas")]
+    use v_model::storage::SortDirection;
     use v_model::{
         AccessGroupId, AccessToken, AccessTokenId, ApiKey, ApiKeyId, ApiUserContactEmail,
         ApiUserProvider, LinkRequestId, LoginAttemptId, MagicLink, MagicLinkAttempt,
@@ -2596,11 +2598,12 @@ pub(crate) mod test_mocks {
             &self,
             filters: Vec<SagaFilter>,
             pagination: &ListPagination,
+            sort: SortDirection,
         ) -> Result<Vec<SagaModel>, StoreError> {
             self.saga_store
                 .as_ref()
                 .unwrap()
-                .list(filters, pagination)
+                .list(filters, pagination, sort)
                 .await
         }
 

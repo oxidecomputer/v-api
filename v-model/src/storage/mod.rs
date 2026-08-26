@@ -71,6 +71,16 @@ impl Default for ListPagination {
     }
 }
 
+/// The direction that a list of records is sorted in
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SortDirection {
+    /// Oldest records first
+    #[default]
+    Ascending,
+    /// Newest records first
+    Descending,
+}
+
 impl ListPagination {
     pub fn latest() -> Self {
         Self::default().limit(1)

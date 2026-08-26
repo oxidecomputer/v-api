@@ -19,7 +19,7 @@ use v_model::{
         storage::{SagaEventFilter, SagaEventStore, SagaFilter, SagaStore},
         view::{SagaExecNodeId, SagaId, SagaView},
     },
-    storage::ListPagination,
+    storage::{ListPagination, SortDirection},
 };
 
 use crate::{
@@ -113,15 +113,16 @@ where
         }
     }
 
-    /// List all sagas matching the given filter.
+    /// List sagas
     pub async fn list_sagas(
         &self,
         caller: &Caller<T>,
         filter: SagaFilter,
         pagination: &ListPagination,
+        sort: SortDirection,
     ) -> ResourceResult<Vec<SagaView>, SagaCtxError> {
         if caller.can(&VPermission::GetSagasAll.into()) {
-            let models = SagaStore::list(&*self.storage, vec![filter], pagination)
+            let models = SagaStore::list(&*self.storage, vec![filter], pagination, sort)
                 .await
                 .map_err(ResourceError::InternalError)
                 .inner_err_into()?;

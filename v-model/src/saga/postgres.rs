@@ -18,7 +18,7 @@ use crate::{
         view::{SagaExecNodeId, SagaId},
     },
     schema::{saga_events, sagas},
-    storage::{ListPagination, StoreError, postgres::PostgresStore},
+    storage::{ListPagination, SortDirection, StoreError, postgres::PostgresStore},
 };
 
 #[async_trait]
@@ -37,6 +37,7 @@ impl SagaStore for PostgresStore {
         &self,
         filters: Vec<SagaFilter>,
         pagination: &ListPagination,
+        sort: SortDirection,
     ) -> Result<Vec<SagaModel>, StoreError> {
         let mut query = sagas::dsl::sagas.into_boxed();
 
@@ -107,10 +108,20 @@ impl SagaStore for PostgresStore {
             }
         }
 
+        // Sagas created within the same instant would otherwise be ordered arbitrarily,
+        // which offset based pagination can not tolerate. The id acts as the tiebreaker
+        query = match sort {
+            SortDirection::Ascending => query
+                .order(sagas::created_at.asc())
+                .then_order_by(sagas::saga_id.asc()),
+            SortDirection::Descending => query
+                .order(sagas::created_at.desc())
+                .then_order_by(sagas::saga_id.desc()),
+        };
+
         let results = query
             .offset(pagination.offset)
             .limit(pagination.limit)
-            .order(sagas::created_at.asc())
             .get_results_async::<SagaModel>(&*self.pool.get().await?)
             .await?;
 
