@@ -31,6 +31,14 @@ use crate::cmd::saga::{
 
 const INPUT_POLL: Duration = Duration::from_millis(200);
 
+/// Rendered between the columns of a saga list row
+const COLUMN_GAP: &str = "  ";
+
+/// Upper bounds on the padded columns of the saga list.
+const NAME_COLUMN_MAX: usize = 40;
+const STATE_COLUMN_MAX: usize = 12;
+const ID_COLUMN_MAX: usize = 36;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
     List,
@@ -321,18 +329,26 @@ where
             .constraints([Constraint::Min(1), Constraint::Length(1)])
             .split(frame.area());
 
-        let items: Vec<ListItem> = self
-            .sagas
+        let rows: Vec<SagaRow> = self.sagas.iter().map(SagaRow::from_summary).collect();
+        let columns = ListColumns::measure(&rows);
+
+        let items: Vec<ListItem> = rows
             .iter()
-            .map(|saga| {
+            .map(|row| {
                 let line = Line::from(vec![
-                    Span::styled(saga.name(), Style::default().add_modifier(Modifier::BOLD)),
-                    Span::raw("\t\t"),
-                    Span::styled(saga.state(), state_style(&saga.state())),
-                    Span::raw("\t\t"),
-                    Span::styled(saga.id(), Style::default().fg(Color::DarkGray)),
-                    Span::raw("\t\t"),
-                    Span::styled(saga.created_at(), Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        columns.fit_name(&row.name),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(COLUMN_GAP),
+                    Span::styled(columns.fit_state(&row.state), state_style(&row.state)),
+                    Span::raw(COLUMN_GAP),
+                    Span::styled(
+                        columns.fit_id(&row.id),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::raw(COLUMN_GAP),
+                    Span::styled(row.created_at.clone(), Style::default().fg(Color::DarkGray)),
                 ]);
                 ListItem::new(line)
             })
@@ -505,6 +521,114 @@ where
     }
 }
 
+/// The values rendered for a single row of the saga list, read out of a summary once so
+/// that they can be measured and rendered without asking the adapter for them twice.
+struct SagaRow {
+    name: String,
+    state: String,
+    id: String,
+    created_at: String,
+}
+
+impl SagaRow {
+    fn from_summary<S>(summary: &S) -> Self
+    where
+        S: CliSagaSummary,
+    {
+        Self {
+            name: summary.name(),
+            state: summary.state(),
+            id: summary.id(),
+            created_at: summary.created_at(),
+        }
+    }
+}
+
+/// The width that each padded column of the saga list is rendered at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ListColumns {
+    name: usize,
+    state: usize,
+    id: usize,
+}
+
+impl ListColumns {
+    /// Measure the columns needed to hold every loaded row. Widths grow to fit the widest
+    /// value present, up to the column maximum, so that the rows of a single render always
+    /// agree on where each column begins.
+    fn measure(rows: &[SagaRow]) -> Self {
+        let mut columns = Self {
+            name: 0,
+            state: 0,
+            id: 0,
+        };
+
+        for row in rows {
+            columns.name = columns.name.max(display_width(&row.name));
+            columns.state = columns.state.max(display_width(&row.state));
+            columns.id = columns.id.max(display_width(&row.id));
+        }
+
+        Self {
+            name: columns.name.min(NAME_COLUMN_MAX),
+            state: columns.state.min(STATE_COLUMN_MAX),
+            id: columns.id.min(ID_COLUMN_MAX),
+        }
+    }
+
+    fn fit_name(&self, value: &str) -> String {
+        fit(value, self.name)
+    }
+
+    fn fit_state(&self, value: &str) -> String {
+        fit(value, self.state)
+    }
+
+    fn fit_id(&self, value: &str) -> String {
+        fit(value, self.id)
+    }
+}
+
+/// The number of terminal cells that `value` occupies
+fn display_width(value: &str) -> usize {
+    Span::raw(value).width()
+}
+
+/// Render `value` as exactly `width` cells, padding it with spaces or truncating it with an
+/// ellipsis. Values are measured in cells rather than bytes or characters so that a wide
+/// character does not shift the columns that follow it.
+fn fit(value: &str, width: usize) -> String {
+    let value_width = display_width(value);
+    if value_width <= width {
+        let mut fitted = String::with_capacity(value.len() + (width - value_width));
+        fitted.push_str(value);
+        fitted.extend(std::iter::repeat_n(' ', width - value_width));
+        return fitted;
+    }
+
+    // The ellipsis marking the truncation needs a cell of its own
+    let mut fitted = String::with_capacity(value.len());
+    let mut used = 0;
+    let mut buf = [0u8; 4];
+    for ch in value.chars() {
+        let ch_width = display_width(ch.encode_utf8(&mut buf));
+        if used + ch_width + 1 > width {
+            break;
+        }
+        fitted.push(ch);
+        used += ch_width;
+    }
+
+    if width > 0 {
+        fitted.push('…');
+        used += 1;
+    }
+
+    // A wide character may have been skipped over, leaving the row a cell short
+    fitted.extend(std::iter::repeat_n(' ', width.saturating_sub(used)));
+    fitted
+}
+
 fn footer(text: &str) -> Paragraph<'_> {
     Paragraph::new(Line::from(text)).style(Style::default().fg(Color::DarkGray))
 }
@@ -549,5 +673,127 @@ fn state_style(state: &str) -> Style {
         "running" => Style::default().fg(Color::Yellow),
         "unwinding" | "failed" => Style::default().fg(Color::Red),
         _ => Style::default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{COLUMN_GAP, ListColumns, NAME_COLUMN_MAX, SagaRow, display_width, fit};
+
+    fn row(name: &str, state: &str, id: &str) -> SagaRow {
+        SagaRow {
+            name: name.to_string(),
+            state: state.to_string(),
+            id: id.to_string(),
+            created_at: "2026-08-27T00:15:15.938481+00:00".to_string(),
+        }
+    }
+
+    /// The width of the leading columns of a row, which is where the following column
+    /// begins. This is the value that has to match across every row of a render.
+    fn prefix_width(columns: &ListColumns, row: &SagaRow) -> usize {
+        display_width(&columns.fit_name(&row.name))
+            + display_width(COLUMN_GAP)
+            + display_width(&columns.fit_state(&row.state))
+            + display_width(COLUMN_GAP)
+            + display_width(&columns.fit_id(&row.id))
+            + display_width(COLUMN_GAP)
+    }
+
+    #[test]
+    fn columns_fit_the_widest_value() {
+        let rows = vec![
+            row(
+                "CaptureOpalSaga",
+                "done",
+                "33301d4a-7682-4d7b-a1bb-9fe8cd47cf1b",
+            ),
+            row(
+                "BenchmarkImportSaga",
+                "running",
+                "99013e4d-1adb-4123-bddc-1d3402a521bc",
+            ),
+        ];
+
+        let columns = ListColumns::measure(&rows);
+
+        assert_eq!("BenchmarkImportSaga".len(), columns.name);
+        assert_eq!("running".len(), columns.state);
+        assert_eq!(36, columns.id);
+    }
+
+    /// Rows whose names and states differ in length must still start their later columns at
+    /// the same offset
+    #[test]
+    fn every_row_starts_its_columns_at_the_same_offset() {
+        let rows = vec![
+            row(
+                "CaptureOpalSaga",
+                "done",
+                "33301d4a-7682-4d7b-a1bb-9fe8cd47cf1b",
+            ),
+            row(
+                "BenchmarkImportSaga",
+                "running",
+                "99013e4d-1adb-4123-bddc-1d3402a521bc",
+            ),
+            row(
+                "DuroSnapshotSaga",
+                "unwinding",
+                "22858e12-3b5f-48c3-985d-edd132540416",
+            ),
+        ];
+
+        let columns = ListColumns::measure(&rows);
+        let widths = rows
+            .iter()
+            .map(|row| prefix_width(&columns, row))
+            .collect::<Vec<_>>();
+
+        assert!(
+            widths.windows(2).all(|pair| pair[0] == pair[1]),
+            "Rows disagree on where the created at column begins: {widths:?}"
+        );
+    }
+
+    /// A name longer than the column cap is truncated rather than shifting the columns that
+    /// follow it
+    #[test]
+    fn over_wide_values_are_truncated_to_the_column() {
+        let long = "A".repeat(NAME_COLUMN_MAX + 20);
+        let rows = vec![
+            row(&long, "done", "33301d4a-7682-4d7b-a1bb-9fe8cd47cf1b"),
+            row(
+                "CaptureOpalSaga",
+                "done",
+                "33301d4a-7682-4d7b-a1bb-9fe8cd47cf1b",
+            ),
+        ];
+
+        let columns = ListColumns::measure(&rows);
+
+        assert_eq!(NAME_COLUMN_MAX, columns.name);
+        let fitted = columns.fit_name(&long);
+        assert_eq!(NAME_COLUMN_MAX, display_width(&fitted));
+        assert!(fitted.ends_with('…'), "Truncation was not marked: {fitted}");
+        assert_eq!(
+            prefix_width(&columns, &rows[0]),
+            prefix_width(&columns, &rows[1])
+        );
+    }
+
+    /// Wide characters occupy two cells, and padding that counted characters instead would
+    /// leave the following columns a cell out of place
+    #[test]
+    fn wide_characters_are_measured_in_cells() {
+        assert_eq!(8, display_width(&fit("四字熟語", 8)));
+        assert_eq!(10, display_width(&fit("四字熟語", 10)));
+        assert_eq!(6, display_width(&fit("四字熟語", 6)));
+    }
+
+    #[test]
+    fn short_values_are_padded_to_the_column() {
+        assert_eq!("done      ", fit("done", 10));
+        assert_eq!("", fit("done", 0));
     }
 }
