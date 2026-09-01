@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, error::Error};
 
 use diesel::{
-    PgConnection,
+    Connection, PgConnection,
     migration::MigrationSource,
     pg::Pg,
     r2d2::{ConnectionManager, ManageConnection},
@@ -49,6 +49,32 @@ pub fn assert_unique_migration_versions() {
             );
         }
     }
+}
+
+/// Returns the versions of enabled embedded migrations that have not been
+/// applied to the database, without modifying it.
+pub fn pending_migration_versions(url: &str) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
+    assert_unique_migration_versions();
+
+    let mut conn = PgConnection::establish(url)?;
+    let applied = conn
+        .applied_migrations()?
+        .into_iter()
+        .map(|version| version.to_string())
+        .collect();
+    let mut embedded = HashSet::new();
+    for migration_set in all_migrations() {
+        let migrations = <EmbeddedMigrations as MigrationSource<Pg>>::migrations(&migration_set)?;
+        embedded.extend(
+            migrations
+                .iter()
+                .map(|migration| migration.name().version().to_string()),
+        );
+    }
+    let mut pending: Vec<String> = embedded.difference(&applied).cloned().collect();
+    pending.sort();
+
+    Ok(pending)
 }
 
 /// Runs all pending migrations for each enabled feature against the database
