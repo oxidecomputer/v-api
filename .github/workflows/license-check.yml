@@ -6,6 +6,9 @@ on:
       - main
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.ref_name == 'main' && github.sha || 'anysha' }}
   cancel-in-progress: true
@@ -16,4 +19,4 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check License Header
-        uses: apache/skywalking-eyes/header@8c96ee223558797cdd9eba82c0919258e1cf2dad
+        uses: apache/skywalking-eyes/header@a196742f472feaffafea537ce5a2a4c3c53a8de4 # v0.9.0
