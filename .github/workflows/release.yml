@@ -16,10 +16,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Create GitHub Release
+      - name: Create v-api GitHub Release
+        if: startsWith(github.ref_name, 'v')
         uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
         with:
           draft: ${{ github.event_name == 'pull_request' }}
           tag: ${{ github.ref_name }}
           generateReleaseNotes: true
           prerelease: ${{ contains(github.ref_name, '-pre') }}
+
+      - name: Create remix-auth-vapi GitHub Release
+        if: startsWith(github.ref_name, 'remix-auth-vapi-v')
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
+        with:
+          draft: ${{ github.event_name == 'pull_request' }}
+          tag: ${{ github.ref_name }}
+          body: |
+            See [`remix-auth-vapi/CHANGELOG.md`](https://github.com/${{ github.repository }}/blob/main/remix-auth-vapi/CHANGELOG.md).
+          prerelease: ${{ contains(github.ref_name, '-pre') }}
+          makeLatest: false
