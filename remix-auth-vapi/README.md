@@ -10,6 +10,10 @@ Talks to the HTTP endpoints every v-api service exposes:
 - `GET /login/oauth/{provider}/code/authorize` and `POST .../code/token` (via `remix-auth-oauth2`)
 - `GET /self`
 
+## Changelog
+
+See: [CHANGELOG.md](CHANGELOG.md) for release details.
+
 ## Usage
 
 ```ts
