@@ -44,7 +44,7 @@ impl VApiOpenTelemetryLayers {
     {
         let span_exporter = opentelemetry_otlp::SpanExporter::builder()
             .with_http()
-            .with_endpoint(&self.endpoint)
+            .with_endpoint(format!("{}/v1/traces", self.endpoint.trim_end_matches('/')))
             .build()?;
         let tracer_provider = SdkTracerProvider::builder()
             .with_batch_exporter(span_exporter, runtime::Tokio)
@@ -59,7 +59,7 @@ impl VApiOpenTelemetryLayers {
     ) -> Result<OpenTelemetryTracingBridge<LoggerProvider, Logger>, VApiOpenTelemetryError> {
         let log_exporter = opentelemetry_otlp::LogExporter::builder()
             .with_http()
-            .with_endpoint(&self.endpoint)
+            .with_endpoint(format!("{}/v1/logs", self.endpoint.trim_end_matches('/')))
             .build()?;
         let logger_provider = LoggerProvider::builder()
             .with_batch_exporter(log_exporter, runtime::Tokio)
