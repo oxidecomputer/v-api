@@ -1,0 +1,15 @@
+[package]
+name = "v-api-telemetry"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+opentelemetry = { workspace = true }
+opentelemetry-appender-tracing = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true }
