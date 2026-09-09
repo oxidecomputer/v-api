@@ -2405,11 +2405,8 @@ dependencies = [
  "async-trait",
  "bytes",
  "http",
- "http-body-util",
- "hyper",
- "hyper-util",
  "opentelemetry",
- "tokio",
+ "reqwest",
 ]
 
 [[package]]
@@ -2424,6 +2421,7 @@ dependencies = [
  "opentelemetry-proto",
  "opentelemetry_sdk",
  "prost",
+ "reqwest",
  "thiserror 2.0.20",
 ]
 
@@ -3170,6 +3168,7 @@ checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",
