@@ -4,13 +4,12 @@
 
 #![cfg(feature = "experimental")]
 
-use opentelemetry::trace::{TraceError, TracerProvider};
+use opentelemetry::trace::TracerProvider;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::{ExporterBuildError, WithExportConfig};
 use opentelemetry_sdk::{
-    logs::{LogError, Logger, LoggerProvider},
-    runtime,
-    trace::{Tracer, TracerProvider as SdkTracerProvider},
+    logs::{SdkLogger, SdkLoggerProvider},
+    trace::{SdkTracerProvider, Tracer},
 };
 use thiserror::Error;
 use tracing::Subscriber;
@@ -24,10 +23,8 @@ pub struct VApiOpenTelemetryLayers {
 
 #[derive(Debug, Error)]
 pub enum VApiOpenTelemetryError {
-    #[error("trace error")]
-    Trace(#[from] TraceError),
-    #[error("log error")]
-    Log(#[from] LogError),
+    #[error("failed to build otlp exporter")]
+    ExporterBuild(#[from] ExporterBuildError),
 }
 
 impl VApiOpenTelemetryLayers {
@@ -47,7 +44,7 @@ impl VApiOpenTelemetryLayers {
             .with_endpoint(format!("{}/v1/traces", self.endpoint.trim_end_matches('/')))
             .build()?;
         let tracer_provider = SdkTracerProvider::builder()
-            .with_batch_exporter(span_exporter, runtime::Tokio)
+            .with_batch_exporter(span_exporter)
             .build();
         let trace_layer =
             tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer(self.service_name));
@@ -56,13 +53,14 @@ impl VApiOpenTelemetryLayers {
 
     pub fn log_layer(
         &self,
-    ) -> Result<OpenTelemetryTracingBridge<LoggerProvider, Logger>, VApiOpenTelemetryError> {
+    ) -> Result<OpenTelemetryTracingBridge<SdkLoggerProvider, SdkLogger>, VApiOpenTelemetryError>
+    {
         let log_exporter = opentelemetry_otlp::LogExporter::builder()
             .with_http()
             .with_endpoint(format!("{}/v1/logs", self.endpoint.trim_end_matches('/')))
             .build()?;
-        let logger_provider = LoggerProvider::builder()
-            .with_batch_exporter(log_exporter, runtime::Tokio)
+        let logger_provider = SdkLoggerProvider::builder()
+            .with_batch_exporter(log_exporter)
             .build();
         let log_layer = OpenTelemetryTracingBridge::new(&logger_provider);
         Ok(log_layer)
