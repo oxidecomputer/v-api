@@ -13,20 +13,20 @@ use tracing::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::registry::LookupSpan;
 
-pub struct VApiTelemetryLayers {
+pub struct VApiOpenTelemetryLayers {
     service_name: &'static str,
     endpoint: String,
 }
 
 #[derive(Debug, Error)]
-pub enum VApiTelemetryError {
+pub enum VApiOpenTelemetryError {
     #[error("trace error")]
     Trace(#[from] TraceError),
     #[error("log error")]
     Log(#[from] LogError),
 }
 
-impl VApiTelemetryLayers {
+impl VApiOpenTelemetryLayers {
     pub fn new(service_name: &'static str, endpoint: &str) -> Self {
         Self {
             service_name,
@@ -34,7 +34,7 @@ impl VApiTelemetryLayers {
         }
     }
 
-    pub fn trace_layer<T>(&self) -> Result<OpenTelemetryLayer<T, Tracer>, VApiTelemetryError>
+    pub fn trace_layer<T>(&self) -> Result<OpenTelemetryLayer<T, Tracer>, VApiOpenTelemetryError>
     where
         T: Subscriber + for<'span> LookupSpan<'span>,
     {
@@ -52,7 +52,7 @@ impl VApiTelemetryLayers {
 
     pub fn log_layer(
         &self,
-    ) -> Result<OpenTelemetryTracingBridge<LoggerProvider, Logger>, VApiTelemetryError> {
+    ) -> Result<OpenTelemetryTracingBridge<LoggerProvider, Logger>, VApiOpenTelemetryError> {
         let log_exporter = opentelemetry_otlp::LogExporter::builder()
             .with_http()
             .with_endpoint(&self.endpoint)
