@@ -4,7 +4,7 @@
 
 //! Proves that the layers actually export, against a listener standing in for a collector.
 
-#![cfg(feature = "experimental")]
+#![cfg(feature = "otel")]
 
 use std::{
     io::{Read, Write},

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#![cfg(feature = "experimental")]
+#![cfg(feature = "otel")]
 
 use opentelemetry::{Key, KeyValue, Value, trace::TracerProvider};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
@@ -70,7 +70,7 @@ impl VApiOpenTelemetryLayers {
     }
 
     fn resource(&self) -> Resource {
-        let mut builder = Resource::builder().with_service_name(self.service_name);
+        let mut builder = Resource::builder().with_service_name(self.service_name.clone());
 
         if let Some(version) = &self.version {
             builder = builder.with_attribute(KeyValue::new(SERVICE_VERSION, version.clone()));
@@ -94,7 +94,7 @@ impl VApiOpenTelemetryLayers {
             .with_batch_exporter(span_exporter)
             .build();
         let trace_layer =
-            tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer(self.service_name));
+            tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer(self.service_name.clone()));
         Ok(trace_layer)
     }
 
