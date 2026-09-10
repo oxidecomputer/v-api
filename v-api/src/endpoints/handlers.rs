@@ -916,7 +916,9 @@ mod macros {
     #[cfg(feature = "metrics")]
     #[macro_export]
     macro_rules! v_metrics_endpoints {
-        ($context_type:ident, $permission_type:ident) => {
+        ($context_type:ident) => {
+            use v_api::endpoints::metrics::metrics_op;
+
             /// Report service metrics
             #[endpoint {
                 method = GET,
@@ -925,7 +927,7 @@ mod macros {
             pub async fn metrics(
                 rqctx: RequestContext<$context_type>,
             ) -> Result<Response<Body>, HttpError> {
-                metrics_op(&rqctx, query.into_inner()).await
+                metrics_op(&rqctx).await
             }
         }
     }
