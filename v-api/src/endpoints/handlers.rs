@@ -912,4 +912,31 @@ mod macros {
                 .expect("Failed to register endpoint");
         };
     }
+
+    #[cfg(feature = "metrics")]
+    #[macro_export]
+    macro_rules! v_metrics_endpoints {
+        ($context_type:ident, $permission_type:ident) => {
+            /// Report service metrics
+            #[endpoint {
+                method = GET,
+                path = "/v/metrics"
+            }]
+            pub async fn metrics(
+                rqctx: RequestContext<$context_type>,
+            ) -> Result<Response<Body>, HttpError> {
+                metrics_op(&rqctx, query.into_inner()).await
+            }
+        }
+    }
+
+    #[cfg(feature = "metrics")]
+    #[macro_export]
+    macro_rules! inject_v_metrics_endpoints {
+        ($api:ident) => {
+            // Metrics endpoints
+            $api.register(metrics)
+                .expect("Failed to register endpoint");
+        };
+    }
 }

@@ -37,6 +37,10 @@ http-body-util = "0.1.5"
 hyper = "1.10.1"
 hyper-util = "0.1"
 jsonwebtoken = { version = "10.2", features = ["aws_lc_rs"] }
+metrics = "0.24.5"
+# Only the http-listener feature. The default set also pulls in push-gateway, which brings
+# hyper-rustls and a TLS provider along with it for a mode we do not use.
+metrics-exporter-prometheus = { version = "0.18.3", default-features = false, features = ["http-listener"] }
 mockall = "0.15.0"
 newtype-uuid = { version = "1.3.2", features = ["schemars08", "serde", "v4"] }
 oauth2 = { version = "5.0.0", default-features = false }
