@@ -1016,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "dropshot-authorization-header"
-version = "0.5.11"
+version = "0.5.12"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -4791,7 +4791,7 @@ dependencies = [
 
 [[package]]
 name = "v-api"
-version = "0.5.11"
+version = "0.5.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4840,7 +4840,7 @@ dependencies = [
 
 [[package]]
 name = "v-api-param"
-version = "0.5.11"
+version = "0.5.12"
 dependencies = [
  "newtype-uuid",
  "secrecy",
@@ -4853,7 +4853,7 @@ dependencies = [
 
 [[package]]
 name = "v-api-permission-derive"
-version = "0.5.11"
+version = "0.5.12"
 dependencies = [
  "chrono",
  "heck",
@@ -4871,7 +4871,7 @@ dependencies = [
 
 [[package]]
 name = "v-api-telemetry"
-version = "0.5.11"
+version = "0.5.12"
 dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
@@ -4887,7 +4887,7 @@ dependencies = [
 
 [[package]]
 name = "v-cli-sdk"
-version = "0.5.11"
+version = "0.5.12"
 dependencies = [
  "anyhow",
  "clap",
@@ -4910,7 +4910,7 @@ dependencies = [
 
 [[package]]
 name = "v-model"
-version = "0.5.11"
+version = "0.5.12"
 dependencies = [
  "async-bb8-diesel",
  "async-trait",
@@ -5380,7 +5380,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xtask"
-version = "0.5.11"
+version = "0.5.12"
 dependencies = [
  "clap",
  "regex",
