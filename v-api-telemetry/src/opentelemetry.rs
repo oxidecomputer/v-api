@@ -93,8 +93,8 @@ impl VApiOpenTelemetryLayers {
             .with_resource(self.resource())
             .with_batch_exporter(span_exporter)
             .build();
-        let trace_layer =
-            tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer(self.service_name.clone()));
+        let trace_layer = tracing_opentelemetry::layer()
+            .with_tracer(tracer_provider.tracer(self.service_name.clone()));
         Ok(trace_layer)
     }
 
