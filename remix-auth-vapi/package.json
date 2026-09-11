@@ -57,7 +57,7 @@
     "tsdown": "^0.22.14",
     "typescript": "^6.0.0",
     "typescript-eslint": "^8.65.0",
-    "vitest": "^4.0.15"
+    "vitest": "^5.0.0"
   },
   "dependencies": {
     "remix-auth-oauth2": "^3.4.0"
