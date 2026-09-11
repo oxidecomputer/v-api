@@ -80,6 +80,6 @@ tracing = "0.1.44"
 tracing-opentelemetry = "0.33"
 tracing-subscriber = "0.3.23"
 url = "2.5.8"
-uuid = "1.24.0"
+uuid = "1.26.1"
 valuable = "0.1.1"
 yup-oauth2 = { version = "12.1.2", default-features = false, features = ["hyper-rustls", "service-account", "aws-lc-rs"] }
