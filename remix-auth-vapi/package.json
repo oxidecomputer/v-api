@@ -54,7 +54,7 @@
     "eslint-plugin-prettier": "^5.0.0",
     "msw": "^2.6.0",
     "prettier": "^3.9.6",
-    "tsdown": "^0.22.14",
+    "tsdown": "^0.23.0",
     "typescript": "^6.0.0",
     "typescript-eslint": "^8.65.0",
     "vitest": "^4.0.15"
