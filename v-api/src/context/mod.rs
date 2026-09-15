@@ -933,6 +933,7 @@ where
         self
     }
 
+    #[allow(clippy::result_large_err)]
     pub async fn build(self) -> Result<VContext<T>, VContextBuilderError> {
         if self.storage.is_some() && self.storage_url.is_some() {
             return Err(VContextBuilderError::ConfigConflict(
@@ -1807,6 +1808,7 @@ pub(crate) mod test_mocks {
     }
 
     // Attempt to construct a context that has been configured with preset groups
+    #[allow(clippy::result_large_err)]
     pub async fn build_ctx_with_groups(
         storage: Arc<MockStorage>,
         groups: Vec<PresetGroupConfig<VPermission>>,

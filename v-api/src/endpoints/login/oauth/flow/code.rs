@@ -1482,7 +1482,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            format!("https://test.oxeng.dev/callback?state=ox_state&error=server_error",),
+            "https://test.oxeng.dev/callback?state=ox_state&error=server_error".to_string(),
             location
         );
     }
@@ -1553,7 +1553,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            format!("https://test.oxeng.dev/callback?state=ox_state&error=access_denied",),
+            "https://test.oxeng.dev/callback?state=ox_state&error=access_denied".to_string(),
             location
         );
     }
