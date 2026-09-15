@@ -49,7 +49,7 @@ opentelemetry = "0.32"
 opentelemetry_sdk = "0.32"
 opentelemetry-otlp = { version = "0.32", default-features = false, features = ["http-json", "reqwest-blocking-client", "logs", "trace", "internal-logs"] }
 opentelemetry-appender-tracing = "0.32"
-owo-colors = "4.3.0"
+owo-colors = "4.4.0"
 partial-struct = { git = "https://github.com/oxidecomputer/partial-struct" }
 proc-macro2 = "1"
 progenitor-client = "0.14.0"
