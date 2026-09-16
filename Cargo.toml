@@ -36,7 +36,7 @@ http = "1"
 http-body-util = "0.1.5"
 hyper = "1.11.1"
 hyper-util = "0.1"
-jsonwebtoken = { version = "10.2", features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "11.0", features = ["aws_lc_rs"] }
 metrics = "0.24.5"
 # Only the http-listener feature. The default set also pulls in push-gateway, which brings
 # hyper-rustls and a TLS provider along with it for a mode we do not use.
