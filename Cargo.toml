@@ -22,7 +22,7 @@ async-trait = "0.1.92"
 base64 = "0.23"
 bb8 = "0.9"
 chrono = "0.4"
-clap = { version = "4.6.6", features = ["derive", "string"] }
+clap = { version = "4.6.7", features = ["derive", "string"] }
 cookie = { version = "0.18.2" }
 crc32c = "0.6.8"
 diesel = { version = "2.3", features = ["postgres"] }
@@ -36,7 +36,7 @@ http = "1"
 http-body-util = "0.1.5"
 hyper = "1.11.1"
 hyper-util = "0.1"
-jsonwebtoken = { version = "10.2", features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "11.0", features = ["aws_lc_rs"] }
 metrics = "0.24.5"
 # Only the http-listener feature. The default set also pulls in push-gateway, which brings
 # hyper-rustls and a TLS provider along with it for a mode we do not use.
@@ -52,7 +52,7 @@ opentelemetry-appender-tracing = "0.32"
 owo-colors = "4.4.0"
 partial-struct = { git = "https://github.com/oxidecomputer/partial-struct" }
 proc-macro2 = "1"
-progenitor-client = "0.14.0"
+progenitor-client = "0.15.0"
 quote = "1"
 ratatui = "0.30"
 rand = "0.10.2"
