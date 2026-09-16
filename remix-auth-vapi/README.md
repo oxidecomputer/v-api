@@ -12,7 +12,8 @@ Talks to the HTTP endpoints every v-api service exposes:
 
 ## Changelog
 
-See: [CHANGELOG.md](CHANGELOG.md) for release details.
+See: [CHANGELOG.md](https://github.com/oxidecomputer/v-api/blob/main/remix-auth-vapi/CHANGELOG.md)
+for release details.
 
 ## Usage
 
