@@ -52,7 +52,7 @@ opentelemetry-appender-tracing = "0.32"
 owo-colors = "4.4.0"
 partial-struct = { git = "https://github.com/oxidecomputer/partial-struct" }
 proc-macro2 = "1"
-progenitor-client = "0.14.0"
+progenitor-client = "0.15.0"
 quote = "1"
 ratatui = "0.30"
 rand = "0.10.2"
