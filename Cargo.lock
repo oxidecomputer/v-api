@@ -4863,7 +4863,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "syn 2.0.119",
+ "syn 3.0.4",
  "uuid",
  "v-api",
  "v-model",
