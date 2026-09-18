@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     services:
       postgres: &setup-postgres
         image: postgres
@@ -42,7 +42,7 @@ jobs:
           TEST_DATABASE: postgres://test:test@localhost
           RUST_LOG: v=trace,turnstile=trace
   test-all:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     services:
       postgres: *setup-postgres
 
