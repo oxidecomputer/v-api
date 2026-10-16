@@ -62,8 +62,8 @@ mod system {
     }
 }
 
-/// Extract the methods from a described dropshot API. This created a set of
-/// (method, pattern) pairs that each map to an #endpoint defintion that has
+/// Extract the methods from a described dropshot API. This creates a set of
+/// (method, pattern) pairs that each map to an #endpoint definition that has
 /// been registered with the description.
 fn registered_endpoints(api: &ApiDescription<Context>) -> BTreeSet<(String, String)> {
     let document = api
@@ -188,9 +188,9 @@ fn registered_endpoints_match_the_expected_set() {
     // accidentally removed.
     let missing = expected.difference(&registered).collect::<Vec<_>>();
 
-    // Ensures that not new endpoint is added without it being added to our test
+    // Ensures that no new endpoint is added without it being added to our test
     // set above. This is our "checkin" for endpoints we use to make sure we
-    // do not break / remove endpoints unexceptedly.
+    // do not break / remove endpoints unexpectedly.
     let unexpected = registered.difference(&expected).collect::<Vec<_>>();
 
     assert!(
