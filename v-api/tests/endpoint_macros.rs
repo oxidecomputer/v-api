@@ -62,11 +62,9 @@ mod system {
     }
 }
 
-/// Every endpoint the API serves, as a method and path pair, taken from the generated OpenAPI
-/// document.
-///
-/// Methods are included because several paths serve more than one, and a path alone would not
-/// notice one of them going missing.
+/// Extract the methods from a described dropshot API. This created a set of
+/// (method, pattern) pairs that each map to an #endpoint defintion that has
+/// been registered with the description.
 fn registered_endpoints(api: &ApiDescription<Context>) -> BTreeSet<(String, String)> {
     let document = api
         .openapi("v-api endpoint macros", Version::new(0, 0, 1))
