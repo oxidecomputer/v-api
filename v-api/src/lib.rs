@@ -12,6 +12,8 @@ pub mod messenger;
 pub mod permissions;
 mod secrets;
 mod util;
+#[cfg(feature = "vanta")]
+pub mod vanta;
 
 pub use context::{
     ApiContext, BasePermissions, CallerExtension, ExtensionError, GroupContext, LinkContext,

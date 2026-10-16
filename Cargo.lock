@@ -4834,6 +4834,7 @@ dependencies = [
  "v-api-param",
  "v-api-permission-derive",
  "v-api-telemetry",
+ "v-api-vanta",
  "v-model",
  "yup-oauth2",
 ]
@@ -4883,6 +4884,26 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "v-api-vanta"
+version = "0.5.12"
+dependencies = [
+ "chrono",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "newtype-uuid",
+ "reqwest",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "v-api-param",
+ "v-model",
 ]
 
 [[package]]

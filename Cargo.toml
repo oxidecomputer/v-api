@@ -4,6 +4,7 @@ members = [
   "v-api-param",
   "v-api-permission-derive",
   "v-api-telemetry",
+  "v-api-vanta",
   "v-cli-sdk",
   "v-model",
   "xtask"

@@ -9,6 +9,8 @@ default = ["sagas"]
 local-dev = []
 metrics = ["v-api-telemetry"]
 sagas = ["slog", "steno", "v-api-permission-derive/sagas", "v-model/sagas"]
+# Report the access control inventory of this service to a Vanta private integration
+vanta = ["v-api-vanta"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -50,6 +52,7 @@ uuid = { workspace = true, features = ["v4", "v5", "serde"]  }
 v-api-param = { path = "../v-api-param" }
 v-api-permission-derive = { path = "../v-api-permission-derive" }
 v-api-telemetry = { path = "../v-api-telemetry", features = ["prometheus"], optional = true }
+v-api-vanta = { path = "../v-api-vanta", optional = true }
 v-model = { path = "../v-model" }
 yup-oauth2 = { workspace = true }
 
