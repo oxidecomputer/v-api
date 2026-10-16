@@ -2165,6 +2165,17 @@ pub(crate) mod test_mocks {
                 .upsert(token)
                 .await
         }
+
+        async fn revoke(
+            &self,
+            tokens: Vec<TypedUuid<AccessTokenId>>,
+        ) -> Result<Vec<bool>, v_model::storage::StoreError> {
+            self.access_token_store
+                .as_ref()
+                .unwrap()
+                .revoke(tokens)
+                .await
+        }
     }
 
     #[async_trait]

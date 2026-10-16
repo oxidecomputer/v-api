@@ -13,7 +13,7 @@ mod macros {
                 RequestContext, TypedBody, Body,
             };
             use http::Response;
-            use v_model::{Mapper, ApiUserContactEmail, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret, AccessGroup, ApiUser, MagicLink, MagicLinkRedirectUri, MagicLinkSecret};
+            use v_model::{Mapper, ApiUserContactEmail, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret, AccessGroup, ApiUser, MagicLink, MagicLinkRedirectUri, MagicLinkSecret, AccessToken};
 
             use v_api::endpoints::{
                 api_user::{
@@ -21,7 +21,7 @@ mod macros {
                     delete_api_user_token_op, get_api_user_op, list_api_user_op, get_api_user_token_op, get_self_op,
                     link_provider_op, list_api_user_tokens_op, remove_api_user_from_group_op, remove_api_user_permission_op,
                     set_api_user_contact_email_op, list_api_users_for_group_op,
-                    update_api_user_op, AddGroupBody, ApiKeyCreateParams, ApiKeyResponse, ApiUserPath,
+                    update_api_user_op, list_api_user_sessions_op, logout_api_user_op, AddGroupBody, ApiKeyCreateParams, ApiKeyResponse, ApiUserPath,
                     ApiUserPermissionParams, ApiUserProviderLinkPayload, ApiUserRemoveGroupPath, ApiUserTokenPath,
                     ApiUserUpdateParams, GetUserResponse, InitialApiKeyResponse, ApiUserEmailUpdateParams, ApiUserGroupPath
                 },
@@ -490,6 +490,30 @@ mod macros {
                 update_api_user_op(&rqctx, path.into_inner(), body.into_inner()).await
             }
 
+            /// List existing sessions for a user.
+            #[endpoint {
+                method = GET,
+                path = "/api-user/{user_id}/session",
+            }]
+            pub async fn list_api_user_sessions(
+                rqctx: RequestContext<$context_type>,
+                path: Path<ApiUserPath>,
+            ) -> Result<HttpResponseOk<Vec<AccessToken>>, HttpError> {
+                list_api_user_sessions_op(&rqctx, path.into_inner()).await
+            }
+
+            /// Revoke any existing sessions for the user.
+            #[endpoint {
+                method = POST,
+                path = "/api-user/{user_id}/logout",
+            }]
+            pub async fn logout_api_user(
+                rqctx: RequestContext<$context_type>,
+                path: Path<ApiUserPath>,
+            ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+                logout_api_user_op(&rqctx, path.into_inner()).await
+            }
+
             /// Add a single permission to a user
             #[endpoint {
                 method = POST,
@@ -759,6 +783,10 @@ mod macros {
             $api.register(remove_api_user_permission)
                 .expect("Failed to register endpoint");
             $api.register(set_api_user_contact_email)
+                .expect("Failed to register endpoint");
+            $api.register(list_api_user_sessions)
+                .expect("Failed to register endpoint");
+            $api.register(logout_api_user)
                 .expect("Failed to register endpoint");
             $api.register(list_api_user_tokens)
                 .expect("Failed to register endpoint");

@@ -11,7 +11,10 @@ use diesel::{
     insert_into, pg::PgConnection, query_dsl::QueryDsl, update, upsert::excluded,
 };
 use newtype_uuid::{GenericUuid, TypedUuid};
-use std::{collections::BTreeMap, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 use thiserror::Error;
 use tracing::instrument;
 use uuid::Uuid;
@@ -675,6 +678,26 @@ impl AccessTokenStore for PostgresStore {
                 .await?;
 
         Ok(token_m.into())
+    }
+
+    async fn revoke(&self, tokens: Vec<TypedUuid<AccessTokenId>>) -> Result<Vec<bool>, StoreError> {
+        let revoked = update(api_user_access_token::table)
+            .filter(
+                api_user_access_token::id
+                    .eq_any(tokens.iter().map(|token| token.into_untyped_uuid())),
+            )
+            .filter(api_user_access_token::revoked_at.is_null())
+            .set(api_user_access_token::revoked_at.eq(Utc::now()))
+            .returning(api_user_access_token::id)
+            .get_results_async::<Uuid>(&*self.pool.get().await?)
+            .await?
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+
+        Ok(tokens
+            .iter()
+            .map(|token| revoked.contains(&token.into_untyped_uuid()))
+            .collect())
     }
 }
 

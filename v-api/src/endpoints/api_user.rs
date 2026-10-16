@@ -17,7 +17,8 @@ use tap::TapFallible;
 use tracing::instrument;
 use uuid::Uuid;
 use v_model::{
-    AccessGroupId, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserProvider, NewApiKey, UserId,
+    AccessGroupId, AccessToken, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserProvider, NewApiKey,
+    UserId,
     permissions::{Caller, Permission, PermissionStorage, Permissions},
     storage::{AccessGroupFilter, ApiUserFilter, ApiUserProviderFilter, ListPagination},
 };
@@ -305,6 +306,65 @@ where
         .await?;
 
     Ok(HttpResponseOk(GetUserResponse::new(info.user, providers)))
+}
+
+/// List all sessions for a user.
+///
+/// Returns a list of sessions.
+#[instrument(skip(rqctx), err(Debug))]
+pub async fn list_api_user_sessions_op<T>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+    path: ApiUserPath,
+) -> Result<HttpResponseOk<Vec<AccessToken>>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+{
+    let (ctx, caller) = rqctx.as_ctx().await?;
+    list_api_user_sessions_inner(ctx, caller, path).await
+}
+
+#[instrument(skip(ctx))]
+pub async fn list_api_user_sessions_inner<T>(
+    ctx: &VContext<T>,
+    caller: Caller<T>,
+    path: ApiUserPath,
+) -> Result<HttpResponseOk<Vec<AccessToken>>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+{
+    let tokens = ctx.user.list_access_tokens(&caller, &path.user_id).await?;
+    Ok(HttpResponseOk(tokens))
+}
+
+/// Revoke all sessions for a user.
+///
+/// Returns an empty response on success.
+#[instrument(skip(rqctx), err(Debug))]
+pub async fn logout_api_user_op<T>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+    path: ApiUserPath,
+) -> Result<HttpResponseUpdatedNoContent, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+{
+    let (ctx, caller) = rqctx.as_ctx().await?;
+    logout_api_user_inner(ctx, caller, path).await
+}
+
+#[instrument(skip(ctx))]
+pub async fn logout_api_user_inner<T>(
+    ctx: &VContext<T>,
+    caller: Caller<T>,
+    path: ApiUserPath,
+) -> Result<HttpResponseUpdatedNoContent, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+{
+    let _ = ctx
+        .user
+        .revoke_access_tokens(&caller, &path.user_id)
+        .await?;
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 /// Lists all API tokens for a specific user.
