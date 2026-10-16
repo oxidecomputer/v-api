@@ -941,11 +941,13 @@ mod tests {
     use mockall::predicate::eq;
     use newtype_uuid::TypedUuid;
     use v_model::{
-        ApiKey, ApiUser, ApiUserContactEmail, ApiUserInfo, ApiUserProvider, NewApiUser,
+        AccessToken, ApiKey, ApiUser, ApiUserContactEmail, ApiUserInfo, ApiUserProvider,
+        NewApiUser,
         permissions::{Caller, Permissions},
         storage::{
-            ApiKeyFilter, ListPagination, MockAccessGroupStore, MockApiKeyStore,
-            MockApiUserContactEmailStore, MockApiUserProviderStore, MockApiUserStore, StoreError,
+            AccessTokenFilter, ApiKeyFilter, ListPagination, MockAccessGroupStore,
+            MockAccessTokenStore, MockApiKeyStore, MockApiUserContactEmailStore,
+            MockApiUserProviderStore, MockApiUserStore, StoreError,
         },
     };
 
@@ -954,8 +956,8 @@ mod tests {
         endpoints::api_user::{
             ApiKeyCreateParams, ApiUserEmailUpdateParams, ApiUserPath, ApiUserTokenPath,
             create_api_user_inner, create_api_user_token_inner, delete_api_user_token_inner,
-            get_api_user_token_inner, list_api_user_tokens_inner, set_api_user_contact_email_inner,
-            update_api_user_inner,
+            get_api_user_token_inner, list_api_user_sessions_inner, list_api_user_tokens_inner,
+            logout_api_user_inner, set_api_user_contact_email_inner, update_api_user_inner,
         },
         permissions::{VPermission, VPermissionResponse},
         util::tests::get_status,
@@ -1995,5 +1997,109 @@ mod tests {
         assert!(resp.is_ok());
         assert_eq!(get_status(&resp), StatusCode::OK);
         assert_eq!("user@company".to_string(), resp.unwrap().0.email);
+    }
+
+    #[tokio::test]
+    async fn test_list_api_user_sessions_permissions() {
+        let api_user_id = TypedUuid::new_v4();
+        let session = AccessToken {
+            id: TypedUuid::new_v4(),
+            user_id: api_user_id,
+            revoked_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        let mut token_store = MockAccessTokenStore::new();
+        token_store
+            .expect_list()
+            .withf(move |filter: &AccessTokenFilter, _| {
+                filter.api_user_id == Some(vec![api_user_id]) && filter.revoked
+            })
+            .times(1)
+            .returning(move |_, _| Ok(vec![session.clone()]));
+
+        let mut storage = MockStorage::new();
+        storage.access_token_store = Some(Arc::new(token_store));
+        let ctx = mock_context(Arc::new(storage)).await;
+
+        let no_permissions = Caller {
+            id: TypedUuid::new_v4(),
+            permissions: Permissions::new(),
+            extensions: HashMap::default(),
+        };
+        let resp = list_api_user_sessions_inner(
+            &ctx,
+            no_permissions,
+            ApiUserPath {
+                user_id: api_user_id,
+            },
+        )
+        .await;
+        assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
+
+        let can_read = Caller {
+            id: TypedUuid::new_v4(),
+            permissions: vec![VPermission::GetApiUser(api_user_id)].into(),
+            extensions: HashMap::default(),
+        };
+        let resp = list_api_user_sessions_inner(
+            &ctx,
+            can_read,
+            ApiUserPath {
+                user_id: api_user_id,
+            },
+        )
+        .await;
+        assert_eq!(get_status(&resp), StatusCode::OK);
+        assert_eq!(1, resp.unwrap().0.len());
+    }
+
+    #[tokio::test]
+    async fn test_logout_api_user_permissions() {
+        let api_user_id = TypedUuid::new_v4();
+
+        // Expecting exactly one revoke also proves that the forbidden call never reached storage
+        let mut token_store = MockAccessTokenStore::new();
+        token_store
+            .expect_revoke()
+            .withf(move |filter: &AccessTokenFilter| filter.api_user_id == Some(vec![api_user_id]))
+            .times(1)
+            .returning(|_| Ok(3));
+
+        let mut storage = MockStorage::new();
+        storage.access_token_store = Some(Arc::new(token_store));
+        let ctx = mock_context(Arc::new(storage)).await;
+
+        let can_only_read = Caller {
+            id: TypedUuid::new_v4(),
+            permissions: vec![VPermission::GetApiUser(api_user_id)].into(),
+            extensions: HashMap::default(),
+        };
+        let resp = logout_api_user_inner(
+            &ctx,
+            can_only_read,
+            ApiUserPath {
+                user_id: api_user_id,
+            },
+        )
+        .await;
+        assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
+
+        let can_manage = Caller {
+            id: TypedUuid::new_v4(),
+            permissions: vec![VPermission::ManageApiUser(api_user_id)].into(),
+            extensions: HashMap::default(),
+        };
+        let resp = logout_api_user_inner(
+            &ctx,
+            can_manage,
+            ApiUserPath {
+                user_id: api_user_id,
+            },
+        )
+        .await;
+        assert_eq!(get_status(&resp), StatusCode::OK);
+        assert_eq!(3, resp.unwrap().0.count);
     }
 }
