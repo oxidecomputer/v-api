@@ -92,10 +92,7 @@ fn registered_endpoints(api: &ApiDescription<Context>) -> BTreeSet<(String, Stri
         .collect()
 }
 
-/// Every endpoint the macros define for the features this test was built with.
-///
-/// This is kept by hand on purpose. A list derived from the macros could not tell an endpoint
-/// that was meant to exist from one that was added or dropped by mistake.
+/// Every endpoint our inject macros define
 fn expected_endpoints() -> BTreeSet<(String, String)> {
     let mut endpoints = vec![
         // OAuth clients
@@ -180,16 +177,22 @@ fn expected_endpoints() -> BTreeSet<(String, String)> {
         .collect()
 }
 
-/// The macros register exactly the expected endpoints, with none missing and none extra.
-///
-/// A missing endpoint is usually one that was added to an endpoint macro but not to the matching
-/// `inject_*` macro. An extra one is an endpoint nobody meant to expose.
+/// Checks that endpoints registered by the inject macros match exactly to our
+/// endpoint map. If this test is failing and the new endpoint has not been
+/// added to `expected_endpoints` then you will need to add it there.
 #[test]
 fn registered_endpoints_match_the_expected_set() {
     let registered = registered_endpoints(&system::api());
     let expected = expected_endpoints();
 
+    // Ensure that every expected endpoint in our map is present in the api.
+    // This catches cases where an endpoint is created but not registered, or
+    // accidentally removed.
     let missing = expected.difference(&registered).collect::<Vec<_>>();
+
+    // Ensures that not new endpoint is added without it being added to our test
+    // set above. This is our "checkin" for endpoints we use to make sure we
+    // do not break / remove endpoints unexceptedly.
     let unexpected = registered.difference(&expected).collect::<Vec<_>>();
 
     assert!(
