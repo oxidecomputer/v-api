@@ -708,6 +708,7 @@ where
         if caller.can(&VPermission::GetApiUser(*api_user).into()) {
             let mut filter = AccessTokenFilter::default();
             filter.api_user_id = Some(vec![*api_user]);
+            filter.revoked = true;
 
             let tokens =
                 AccessTokenStore::list(&*self.storage, filter, &ListPagination::unlimited())
@@ -726,6 +727,7 @@ where
         if caller.can(&VPermission::ManageApiUser(*api_user).into()) {
             let mut filter = AccessTokenFilter::default();
             filter.api_user_id = Some(vec![*api_user]);
+            filter.revoked = false;
 
             let tokens =
                 AccessTokenStore::list(&*self.storage, filter, &ListPagination::unlimited())
