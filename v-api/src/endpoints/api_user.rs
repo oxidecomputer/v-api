@@ -360,8 +360,7 @@ pub async fn logout_api_user_inner<T>(
 where
     T: VAppPermission + PermissionStorage,
 {
-    let _ = ctx
-        .user
+    ctx.user
         .revoke_access_tokens(&caller, &path.user_id)
         .await?;
     Ok(HttpResponseUpdatedNoContent())

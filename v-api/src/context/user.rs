@@ -706,9 +706,11 @@ where
         api_user: &TypedUuid<UserId>,
     ) -> ResourceResult<Vec<AccessToken>, UserContextError> {
         if caller.can(&VPermission::GetApiUser(*api_user).into()) {
-            let mut filter = AccessTokenFilter::default();
-            filter.api_user_id = Some(vec![*api_user]);
-            filter.revoked = true;
+            let filter = AccessTokenFilter {
+                api_user_id: Some(vec![*api_user]),
+                revoked: true,
+                ..Default::default()
+            };
 
             let tokens =
                 AccessTokenStore::list(&*self.storage, filter, &ListPagination::unlimited())
@@ -725,9 +727,11 @@ where
         api_user: &TypedUuid<UserId>,
     ) -> ResourceResult<(), UserContextError> {
         if caller.can(&VPermission::ManageApiUser(*api_user).into()) {
-            let mut filter = AccessTokenFilter::default();
-            filter.api_user_id = Some(vec![*api_user]);
-            filter.revoked = false;
+            let filter = AccessTokenFilter {
+                api_user_id: Some(vec![*api_user]),
+                revoked: false,
+                ..Default::default()
+            };
 
             let tokens =
                 AccessTokenStore::list(&*self.storage, filter, &ListPagination::unlimited())
