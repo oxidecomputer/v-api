@@ -2168,12 +2168,12 @@ pub(crate) mod test_mocks {
 
         async fn revoke(
             &self,
-            tokens: Vec<TypedUuid<AccessTokenId>>,
-        ) -> Result<Vec<bool>, v_model::storage::StoreError> {
+            filter: v_model::storage::AccessTokenFilter,
+        ) -> Result<usize, v_model::storage::StoreError> {
             self.access_token_store
                 .as_ref()
                 .unwrap()
-                .revoke(tokens)
+                .revoke(filter)
                 .await
         }
     }

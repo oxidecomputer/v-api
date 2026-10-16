@@ -336,14 +336,19 @@ where
     Ok(HttpResponseOk(tokens))
 }
 
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RevokedResponse {
+    count: usize,
+}
+
 /// Revoke all sessions for a user.
 ///
-/// Returns an empty response on success.
+/// Returns the number of sessions that were revoked.
 #[instrument(skip(rqctx), err(Debug))]
 pub async fn logout_api_user_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: ApiUserPath,
-) -> Result<HttpResponseUpdatedNoContent, HttpError>
+) -> Result<HttpResponseOk<RevokedResponse>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
 {
@@ -356,14 +361,15 @@ pub async fn logout_api_user_inner<T>(
     ctx: &VContext<T>,
     caller: Caller<T>,
     path: ApiUserPath,
-) -> Result<HttpResponseUpdatedNoContent, HttpError>
+) -> Result<HttpResponseOk<RevokedResponse>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
 {
-    ctx.user
+    let count = ctx
+        .user
         .revoke_access_tokens(&caller, &path.user_id)
         .await?;
-    Ok(HttpResponseUpdatedNoContent())
+    Ok(HttpResponseOk(RevokedResponse { count }))
 }
 
 /// Lists all API tokens for a specific user.

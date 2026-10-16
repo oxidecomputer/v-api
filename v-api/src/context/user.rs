@@ -725,24 +725,14 @@ where
         &self,
         caller: &Caller<T>,
         api_user: &TypedUuid<UserId>,
-    ) -> ResourceResult<(), UserContextError> {
+    ) -> ResourceResult<usize, UserContextError> {
         if caller.can(&VPermission::ManageApiUser(*api_user).into()) {
             let filter = AccessTokenFilter {
                 api_user_id: Some(vec![*api_user]),
-                revoked: false,
                 ..Default::default()
             };
 
-            let tokens =
-                AccessTokenStore::list(&*self.storage, filter, &ListPagination::unlimited())
-                    .await?;
-            let _ = AccessTokenStore::revoke(
-                &*self.storage,
-                tokens.into_iter().map(|token| token.id).collect(),
-            )
-            .await?;
-
-            Ok(())
+            Ok(AccessTokenStore::revoke(&*self.storage, filter).await?)
         } else {
             resource_restricted()
         }

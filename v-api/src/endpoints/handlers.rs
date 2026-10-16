@@ -23,7 +23,7 @@ mod macros {
                     set_api_user_contact_email_op, list_api_users_for_group_op,
                     update_api_user_op, list_api_user_sessions_op, logout_api_user_op, AddGroupBody, ApiKeyCreateParams, ApiKeyResponse, ApiUserPath,
                     ApiUserPermissionParams, ApiUserProviderLinkPayload, ApiUserRemoveGroupPath, ApiUserTokenPath,
-                    ApiUserUpdateParams, GetUserResponse, InitialApiKeyResponse, ApiUserEmailUpdateParams, ApiUserGroupPath
+                    ApiUserUpdateParams, GetUserResponse, InitialApiKeyResponse, ApiUserEmailUpdateParams, ApiUserGroupPath, RevokedResponse
                 },
                 api_user_provider::{
                     create_link_token_op, ApiUserLinkRequestPayload, ApiUserLinkRequestResponse,
@@ -510,7 +510,7 @@ mod macros {
             pub async fn logout_api_user(
                 rqctx: RequestContext<$context_type>,
                 path: Path<ApiUserPath>,
-            ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            ) -> Result<HttpResponseOk<RevokedResponse>, HttpError> {
                 logout_api_user_op(&rqctx, path.into_inner()).await
             }
 

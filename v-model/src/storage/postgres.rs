@@ -11,10 +11,7 @@ use diesel::{
     insert_into, pg::PgConnection, query_dsl::QueryDsl, update, upsert::excluded,
 };
 use newtype_uuid::{GenericUuid, TypedUuid};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    time::Duration,
-};
+use std::{collections::BTreeMap, time::Duration};
 use thiserror::Error;
 use tracing::instrument;
 use uuid::Uuid;
@@ -680,24 +677,36 @@ impl AccessTokenStore for PostgresStore {
         Ok(token_m.into())
     }
 
-    async fn revoke(&self, tokens: Vec<TypedUuid<AccessTokenId>>) -> Result<Vec<bool>, StoreError> {
-        let revoked = update(api_user_access_token::table)
-            .filter(
+    async fn revoke(&self, filter: AccessTokenFilter) -> Result<usize, StoreError> {
+        let mut query = update(api_user_access_token::table).into_boxed();
+
+        let AccessTokenFilter {
+            id,
+            api_user_id,
+            // The revoked filter in this context is not useful as we do not
+            // revoke already revoked tokens
+            revoked: _,
+        } = filter;
+
+        if let Some(id) = id {
+            query = query.filter(
                 api_user_access_token::id
-                    .eq_any(tokens.iter().map(|token| token.into_untyped_uuid())),
-            )
+                    .eq_any(id.into_iter().map(|token| token.into_untyped_uuid())),
+            );
+        }
+
+        if let Some(api_user_id) = api_user_id {
+            query = query.filter(
+                api_user_access_token::api_user_id
+                    .eq_any(api_user_id.into_iter().map(|user| user.into_untyped_uuid())),
+            );
+        }
+
+        Ok(query
             .filter(api_user_access_token::revoked_at.is_null())
             .set(api_user_access_token::revoked_at.eq(Utc::now()))
-            .returning(api_user_access_token::id)
-            .get_results_async::<Uuid>(&*self.pool.get().await?)
-            .await?
-            .into_iter()
-            .collect::<BTreeSet<_>>();
-
-        Ok(tokens
-            .iter()
-            .map(|token| revoked.contains(&token.into_untyped_uuid()))
-            .collect())
+            .execute_async(&*self.pool.get().await?)
+            .await?)
     }
 }
 
