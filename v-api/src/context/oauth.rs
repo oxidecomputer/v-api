@@ -81,6 +81,7 @@ where
             &*self.storage,
             OAuthClientFilter {
                 id: None,
+                api_user_id: None,
                 deleted: false,
             },
             &ListPagination::default(),
@@ -229,6 +230,8 @@ mod tests {
         client_store.expect_get().returning(move |id, _| {
             Ok(Some(OAuthClient {
                 id: *id,
+                api_user_id: None,
+                keys: vec![],
                 secrets: vec![],
                 redirect_uris: vec![],
                 created_at: Utc::now(),
@@ -284,6 +287,8 @@ mod tests {
         client_store.expect_get().returning(move |id, _| {
             Ok(Some(OAuthClient {
                 id: *id,
+                api_user_id: None,
+                keys: vec![],
                 secrets: vec![],
                 redirect_uris: vec![],
                 created_at: Utc::now(),

@@ -7,6 +7,7 @@ use std::fmt::Debug;
 pub use async_bb8_diesel::{ConnectionError, PoolError};
 use async_trait::async_trait;
 use bb8::RunError;
+use chrono::{DateTime, Utc};
 pub use diesel::result::Error as DbError;
 use diesel::result::{DatabaseErrorKind, Error as DieselError};
 #[cfg(feature = "mock")]
@@ -23,8 +24,9 @@ use crate::{
     MapperId, MapperSource, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
     NewApiUserContactEmail, NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMagicLink,
     NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, NewMapperEvent,
-    NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
-    OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId,
+    NewOAuthClient, NewOAuthClientAssertion, NewOAuthClientKey, NewOAuthClientRedirectUri,
+    NewOAuthClientSecret, OAuthClient, OAuthClientAssertion, OAuthClientId, OAuthClientKey,
+    OAuthClientKeyId, OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId,
     UserContactEmailId, UserId, UserProviderId,
     schema_ext::{LoginAttemptState, MagicLinkAttemptState},
 };
@@ -145,6 +147,11 @@ pub trait ApiUserStore<T: Send + Sync> {
         pagination: &ListPagination,
     ) -> Result<Vec<ApiUserInfo<T>>, StoreError>;
     async fn upsert(&self, api_user: NewApiUser<T>) -> Result<ApiUserInfo<T>, StoreError>;
+    async fn update(
+        &self,
+        api_user: NewApiUser<T>,
+        expected_generation: i64,
+    ) -> Result<Option<ApiUserInfo<T>>, StoreError>;
     async fn delete(&self, id: &TypedUuid<UserId>) -> Result<Option<ApiUserInfo<T>>, StoreError>;
 }
 
@@ -297,6 +304,7 @@ pub trait LoginAttemptStore {
 #[derive(Debug, Default)]
 pub struct OAuthClientFilter {
     pub id: Option<Vec<TypedUuid<OAuthClientId>>>,
+    pub api_user_id: Option<Vec<TypedUuid<UserId>>>,
     pub deleted: bool,
 }
 
@@ -317,6 +325,14 @@ pub trait OAuthClientStore {
     async fn delete(
         &self,
         id: &TypedUuid<OAuthClientId>,
+    ) -> Result<Option<OAuthClient>, StoreError>;
+    /// Assign the service user that the client acts as when it authenticates with client
+    /// credentials. This is a one time operation that can not be undone. None is returned if there
+    /// the client has already been assigned a user.
+    async fn assign_api_user(
+        &self,
+        id: &TypedUuid<OAuthClientId>,
+        api_user_id: &TypedUuid<UserId>,
     ) -> Result<Option<OAuthClient>, StoreError>;
 }
 
@@ -341,6 +357,49 @@ pub trait OAuthClientRedirectUriStore {
         &self,
         id: &TypedUuid<OAuthRedirectUriId>,
     ) -> Result<Option<OAuthClientRedirectUri>, StoreError>;
+}
+
+#[derive(Debug, Default)]
+pub struct OAuthClientKeyFilter {
+    pub id: Option<Vec<TypedUuid<OAuthClientKeyId>>>,
+    pub oauth_client_id: Option<Vec<TypedUuid<OAuthClientId>>>,
+    pub thumbprint: Option<Vec<String>>,
+    pub deleted: bool,
+}
+
+#[cfg_attr(feature = "mock", automock)]
+#[async_trait]
+pub trait OAuthClientKeyStore {
+    async fn get(
+        &self,
+        id: &TypedUuid<OAuthClientKeyId>,
+        deleted: bool,
+    ) -> Result<Option<OAuthClientKey>, StoreError>;
+    async fn list(
+        &self,
+        filter: OAuthClientKeyFilter,
+        pagination: &ListPagination,
+    ) -> Result<Vec<OAuthClientKey>, StoreError>;
+    /// Store a new key. A key whose thumbprint is already registered to any client, even as a
+    /// deleted key must fail with [`StoreError::Conflict`].
+    async fn insert(&self, key: NewOAuthClientKey) -> Result<OAuthClientKey, StoreError>;
+    async fn delete(
+        &self,
+        id: &TypedUuid<OAuthClientKeyId>,
+    ) -> Result<Option<OAuthClientKey>, StoreError>;
+}
+
+#[cfg_attr(feature = "mock", automock)]
+#[async_trait]
+pub trait OAuthClientAssertionStore {
+    /// Record an accepted assertion. This must fail with [`StoreError::Conflict`] when an
+    /// assertion with the same jti, for a given client, already exists.
+    async fn record(
+        &self,
+        assertion: NewOAuthClientAssertion,
+    ) -> Result<OAuthClientAssertion, StoreError>;
+    /// Returning how many assertions were removed.
+    async fn delete_expired(&self, before: DateTime<Utc>) -> Result<usize, StoreError>;
 }
 
 #[derive(Debug, Default)]
@@ -443,7 +502,18 @@ pub trait AccessGroupStore<T: Send + Sync> {
         filter: AccessGroupFilter,
         pagination: &ListPagination,
     ) -> Result<Vec<AccessGroup<T>>, StoreError>;
+    /// Store a group. When a group with the same id already exists only its permissions are
+    /// replaced, and its name is kept.
     async fn upsert(&self, group: &NewAccessGroup<T>) -> Result<AccessGroup<T>, StoreError>;
+    /// Write the group's permissions only if its generation is still `expected_generation`.
+    ///
+    /// A group's name is never changed after it is created. Mappers resolve groups by name, so
+    /// renaming a group would silently change which users mappers place into it.
+    async fn update(
+        &self,
+        group: &NewAccessGroup<T>,
+        expected_generation: i64,
+    ) -> Result<Option<AccessGroup<T>>, StoreError>;
     async fn delete(
         &self,
         id: &TypedUuid<AccessGroupId>,

@@ -13,6 +13,7 @@ use tracing::instrument;
 use v_model::{
     Mapper, MapperId, NewMapper,
     permissions::{AsScope, Permission, PermissionStorage},
+    storage::AccessGroupFilter,
 };
 
 use crate::{
@@ -64,10 +65,15 @@ where
 {
     let (ctx, caller) = rqctx.as_ctx().await?;
     if ctx.mapping.validate(&body.rule) {
+        let visible_groups = ctx
+            .group
+            .list_groups(&caller, AccessGroupFilter::default())
+            .await?;
         let res = ctx
             .mapping
             .add_mapper(
                 &caller,
+                &visible_groups,
                 &NewMapper {
                     id: TypedUuid::new_v4(),
                     name: body.name,

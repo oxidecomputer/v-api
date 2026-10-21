@@ -953,6 +953,8 @@ fn permission_storage_trait_tokens(
 ) -> proc_macro2::TokenStream {
     let contract_tokens = permission_storage_contract_tokens(permission_type, contract_settings);
     let expand_tokens = permission_storage_expand_tokens(permission_type, expand_settings.clone());
+    let expand_value_tokens =
+        permission_storage_expand_value_tokens(permission_type, &expand_settings);
     let implies_tokens = permission_storage_implies_tokens(
         permission_type,
         implies_settings,
@@ -964,7 +966,45 @@ fn permission_storage_trait_tokens(
         impl v_model::permissions::PermissionStorage for #permission_type {
             #contract_tokens
             #expand_tokens
+            #expand_value_tokens
             #implies_tokens
+        }
+    }
+}
+
+/// Generates `expand_value`, which splits a permission that carries a set of values into one
+/// permission per value.
+///
+/// Only iter expansions without an external source qualify. These are permissions who hold all of
+/// the direct values required for expansion. Expansions that depend on an external source are left
+/// alone.
+fn permission_storage_expand_value_tokens(
+    permission_type: &Ident,
+    expand_settings: &[(Variant, ExpandSettings)],
+) -> proc_macro2::TokenStream {
+    let branches = expand_settings
+        .iter()
+        .filter(|(_, setting)| matches!(setting.kind, ExpandKind::Iter) && setting.source.is_none())
+        .map(|(variant, setting)| {
+            let set_ident = &variant.ident;
+            let value_ident = &setting.variant;
+            quote! {
+                #permission_type::#set_ident(values) => Some(
+                    values
+                        .iter()
+                        .map(|value| #permission_type::#value_ident(value.clone()))
+                        .collect()
+                ),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    quote! {
+        fn expand_value(&self) -> Option<Vec<Self>> {
+            match self {
+                #(#branches)*
+                _ => None,
+            }
         }
     }
 }

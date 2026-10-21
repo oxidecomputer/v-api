@@ -3,72 +3,40 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use async_trait::async_trait;
-use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
-use tracing::instrument;
-use v_model::{
-    AccessGroupId,
-    permissions::{Caller, Permissions},
-    storage::{AccessGroupFilter, StoreError},
-};
 
-use crate::{
-    context::group::GroupContext, endpoints::login::UserInfo, permissions::VAppPermission,
-    util::response::ResourceResult,
-};
+use crate::endpoints::login::UserInfo;
 
-use super::MapperRule;
+use super::{MapperRule, MappingGrants};
 
-pub struct DefaultMapper<T> {
-    caller: Caller<T>,
-    group: GroupContext<T>,
-    data: DefaultMapperData<T>,
+/// Adds all users to a set of groups.
+pub struct DefaultMapper {
+    grants: MappingGrants,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DefaultMapperData<T> {
-    permissions: Option<Permissions<T>>,
-    #[serde(default)]
+pub struct DefaultMapperData {
     groups: Vec<String>,
 }
 
-impl<T> DefaultMapper<T> {
-    pub fn new(caller: Caller<T>, group: GroupContext<T>, data: DefaultMapperData<T>) -> Self {
+impl DefaultMapper {
+    pub fn new(data: DefaultMapperData) -> Self {
         Self {
-            caller,
-            group,
-            data,
+            grants: MappingGrants {
+                groups: data.groups,
+            },
         }
     }
 }
 
 #[async_trait]
-impl<T> MapperRule<T> for DefaultMapper<T>
-where
-    T: VAppPermission,
-{
-    #[instrument(skip(self, _user), field(data = ?self.data))]
-    async fn permissions_for(&self, _user: &UserInfo) -> Result<Permissions<T>, StoreError> {
-        tracing::trace!("Running default mapper");
-        Ok(self.data.permissions.clone().unwrap_or_default())
+impl MapperRule for DefaultMapper {
+    fn grants(&self) -> &MappingGrants {
+        &self.grants
     }
 
-    #[instrument(skip(self, _user), field(data = ?self.data))]
-    async fn groups_for(
-        &self,
-        _user: &UserInfo,
-    ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError> {
-        tracing::trace!("Running default mapper");
-        let known_groups = self
-            .group
-            .list_groups(&self.caller, AccessGroupFilter::default())
-            .await?;
-
-        Ok(super::resolve_mapped_groups(
-            &self.data.groups,
-            &known_groups,
-        ))
+    async fn matches(&self, _user: &UserInfo) -> bool {
+        true
     }
 }

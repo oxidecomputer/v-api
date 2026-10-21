@@ -603,6 +603,7 @@ fn joined_actor(
         created_at: Utc::now(),
         updated_at: Utc::now(),
         deleted_at: None,
+        generation: 0,
     }
 }
 

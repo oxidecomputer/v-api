@@ -7,8 +7,10 @@ use db::{
     AccessGroupModel, ApiKeyModel, ApiUserAccessTokenModel, ApiUserContactEmailModel, ApiUserModel,
     ApiUserProviderModel, LinkRequestModel, LoginAttemptModel, MagicLinkAttemptModel,
     MagicLinkModel, MagicLinkRedirectUriModel, MagicLinkSecretModel, MapperEventModel, MapperModel,
-    OAuthClientModel, OAuthClientRedirectUriModel, OAuthClientSecretModel,
+    OAuthClientAssertionModel, OAuthClientKeyModel, OAuthClientModel, OAuthClientRedirectUriModel,
+    OAuthClientSecretModel,
 };
+use jwk::PublicJwk;
 use newtype_uuid::{GenericUuid, TypedUuid, TypedUuidKind, TypedUuidTag};
 use partial_struct::partial;
 use schema_ext::MagicLinkAttemptState;
@@ -20,6 +22,7 @@ use thiserror::Error;
 use url::Url;
 
 pub mod db;
+pub mod jwk;
 pub mod migrations;
 pub mod permissions;
 #[cfg(feature = "sagas")]
@@ -77,6 +80,9 @@ pub struct ApiUser<T> {
     pub updated_at: DateTime<Utc>,
     #[partial(NewApiUser(skip))]
     pub deleted_at: Option<DateTime<Utc>>,
+    #[partial(NewApiUser(skip))]
+    #[serde(skip)]
+    pub generation: i64,
 }
 
 impl<T> From<ApiUserModel<T>> for ApiUser<T> {
@@ -92,6 +98,7 @@ impl<T> From<ApiUserModel<T>> for ApiUser<T> {
             created_at: value.created_at,
             updated_at: value.updated_at,
             deleted_at: value.deleted_at,
+            generation: value.generation,
         }
     }
 }
@@ -400,9 +407,13 @@ impl TypedUuidKind for OAuthClientId {
 pub struct OAuthClient {
     pub id: TypedUuid<OAuthClientId>,
     #[partial(NewOAuthClient(skip))]
+    pub api_user_id: Option<TypedUuid<UserId>>,
+    #[partial(NewOAuthClient(skip))]
     pub secrets: Vec<OAuthClientSecret>,
     #[partial(NewOAuthClient(skip))]
     pub redirect_uris: Vec<OAuthClientRedirectUri>,
+    #[partial(NewOAuthClient(skip))]
+    pub keys: Vec<OAuthClientKey>,
     #[partial(NewOAuthClient(skip))]
     pub created_at: DateTime<Utc>,
     #[partial(NewOAuthClient(skip))]
@@ -414,11 +425,14 @@ impl OAuthClient {
         client: OAuthClientModel,
         secrets: Vec<OAuthClientSecret>,
         redirect_uris: Vec<OAuthClientRedirectUri>,
+        keys: Vec<OAuthClientKey>,
     ) -> Self {
         OAuthClient {
             id: TypedUuid::from_untyped_uuid(client.id),
+            api_user_id: client.api_user_id.map(TypedUuid::from_untyped_uuid),
             secrets,
             redirect_uris,
+            keys,
             created_at: client.created_at,
             deleted_at: client.deleted_at,
         }
@@ -427,13 +441,7 @@ impl OAuthClient {
 
 impl From<OAuthClientModel> for OAuthClient {
     fn from(value: OAuthClientModel) -> Self {
-        OAuthClient {
-            id: TypedUuid::from_untyped_uuid(value.id),
-            secrets: vec![],
-            redirect_uris: vec![],
-            created_at: value.created_at,
-            deleted_at: value.deleted_at,
-        }
+        OAuthClient::new(value, vec![], vec![], vec![])
     }
 }
 
@@ -499,6 +507,64 @@ impl From<OAuthClientRedirectUriModel> for OAuthClientRedirectUri {
             redirect_uri: value.redirect_uri,
             created_at: value.created_at,
             deleted_at: value.deleted_at,
+        }
+    }
+}
+
+#[derive(JsonSchema)]
+pub enum OAuthClientKeyId {}
+impl TypedUuidKind for OAuthClientKeyId {
+    fn tag() -> TypedUuidTag {
+        const TAG: TypedUuidTag = TypedUuidTag::new("oauth-client-key");
+        TAG
+    }
+}
+
+#[partial(NewOAuthClientKey)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct OAuthClientKey {
+    pub id: TypedUuid<OAuthClientKeyId>,
+    pub oauth_client_id: TypedUuid<OAuthClientId>,
+    /// The RFC 7638 thumbprint of the key, which also serves as its `kid`. Unique across all
+    /// clients.
+    pub thumbprint: String,
+    pub jwk: PublicJwk,
+    #[partial(NewOAuthClientKey(skip))]
+    pub created_at: DateTime<Utc>,
+    #[partial(NewOAuthClientKey(skip))]
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+impl From<OAuthClientKeyModel> for OAuthClientKey {
+    fn from(value: OAuthClientKeyModel) -> Self {
+        OAuthClientKey {
+            id: TypedUuid::from_untyped_uuid(value.id),
+            oauth_client_id: TypedUuid::from_untyped_uuid(value.oauth_client_id),
+            thumbprint: value.thumbprint,
+            jwk: value.jwk,
+            created_at: value.created_at,
+            deleted_at: value.deleted_at,
+        }
+    }
+}
+
+#[partial(NewOAuthClientAssertion)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct OAuthClientAssertion {
+    pub oauth_client_id: TypedUuid<OAuthClientId>,
+    pub jti: String,
+    pub expires_at: DateTime<Utc>,
+    #[partial(NewOAuthClientAssertion(skip))]
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<OAuthClientAssertionModel> for OAuthClientAssertion {
+    fn from(value: OAuthClientAssertionModel) -> Self {
+        OAuthClientAssertion {
+            oauth_client_id: TypedUuid::from_untyped_uuid(value.oauth_client_id),
+            jti: value.jti,
+            expires_at: value.expires_at,
+            created_at: value.created_at,
         }
     }
 }
@@ -690,6 +756,9 @@ pub struct AccessGroup<T> {
     pub updated_at: DateTime<Utc>,
     #[partial(NewAccessGroup(skip))]
     pub deleted_at: Option<DateTime<Utc>>,
+    #[partial(NewAccessGroup(skip))]
+    #[serde(skip)]
+    pub generation: i64,
 }
 
 impl<T> From<AccessGroupModel<T>> for AccessGroup<T> {
@@ -703,6 +772,7 @@ impl<T> From<AccessGroupModel<T>> for AccessGroup<T> {
             created_at: value.created_at,
             updated_at: value.updated_at,
             deleted_at: value.deleted_at,
+            generation: value.generation,
         }
     }
 }
@@ -848,6 +918,7 @@ mod tests {
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 deleted_at: None,
+                generation: 0,
             },
             email: Some(ApiUserContactEmail {
                 id: TypedUuid::new_v4(),

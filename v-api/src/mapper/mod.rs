@@ -14,16 +14,9 @@ use serde_json::Value;
 use std::{collections::BTreeSet, error::Error as StdError, fmt::Debug};
 use tap::TapFallible;
 use thiserror::Error;
-use v_model::{
-    AccessGroup, AccessGroupId, Mapper,
-    permissions::{Caller, Permissions},
-    storage::StoreError,
-};
+use v_model::{AccessGroup, AccessGroupId};
 
-use crate::{
-    context::group::GroupContext, endpoints::login::UserInfo, permissions::VAppPermission,
-    util::response::ResourceResult,
-};
+use crate::endpoints::login::UserInfo;
 
 use self::{
     default::DefaultMapper, email_address::EmailAddressMapper, email_domain::EmailDomainMapper,
@@ -36,18 +29,11 @@ pub mod email_domain;
 pub mod github_username;
 
 #[async_trait]
-/// Mapping rules that determine permissions and groups for users
-pub trait MapperRule<T>: Send + Sync
-where
-    T: VAppPermission,
-{
-    /// Determines the permissions for a given user.
-    async fn permissions_for(&self, user: &UserInfo) -> Result<Permissions<T>, StoreError>;
-    /// Determines the access groups for a given user.
-    async fn groups_for(
-        &self,
-        user: &UserInfo,
-    ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError>;
+pub trait MapperRule: Send + Sync + 'static {
+    /// Everything the rule hands to a user it matches.
+    fn grants(&self) -> &MappingGrants;
+    /// Whether the rule applies to the given user.
+    async fn matches(&self, user: &UserInfo) -> bool;
 }
 
 #[derive(Debug, Error)]
@@ -58,11 +44,20 @@ pub enum MappingEngineError {
     Other(Box<dyn StdError + Send + Sync + 'static>),
 }
 
+/// The groups a mapping rule assigns to a user.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MappingGrants {
+    /// Names of the groups a matched user is added to.
+    pub groups: Vec<String>,
+}
+
 /// Interface for generating mapping rules from mapper configurations
-pub trait MappingEngine<T>: Send + Sync + 'static {
-    /// Creates a new mapping rule from a Mapper configuration
-    fn create_mapping(&self, value: Mapper) -> Result<Box<dyn MapperRule<T>>, MappingEngineError>;
-    /// Validates whether the provided data represents a known mapping rule
+pub trait MappingEngine: Send + Sync + 'static {
+    // TODO: Would love to fix this so it isn't a Value...
+    /// Creates a mapping rule from a blob of rule data.
+    fn create_mapping(&self, rule: &Value) -> Result<Box<dyn MapperRule>, MappingEngineError>;
+    // TODO: Would love to fix this so it isn't a Value...
+    /// Validates whether the provided data represents a known mapping rule.
     fn validate_mapping_data(&self, value: &Value) -> bool;
 }
 
@@ -94,79 +89,42 @@ pub(crate) fn resolve_mapped_groups<T>(
 }
 
 /// Default implementation of the MappingEngine trait
-pub struct DefaultMappingEngine<T> {
-    caller: Caller<T>,
-    group: GroupContext<T>,
-}
-
-impl<T> DefaultMappingEngine<T>
-where
-    T: VAppPermission,
-{
-    pub fn new(caller: Caller<T>, group: GroupContext<T>) -> Self {
-        Self { caller, group }
-    }
-}
+#[derive(Default)]
+pub struct DefaultMappingEngine;
 
 /// The default mapping rule configurations that are supported by the default mapping engine
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "rule", rename_all = "snake_case")]
-pub enum MappingRulesData<T> {
-    Default(DefaultMapperData<T>),
-    EmailAddress(EmailAddressMapperData<T>),
-    EmailDomain(EmailDomainMapperData<T>),
+pub enum MappingRulesData {
+    Default(DefaultMapperData),
+    EmailAddress(EmailAddressMapperData),
+    EmailDomain(EmailDomainMapperData),
     #[serde(rename = "github_username")]
-    GitHubUsername(GitHubUsernameMapperData<T>),
+    GitHubUsername(GitHubUsernameMapperData),
 }
 
-impl<T> MappingEngine<T> for DefaultMappingEngine<T>
-where
-    T: VAppPermission,
-{
-    fn create_mapping(&self, value: Mapper) -> Result<Box<dyn MapperRule<T>>, MappingEngineError> {
-        serde_json::from_value::<MappingRulesData<T>>(value.rule)
+impl MappingEngine for DefaultMappingEngine {
+    fn create_mapping(&self, rule: &Value) -> Result<Box<dyn MapperRule>, MappingEngineError> {
+        serde_json::from_value::<MappingRulesData>(rule.clone())
             .map_err(|err| {
                 tracing::error!(?err, "Failed to translate stored rule to mapper");
                 MappingEngineError::Other(Box::new(err))
             })
-            .map(move |rule| match rule {
-                MappingRulesData::Default(data) => {
-                    let res: Box<dyn MapperRule<T>> = Box::new(DefaultMapper::new(
-                        self.caller.clone(),
-                        self.group.clone(),
-                        data,
-                    ));
-                    res
-                }
-                MappingRulesData::EmailAddress(data) => {
-                    let res: Box<dyn MapperRule<T>> = Box::new(EmailAddressMapper::new(
-                        self.caller.clone(),
-                        self.group.clone(),
-                        data,
-                    ));
-                    res
-                }
-                MappingRulesData::EmailDomain(data) => {
-                    let res: Box<dyn MapperRule<T>> = Box::new(EmailDomainMapper::new(
-                        self.caller.clone(),
-                        self.group.clone(),
-                        data,
-                    ));
-                    res
-                }
-                MappingRulesData::GitHubUsername(data) => {
-                    let res: Box<dyn MapperRule<T>> = Box::new(GitHubUsernameMapper::new(
-                        self.caller.clone(),
-                        self.group.clone(),
-                        data,
-                    ));
-                    res
-                }
+            .map(|rule| {
+                let mapping: Box<dyn MapperRule> = match rule {
+                    MappingRulesData::Default(data) => Box::new(DefaultMapper::new(data)),
+                    MappingRulesData::EmailAddress(data) => Box::new(EmailAddressMapper::new(data)),
+                    MappingRulesData::EmailDomain(data) => Box::new(EmailDomainMapper::new(data)),
+                    MappingRulesData::GitHubUsername(data) => {
+                        Box::new(GitHubUsernameMapper::new(data))
+                    }
+                };
+                mapping
             })
     }
 
     fn validate_mapping_data(&self, value: &Value) -> bool {
-        serde_json::from_value::<MappingRulesData<T>>(value.clone())
+        serde_json::from_value::<MappingRulesData>(value.clone())
             .tap_err(|err| {
                 tracing::warn!(?value, ?err, "Failed to parse mapping rule");
             })
@@ -193,6 +151,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             deleted_at: None,
+            generation: 0,
         }
     }
 

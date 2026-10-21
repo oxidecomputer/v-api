@@ -17,21 +17,22 @@ mod macros {
 
             use v_api::endpoints::{
                 api_user::{
-                    add_api_user_permission_op, add_api_user_to_group_op, create_api_user_op, create_api_user_token_op,
+                    add_api_user_permission_op, add_api_user_to_group_op, create_api_user_token_op,
                     delete_api_user_token_op, get_api_user_op, list_api_user_op, get_api_user_token_op, get_self_op,
                     link_provider_op, list_api_user_tokens_op, remove_api_user_from_group_op, remove_api_user_permission_op,
                     set_api_user_contact_email_op, list_api_users_for_group_op,
-                    update_api_user_op, AddGroupBody, ApiKeyCreateParams, ApiKeyResponse, ApiUserPath,
+                    AddGroupBody, ApiKeyCreateParams, ApiKeyResponse, ApiUserPath,
                     ApiUserPermissionParams, ApiUserProviderLinkPayload, ApiUserRemoveGroupPath, ApiUserTokenPath,
-                    ApiUserUpdateParams, GetUserResponse, InitialApiKeyResponse, ApiUserEmailUpdateParams, ApiUserGroupPath
+                    GetUserResponse, InitialApiKeyResponse, ApiUserEmailUpdateParams, ApiUserGroupPath
                 },
                 api_user_provider::{
                     create_link_token_op, ApiUserLinkRequestPayload, ApiUserLinkRequestResponse,
                     ApiUserProviderPath,
                 },
                 group::{
-                    create_group_op, delete_group_op, get_groups_op, update_group_op, AccessGroupPath,
-                    AccessGroupUpdateParams,
+                    add_group_permission_op, create_group_op, delete_group_op, get_groups_op,
+                    remove_group_permission_op, AccessGroupPath,
+                    AccessGroupPermissionParams, AccessGroupUpdateParams,
                 },
                 login::{
                     magic_link:: {
@@ -464,32 +465,6 @@ mod macros {
                 get_api_user_op(&rqctx, path).await
             }
 
-            /// Create a new user
-            #[endpoint {
-                method = POST,
-                path = "/api-user",
-            }]
-            pub async fn create_api_user(
-                rqctx: RequestContext<$context_type>,
-                body: TypedBody<ApiUserUpdateParams<$permission_type>>,
-            ) -> Result<HttpResponseCreated<GetUserResponse<$permission_type>>, HttpError> {
-                create_api_user_op(&rqctx, body).await
-            }
-
-            /// Update the permissions assigned to a given user. These replace any existing
-            /// permissions.
-            #[endpoint {
-                method = POST,
-                path = "/api-user/{user_id}",
-            }]
-            pub async fn update_api_user(
-                rqctx: RequestContext<$context_type>,
-                path: Path<ApiUserPath>,
-                body: TypedBody<ApiUserUpdateParams<$permission_type>>,
-            ) -> Result<HttpResponseOk<GetUserResponse<$permission_type>>, HttpError> {
-                update_api_user_op(&rqctx, path.into_inner(), body.into_inner()).await
-            }
-
             /// Add a single permission to a user
             #[endpoint {
                 method = POST,
@@ -641,17 +616,30 @@ mod macros {
                 create_group_op(&rqctx, body.into_inner()).await
             }
 
-            /// Update a group
+            /// Add a permission to a group
             #[endpoint {
-                method = PUT,
-                path = "/group/{group_id}",
+                method = POST,
+                path = "/group/{group_id}/permission",
             }]
-            pub async fn update_group(
+            pub async fn add_group_permission(
                 rqctx: RequestContext<$context_type>,
                 path: Path<AccessGroupPath>,
-                body: TypedBody<AccessGroupUpdateParams<$permission_type>>,
+                body: TypedBody<AccessGroupPermissionParams<$permission_type>>,
             ) -> Result<HttpResponseOk<AccessGroup<$permission_type>>, HttpError> {
-                update_group_op(&rqctx, path.into_inner(), body.into_inner()).await
+                add_group_permission_op(&rqctx, path.into_inner(), body.into_inner()).await
+            }
+
+            /// Remove a permission from a group
+            #[endpoint {
+                method = DELETE,
+                path = "/group/{group_id}/permission",
+            }]
+            pub async fn remove_group_permission(
+                rqctx: RequestContext<$context_type>,
+                path: Path<AccessGroupPath>,
+                body: TypedBody<AccessGroupPermissionParams<$permission_type>>,
+            ) -> Result<HttpResponseOk<AccessGroup<$permission_type>>, HttpError> {
+                remove_group_permission_op(&rqctx, path.into_inner(), body.into_inner()).await
             }
 
             /// Delete a group
@@ -750,10 +738,6 @@ mod macros {
                 .expect("Failed to register endpoint");
             $api.register(get_api_user)
                 .expect("Failed to register endpoint");
-            $api.register(create_api_user)
-                .expect("Failed to register endpoint");
-            $api.register(update_api_user)
-                .expect("Failed to register endpoint");
             $api.register(add_api_user_permission)
                 .expect("Failed to register endpoint");
             $api.register(remove_api_user_permission)
@@ -784,7 +768,9 @@ mod macros {
                 .expect("Failed to register endpoint");
             $api.register(create_group)
                 .expect("Failed to register endpoint");
-            $api.register(update_group)
+            $api.register(add_group_permission)
+                .expect("Failed to register endpoint");
+            $api.register(remove_group_permission)
                 .expect("Failed to register endpoint");
             $api.register(delete_group)
                 .expect("Failed to register endpoint");

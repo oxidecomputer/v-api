@@ -1133,6 +1133,8 @@ mod tests {
             .returning(move |_, _| {
                 Ok(Some(OAuthClient {
                     id: client_id,
+                    api_user_id: None,
+                    keys: vec![],
                     secrets: vec![],
                     redirect_uris: vec![OAuthClientRedirectUri {
                         id: TypedUuid::new_v4(),
@@ -1163,6 +1165,8 @@ mod tests {
             ctx,
             OAuthClient {
                 id: client_id,
+                api_user_id: None,
+                keys: vec![],
                 secrets: vec![OAuthClientSecret {
                     id: TypedUuid::new_v4(),
                     oauth_client_id: client_id,
@@ -1189,6 +1193,8 @@ mod tests {
         let client_id = TypedUuid::new_v4();
         let client = OAuthClient {
             id: client_id,
+            api_user_id: None,
+            keys: vec![],
             secrets: vec![],
             redirect_uris: vec![OAuthClientRedirectUri {
                 id: TypedUuid::new_v4(),
@@ -2361,6 +2367,7 @@ mod tests {
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 deleted_at: None,
+                generation: 0,
             },
             email: None,
             providers: vec![],
@@ -2438,6 +2445,7 @@ mod tests {
                         created_at: Utc::now(),
                         updated_at: Utc::now(),
                         deleted_at: None,
+                        generation: 0,
                     },
                     email: None,
                     providers: vec![],
@@ -2876,6 +2884,8 @@ mod tests {
             .returning(move |_, _| {
                 Ok(Some(OAuthClient {
                     id: client_id,
+                    api_user_id: None,
+                    keys: vec![],
                     secrets: vec![],
                     redirect_uris: vec![], // No registered URIs
                     created_at: Utc::now(),

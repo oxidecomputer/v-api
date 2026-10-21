@@ -107,13 +107,12 @@ where
         result
     }
 
-    /// Alias for [`can`](Self::can). A caller can grant any permission they hold.
+    /// Returns true if the caller could grant the target. See [`Permissions::can_grant`].
     pub fn can_grant(&self, target: &T) -> bool {
-        self.can(target)
+        self.permissions.can_grant(target)
     }
 
-    /// Alias for [`all`](Self::all). A caller can grant a set of permissions if they hold
-    /// every one of them.
+    /// Returns true if the caller could grant every permission in the targets
     pub fn can_grant_all(&self, targets: &Permissions<T>) -> bool {
         self.permissions.can_grant_all(targets)
     }
@@ -220,22 +219,57 @@ where
     }
 
     /// Returns true if any held permission implies the target, either by exact match
-    /// or through the permission hierarchy (e.g., an "All" variant implies specific instances).
+    /// or through a permission definition.
     pub fn can(&self, permission: &T) -> bool {
         let res = self.iter().any(|held| T::implies(held, permission));
         tracing::trace!(available = ?self.0, requested = ?permission, result = ?res, "Permissions existence check");
         res
     }
 
-    /// Alias for [`can`](Self::can). A permission set can grant any permission it holds.
+    /// Returns true if this set could grant the target to someone else.
     pub fn can_grant(&self, target: &T) -> bool {
-        self.can(target)
+        // We need to expand the target to verify that every permission it expresses is covered by
+        // this permission set. We can not use equality as this permission set may contain supersets
+        // for value carrying permissions compared to the target permission.
+        match target.expand_value() {
+            Some(values) => values.iter().all(|value| self.can(value)),
+            None => self.can(target),
+        }
     }
 
-    /// Alias for [`all`](Self::all). A permission set can grant a collection of permissions
-    /// if it holds every one of them.
+    /// Returns true if this set could grant every permission in the targets
     pub fn can_grant_all(&self, targets: &Permissions<T>) -> bool {
-        targets.iter().all(|target| self.can(target))
+        targets.iter().all(|target| self.can_grant(target))
+    }
+
+    /// Splits every permission that carries a set of values into one permission per value.
+    pub fn expand_values(&self) -> Permissions<T> {
+        let mut expanded = Permissions::new();
+        for permission in self.iter() {
+            match permission.expand_value() {
+                Some(values) => values.into_iter().for_each(|value| {
+                    expanded.insert(value);
+                }),
+                None => {
+                    expanded.insert(permission.clone());
+                }
+            }
+        }
+
+        expanded
+    }
+
+    /// Returns this set with the target removed.
+    pub fn without(&self, target: &T) -> Permissions<T> {
+        let removed = target
+            .expand_value()
+            .unwrap_or_else(|| vec![target.clone()]);
+        let mut remaining = self.expand_values();
+        removed.iter().for_each(|value| {
+            remaining.remove(value);
+        });
+
+        remaining
     }
 }
 
@@ -359,4 +393,14 @@ pub trait PermissionStorage {
     fn implies(held: &Self, target: &Self) -> bool
     where
         Self: Sized;
+
+    /// Splits a permission that carries a set of values into one permission per value. Returns
+    /// `None` for any permission that does not carry a set of values, which includes permissions
+    /// whose meaning is relative to whoever holds them.
+    fn expand_value(&self) -> Option<Vec<Self>>
+    where
+        Self: Sized,
+    {
+        None
+    }
 }

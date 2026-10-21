@@ -29,7 +29,8 @@ use crate::{
     },
     permissions::{VAppPermission, VPermission},
     response::{
-        OptionalResource, ResourceError, ResourceResult, resource_not_found, resource_restricted,
+        OptionalResource, ResourceError, ResourceResult, resource_conflict, resource_not_found,
+        resource_restricted,
     },
 };
 
@@ -86,6 +87,15 @@ where
     ) -> Result<(), ExtensionError> {
         (self)(user, extensions)
     }
+}
+
+/// A change to the permissions or groups held directly by a user. Each kind of change carries
+/// what is needed to check the caller's authority to make it.
+enum UserChange<'a, T> {
+    AddPermissions { permissions: Permissions<T> },
+    RemovePermission { permission: &'a T },
+    JoinGroup(&'a AccessGroup<T>),
+    LeaveGroup(&'a AccessGroup<T>),
 }
 
 #[derive(Clone)]
@@ -346,21 +356,25 @@ where
         caller: &Caller<T>,
         id: &TypedUuid<UserId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
+        let mut info = self.get_stored_api_user(caller, id).await?;
+        let extensions = self.get_extensions(&info.user).await;
+
+        info.user.permissions =
+            <T as PermissionStorage>::expand(&info.user.permissions, &info.user, None, &extensions);
+
+        Ok(info)
+    }
+
+    /// Reads a user as it is (notably without expanding permissions).
+    async fn get_stored_api_user(
+        &self,
+        caller: &Caller<T>,
+        id: &TypedUuid<UserId>,
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
         if caller.can(&VPermission::GetApiUser(*id).into()) {
-            let mut info = ApiUserStore::get(&*self.storage, id, false)
+            ApiUserStore::get(&*self.storage, id, false)
                 .await
-                .optional()?;
-
-            let extensions = self.get_extensions(&info.user).await;
-
-            info.user.permissions = <T as PermissionStorage>::expand(
-                &info.user.permissions,
-                &info.user,
-                None,
-                &extensions,
-            );
-
-            Ok(info)
+                .optional()
         } else {
             resource_restricted()
         }
@@ -408,27 +422,8 @@ where
         }
     }
 
-    /// Replaces the direct permissions on a user. Group membership is not affected.
-    /// The caller must hold every permission that is being newly added.
-    #[instrument(skip(self, caller, user_id, permissions), fields(caller = ?caller.id))]
-    pub async fn set_api_user_permissions(
-        &self,
-        caller: &Caller<T>,
-        user_id: &TypedUuid<UserId>,
-        permissions: Permissions<T>,
-    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.can(&VPermission::ManageApiUser(*user_id).into())
-            && caller.can_grant_all(&permissions)
-        {
-            let info = self.get_api_user(caller, user_id).await?;
-            let mut update: NewApiUser<T> = info.user.into();
-            update.permissions = permissions;
-            self.save_api_user(update).await
-        } else {
-            resource_restricted()
-        }
-    }
-
+    /// Adds permissions directly to a user. The caller must be able to manage the user's
+    /// permissions and grant every new permission for any permissions to be added.
     #[instrument(skip(self, caller, user_id, new_permissions), fields(caller = ?caller.id))]
     pub async fn add_permissions_to_user(
         &self,
@@ -436,24 +431,18 @@ where
         user_id: &TypedUuid<UserId>,
         new_permissions: Permissions<T>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.can(&VPermission::ManageApiUser(*user_id).into())
-            && caller.can_grant_all(&new_permissions)
-        {
-            let info = self.get_api_user(caller, user_id).await?;
-
-            let mut user_update: NewApiUser<T> = info.user.into();
-            for permission in new_permissions.into_iter() {
-                tracing::info!(id = ?user_id, ?permission, "Adding permission to user");
-                user_update.permissions.insert(permission);
-            }
-
-            self.save_api_user(user_update).await
-        } else {
-            resource_restricted()
-        }
+        self.modify_api_user(
+            caller,
+            user_id,
+            UserChange::AddPermissions {
+                permissions: new_permissions,
+            },
+        )
+        .await
     }
 
-    /// Adds a single permission to a user. The caller must hold the permission being added.
+    /// Adds a permission directly to a user. The caller must be able to manage the user's
+    /// permissions and grant the permission.
     #[instrument(skip(self, caller, user_id, permission), fields(caller = ?caller.id))]
     pub async fn add_permission_to_user(
         &self,
@@ -461,22 +450,18 @@ where
         user_id: &TypedUuid<UserId>,
         permission: T,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.can(&VPermission::ManageApiUser(*user_id).into()) && caller.can_grant(&permission)
-        {
-            let info = self.get_api_user(caller, user_id).await?;
-
-            let mut user_update: NewApiUser<T> = info.user.into();
-            tracing::info!(id = ?user_id, ?permission, "Adding permission to user");
-            user_update.permissions.insert(permission);
-
-            self.save_api_user(user_update).await
-        } else {
-            resource_restricted()
-        }
+        self.modify_api_user(
+            caller,
+            user_id,
+            UserChange::AddPermissions {
+                permissions: Permissions::from_iter([permission]),
+            },
+        )
+        .await
     }
 
-    /// Removes a single permission from a user. The caller does not need to hold the
-    /// permission being removed, only the ability to manage the target user.
+    /// Removes a permission held directly by a user. This does not affect permissions
+    /// attributed through group memberships.
     #[instrument(skip(self, caller, user_id, permission), fields(caller = ?caller.id))]
     pub async fn remove_permission_from_user(
         &self,
@@ -484,21 +469,134 @@ where
         user_id: &TypedUuid<UserId>,
         permission: &T,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.can(&VPermission::ManageApiUser(*user_id).into()) {
-            let info = self.get_api_user(caller, user_id).await?;
+        self.modify_api_user(caller, user_id, UserChange::RemovePermission { permission })
+            .await
+    }
 
-            let mut user_update: NewApiUser<T> = info.user.into();
-            tracing::info!(id = ?user_id, ?permission, "Removing permission from user");
-            user_update.permissions.remove(permission);
+    /// Adds a user to a group.
+    pub async fn add_user_to_group(
+        &self,
+        caller: &Caller<T>,
+        user_id: &TypedUuid<UserId>,
+        group: &AccessGroup<T>,
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
+        self.modify_api_user(caller, user_id, UserChange::JoinGroup(group))
+            .await
+    }
 
-            self.save_api_user(user_update).await
+    /// Removes a user from a group.
+    pub async fn remove_user_from_group(
+        &self,
+        caller: &Caller<T>,
+        user_id: &TypedUuid<UserId>,
+        group: &AccessGroup<T>,
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
+        self.modify_api_user(caller, user_id, UserChange::LeaveGroup(group))
+            .await
+    }
+
+    /// Applies a change to a user's permissions and groups.
+    async fn modify_api_user(
+        &self,
+        caller: &Caller<T>,
+        user_id: &TypedUuid<UserId>,
+        change: UserChange<'_, T>,
+    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
+        if Self::can_make_change(caller, user_id, &change) {
+            let current = self.get_stored_api_user(caller, user_id).await?;
+            let read_generation = current.user.generation;
+
+            let mut update: NewApiUser<T> = current.user.into();
+            update.permissions = update.permissions.expand_values();
+            Self::apply_change(&mut update, change);
+            update.permissions = <T as PermissionStorage>::contract(&update.permissions);
+
+            match ApiUserStore::update(&*self.storage, update, read_generation).await? {
+                Some(updated) => Ok(updated),
+                None => {
+                    tracing::info!(
+                        ?user_id,
+                        generation = read_generation,
+                        "User was written by someone else since it was read"
+                    );
+                    resource_conflict()
+                }
+            }
         } else {
             resource_restricted()
         }
     }
 
-    /// Contracts permissions and persists the user. Callers are responsible for performing
-    /// any authorization and escalation checks before calling this method.
+    fn apply_change(update: &mut NewApiUser<T>, change: UserChange<T>) {
+        match change {
+            UserChange::AddPermissions { permissions, .. } => {
+                for permission in permissions.expand_values().into_iter() {
+                    tracing::info!(id = ?update.id, ?permission, "Adding permission to user");
+                    update.permissions.insert(permission);
+                }
+            }
+            UserChange::RemovePermission { permission, .. } => {
+                tracing::info!(id = ?update.id, ?permission, "Removing permission from user");
+                update.permissions = update.permissions.without(permission);
+            }
+            UserChange::JoinGroup(group) => {
+                update.groups.insert(group.id);
+            }
+            UserChange::LeaveGroup(group) => {
+                update.groups.retain(|id| id != &group.id);
+            }
+        }
+    }
+
+    /// Returns true if the caller can make this change to the user
+    fn can_make_change(
+        caller: &Caller<T>,
+        user_id: &TypedUuid<UserId>,
+        change: &UserChange<T>,
+    ) -> bool {
+        match change {
+            UserChange::AddPermissions { permissions } => {
+                Self::can_manage_permissions(caller, user_id) && caller.can_grant_all(permissions)
+            }
+            UserChange::RemovePermission { permission } => {
+                Self::can_manage_permissions(caller, user_id) && caller.can_grant(permission)
+            }
+            UserChange::JoinGroup(group) => Self::can_change_membership(caller, group, "add"),
+            UserChange::LeaveGroup(group) => Self::can_change_membership(caller, group, "remove"),
+        }
+    }
+
+    /// Returns true if the caller can change the permissions directly assigned to the user.
+    fn can_manage_permissions(caller: &Caller<T>, user_id: &TypedUuid<UserId>) -> bool {
+        caller.can(&VPermission::ManageApiUser(*user_id).into())
+    }
+
+    // TODO: This is evidence of a problem in our data model. Storing groups on the user model means
+    // that we have to modify a user to assign a group. But what we actually care about are group
+    // permissions. This is for a future larger refactoring of the data model.
+
+    /// Returns true if the caller may add users to or remove users from the group.
+    fn can_change_membership(caller: &Caller<T>, group: &AccessGroup<T>, action: &str) -> bool {
+        let can_manage_membership =
+            caller.can(&VPermission::ManageGroupMembership(group.id).into());
+        let can_grant_permissions = caller.can_grant_all(&group.permissions);
+
+        if !can_manage_membership || !can_grant_permissions {
+            tracing::warn!(
+                caller = ?caller.id,
+                group_id = ?group.id,
+                group_name = ?group.name,
+                action,
+                can_manage_membership,
+                can_grant_permissions,
+                "Caller is not permitted to change membership of group"
+            );
+        }
+
+        can_manage_membership && can_grant_permissions
+    }
+
+    /// Contracts permissions and stores a new user.
     async fn save_api_user(
         &self,
         mut api_user: NewApiUser<T>,

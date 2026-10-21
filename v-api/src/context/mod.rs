@@ -24,8 +24,7 @@ use v_model::saga::{
 };
 use v_model::{
     AccessGroup, AccessGroupId, AccessGroupSource, ApiUserInfo, ApiUserProvider, LinkRequest,
-    Mapper, MapperSource, NewApiUser, NewApiUserProvider, NewLinkRequest, Permissions, UserId,
-    UserProviderId,
+    Mapper, MapperSource, NewApiUserProvider, NewLinkRequest, Permissions, UserId, UserProviderId,
     permissions::{Caller, Permission},
     storage::{
         AccessGroupFilter, AccessGroupStore, AccessTokenStore, ApiKeyStore,
@@ -53,7 +52,7 @@ use crate::{
     error::ApiError,
     mapper::DefaultMappingEngine,
     permissions::{VAppPermission, VPermission},
-    response::{OptionalResource, ResourceErrorInner},
+    response::ResourceErrorInner,
     util::response::{
         ResourceResult, client_error, internal_error, resource_error, resource_restricted,
     },
@@ -513,18 +512,21 @@ where
             }
         };
 
-        let (mapped_permissions, mapped_groups) = self
+        let visible_groups = self
+            .group
+            .list_groups(caller, AccessGroupFilter::default())
+            .await
+            .inner_err_into()?;
+        let mapped_groups = self
             .mapping
-            .get_mapped_fields(caller, &info, user_id)
+            .get_mapped_fields(caller, &visible_groups, &info, user_id)
             .await
             .inner_err_into()?;
 
-        tracing::debug!(?mapped_permissions, "Computed mapping permissions");
         tracing::debug!(?mapped_groups, "Computed mapped groups");
 
         if is_new_user {
             tracing::info!(
-                ?mapped_permissions,
                 ?mapped_groups,
                 "Did not find any existing users. Registering a new user."
             );
@@ -545,7 +547,7 @@ where
 
             let user = self
                 .user
-                .create_api_user(caller, user_id, mapped_permissions, groups)
+                .create_api_user(caller, user_id, Permissions::default(), groups)
                 .await
                 .inner_err_into()?;
 
@@ -587,12 +589,6 @@ where
                 .inner_err_into()?;
 
             tracing::info!(?provider.id, ?provider.user_id, "Updating found user permissions and groups");
-
-            // Add mapped permissions to the existing user
-            self.user
-                .add_permissions_to_user(caller, &provider.user_id, mapped_permissions)
-                .await
-                .inner_err_into()?;
 
             // Add mapped groups to the existing user
             for group_id in &mapped_groups {
@@ -659,40 +655,9 @@ where
         group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
         let group = self.group.get_group(caller, group_id).await?;
-        let can_manage_membership =
-            caller.can(&VPermission::ManageGroupMembership(*group_id).into());
-        let can_grant_permissions = caller.can_grant_all(&group.permissions);
-
-        if !can_manage_membership || !can_grant_permissions {
-            // This check runs on every login for mapper matched groups. Denials fail the
-            // entire login, so record exactly which check failed and for which group.
-            tracing::warn!(
-                caller = ?caller.id,
-                ?group_id,
-                group_name = ?group.name,
-                can_manage_membership,
-                can_grant_permissions,
-                "Caller is not permitted to add user to group"
-            );
-        }
-
-        if can_manage_membership && can_grant_permissions {
-            // TODO: This needs to be wrapped in a transaction. That requires reworking the way the
-            // store traits are handled. Ideally we could have an API that still abstracts away the
-            // underlying connection management while allowing for transactions. Possibly something
-            // that takes a closure and passes in a connection that implements all of the expected
-            // data store traits
-            let info = ApiUserStore::get(&*self.storage, api_user_id, false)
-                .await
-                .optional()?;
-
-            let mut update: NewApiUser<T> = info.user.into();
-            update.groups.insert(*group_id);
-
-            Ok(ApiUserStore::upsert(&*self.storage, update).await?)
-        } else {
-            resource_restricted()
-        }
+        self.user
+            .add_user_to_group(caller, api_user_id, &group)
+            .await
     }
 
     pub async fn remove_api_user_from_group(
@@ -701,23 +666,10 @@ where
         api_user_id: &TypedUuid<UserId>,
         group_id: &TypedUuid<AccessGroupId>,
     ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        if caller.can(&VPermission::ManageGroupMembership(*group_id).into()) {
-            // TODO: This needs to be wrapped in a transaction. That requires reworking the way the
-            // store traits are handled. Ideally we could have an API that still abstracts away the
-            // underlying connection management while allowing for transactions. Possibly something
-            // that takes a closure and passes in a connection that implements all of the expected
-            // data store traits
-            let info = ApiUserStore::get(&*self.storage, api_user_id, false)
-                .await
-                .optional()?;
-
-            let mut update: NewApiUser<T> = info.user.into();
-            update.groups.retain(|id| id != group_id);
-
-            Ok(ApiUserStore::upsert(&*self.storage, update).await?)
-        } else {
-            resource_restricted()
-        }
+        let group = self.group.get_group(caller, group_id).await?;
+        self.user
+            .remove_user_from_group(caller, api_user_id, &group)
+            .await
     }
 
     pub async fn complete_link_request(
@@ -1061,6 +1013,7 @@ where
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
                     deleted_at: None,
+                    generation: 0,
                 }
             })
             .collect();
@@ -1133,10 +1086,7 @@ where
         }
 
         let mut mapping_ctx = MappingContext::new(storage.clone());
-        mapping_ctx.set_engine(Some(Arc::new(DefaultMappingEngine::new(
-            auth_ctx.builtin_registration_user(),
-            group_ctx.clone(),
-        ))));
+        mapping_ctx.set_engine(Some(Arc::new(DefaultMappingEngine)));
 
         // Convert preset mapper configs into Mapper structs with deterministic IDs
         let preset_mappers: Vec<Mapper> = self
@@ -1270,6 +1220,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             deleted_at: None,
+            generation: 0,
         };
 
         let provider = ApiUserProvider {
@@ -1314,6 +1265,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             deleted_at: None,
+            generation: 0,
         };
         let pagination = ListPagination::unlimited();
         let mut group_store = MockAccessGroupStore::new();
@@ -1340,6 +1292,7 @@ mod tests {
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 deleted_at: None,
+                generation: 0,
             },
             email: None,
             providers: vec![],
@@ -1466,6 +1419,7 @@ mod tests {
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 deleted_at: None,
+                generation: 0,
             },
             email: None,
             providers: vec![],
@@ -1539,6 +1493,7 @@ mod tests {
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
                     deleted_at: None,
+                    generation: 0,
                 },
                 email: None,
                 providers: vec![],
@@ -1549,8 +1504,8 @@ mod tests {
                 .expect_get()
                 .with(eq(user_id), eq(false))
                 .returning(move |_, _| Ok(Some(user.clone())));
-            user_store.expect_upsert().returning(|update| {
-                Ok(ApiUserInfo {
+            user_store.expect_update().returning(|update, _| {
+                Ok(Some(ApiUserInfo {
                     user: ApiUser {
                         id: update.id,
                         permissions: update.permissions,
@@ -1558,10 +1513,11 @@ mod tests {
                         created_at: Utc::now(),
                         updated_at: Utc::now(),
                         deleted_at: None,
+                        generation: 0,
                     },
                     email: None,
                     providers: vec![],
-                })
+                }))
             });
 
             let mut group_store = MockAccessGroupStore::new();
@@ -1584,6 +1540,7 @@ mod tests {
         let caller = Caller {
             id: user_id,
             permissions: vec![
+                VPermission::GetApiUsersAll,
                 VPermission::GetGroupsAll,
                 VPermission::ManageGroupMembershipsAll,
                 // Required to grant the permissions held by the group
@@ -1599,6 +1556,27 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(BTreeSet::from([group_id]), added.user.groups);
+
+        // Leaving the group takes away CreateGroup, which this caller can not grant, so it may
+        // not remove the user even though it can manage the group's membership
+        let cannot_grant = Caller {
+            id: user_id,
+            permissions: vec![
+                VPermission::GetApiUsersAll,
+                VPermission::GetGroupsAll,
+                VPermission::ManageGroupMembershipsAll,
+            ]
+            .into(),
+            extensions: Default::default(),
+        };
+        let ctx = ctx_with_memberships(BTreeSet::from([group_id])).await;
+        let refused = ctx
+            .remove_api_user_from_group(&cannot_grant, &user_id, &group_id)
+            .await;
+        assert!(matches!(
+            refused,
+            Err(crate::response::ResourceError::Restricted)
+        ));
 
         let ctx = ctx_with_memberships(BTreeSet::from([group_id])).await;
         let removed = ctx
@@ -1649,6 +1627,7 @@ mod tests {
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 deleted_at: None,
+                generation: 0,
             }])
         });
 
@@ -1832,10 +1811,7 @@ pub(crate) mod test_mocks {
     ) -> VContext<VPermission> {
         let mut ctx = build_ctx_with_groups(storage, groups).await.unwrap();
 
-        let mapping_engine = Arc::new(DefaultMappingEngine::new(
-            ctx.builtin_registration_user(),
-            ctx.group.clone(),
-        ));
+        let mapping_engine = Arc::new(DefaultMappingEngine);
         ctx.mapping.set_engine(Some(mapping_engine));
 
         ctx.auth.insert_oauth_provider(
@@ -1963,6 +1939,19 @@ pub(crate) mod test_mocks {
             api_user: NewApiUser<VPermission>,
         ) -> Result<v_model::ApiUserInfo<VPermission>, v_model::storage::StoreError> {
             self.api_user_store.as_ref().unwrap().upsert(api_user).await
+        }
+
+        async fn update(
+            &self,
+            api_user: NewApiUser<VPermission>,
+            expected_generation: i64,
+        ) -> Result<Option<v_model::ApiUserInfo<VPermission>>, v_model::storage::StoreError>
+        {
+            self.api_user_store
+                .as_ref()
+                .unwrap()
+                .update(api_user, expected_generation)
+                .await
         }
 
         async fn delete(
@@ -2255,6 +2244,18 @@ pub(crate) mod test_mocks {
         ) -> Result<Option<v_model::OAuthClient>, v_model::storage::StoreError> {
             self.oauth_client_store.as_ref().unwrap().delete(id).await
         }
+
+        async fn assign_api_user(
+            &self,
+            id: &TypedUuid<OAuthClientId>,
+            api_user_id: &TypedUuid<UserId>,
+        ) -> Result<Option<v_model::OAuthClient>, v_model::storage::StoreError> {
+            self.oauth_client_store
+                .as_ref()
+                .unwrap()
+                .assign_api_user(id, api_user_id)
+                .await
+        }
     }
 
     #[async_trait]
@@ -2342,6 +2343,19 @@ pub(crate) mod test_mocks {
                 .as_ref()
                 .unwrap()
                 .upsert(group)
+                .await
+        }
+
+        async fn update(
+            &self,
+            group: &NewAccessGroup<VPermission>,
+            expected_generation: i64,
+        ) -> Result<Option<v_model::AccessGroup<VPermission>>, v_model::storage::StoreError>
+        {
+            self.access_group_store
+                .as_ref()
+                .unwrap()
+                .update(group, expected_generation)
                 .await
         }
 

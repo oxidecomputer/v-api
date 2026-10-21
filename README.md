@@ -85,8 +85,6 @@ The following endpoints are injected by the `inject_endpoints` macro:
 | GET | /.well-known/jwks.json | Retrieve JWKS for verifying access tokens |
 | GET | /self | View information about the calling user |
 | GET | /api-user/{identifier} | View information about a specific user |
-| POST | /api-user | Create a new user |
-| POST | /api-user/{identifier} | Update information on an existing user |
 | GET | /api-user/{identifier}/token | View all API tokens for an existing user |
 | POST | /api-user/{identifier}/token | Create a new API token for an existing user |
 | GET | /api-user/{identifier}/token/{token_identifier} | View an existing API token |
@@ -97,7 +95,8 @@ The following endpoints are injected by the `inject_endpoints` macro:
 | POST | /api-user-provider/{identifier}/link-token | TBD |
 | GET | /group | View all groups |
 | POST | /group | Create a new group |
-| PUT | /group/{group_id} | Update an existing group |
+| POST | /group/{group_id}/permission | Add a single permission to an existing group |
+| DELETE | /group/{group_id}/permission | Remove a single permission from an existing group |
 | DELETE | /group/{group_id} | Delete an existing group |
 | GET | /mapper | View all mappers |
 | POST | /mapper | Create a new mapper |

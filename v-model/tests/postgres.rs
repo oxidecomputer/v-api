@@ -16,12 +16,16 @@ use serde::{Deserialize, Serialize};
 use std::ops::{Add, Sub};
 use uuid::Uuid;
 use v_model::{
-    NewApiKey, NewApiUser, NewMagicLink, NewMagicLinkAttempt, NewMapper, UserId,
+    NewAccessGroup, NewApiKey, NewApiUser, NewMagicLink, NewMagicLinkAttempt, NewMapper,
+    NewOAuthClient, NewOAuthClientAssertion, NewOAuthClientKey, OAuthClientId, UserId,
+    jwk::PublicJwk,
     migrations::run_migrations_quiet,
     schema_ext::MagicLinkAttemptState,
     storage::{
-        ApiKeyFilter, ApiKeyStore, ApiUserFilter, ApiUserStore, ListPagination,
-        MagicLinkAttemptStore, MagicLinkStore, MapperStore, postgres::PostgresStore,
+        AccessGroupStore, ApiKeyFilter, ApiKeyStore, ApiUserFilter, ApiUserStore, ListPagination,
+        MagicLinkAttemptStore, MagicLinkStore, MapperStore, OAuthClientAssertionStore,
+        OAuthClientKeyFilter, OAuthClientKeyStore, OAuthClientStore, StoreError,
+        postgres::PostgresStore,
     },
 };
 
@@ -597,4 +601,334 @@ async fn test_mapper_activation_limit() {
         .unwrap();
     assert_eq!(final_mapper.activations, Some(1));
     assert!(final_mapper.depleted_at.is_some());
+}
+
+async fn create_user(store: &PostgresStore) -> TypedUuid<UserId> {
+    let id = TypedUuid::new_v4();
+    ApiUserStore::<TestPermission>::upsert(
+        store,
+        NewApiUser {
+            id,
+            permissions: Default::default(),
+            groups: BTreeSet::new(),
+        },
+    )
+    .await
+    .unwrap();
+    id
+}
+
+async fn create_client(store: &PostgresStore) -> TypedUuid<OAuthClientId> {
+    let id = TypedUuid::new_v4();
+    OAuthClientStore::upsert(store, NewOAuthClient { id })
+        .await
+        .unwrap();
+    id
+}
+
+fn new_key(client_id: TypedUuid<OAuthClientId>, thumbprint: &str) -> NewOAuthClientKey {
+    NewOAuthClientKey {
+        id: TypedUuid::new_v4(),
+        oauth_client_id: client_id,
+        thumbprint: thumbprint.to_string(),
+        // A distinct key per thumbprint, which is all these tests need
+        jwk: PublicJwk::ed25519([*thumbprint.as_bytes().last().unwrap(); 32]),
+    }
+}
+
+// A client's service user can be assigned once and is never rebound afterwards
+#[tokio::test]
+async fn test_oauth_client_service_user() {
+    let db = TestDb::new("test_oauth_client_service_user");
+    let store = PostgresStore::new(&db.url()).await.unwrap();
+
+    let client_id = create_client(&store).await;
+    let client = OAuthClientStore::get(&store, &client_id, false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(None, client.api_user_id);
+
+    let first = create_user(&store).await;
+    let client = OAuthClientStore::assign_api_user(&store, &client_id, &first)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(Some(first), client.api_user_id);
+
+    // A second assignment leaves the original service user in place
+    let second = create_user(&store).await;
+    let client = OAuthClientStore::assign_api_user(&store, &client_id, &second)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(Some(first), client.api_user_id);
+
+    // A service user backs at most one client
+    let other_client = create_client(&store).await;
+    let result = OAuthClientStore::assign_api_user(&store, &other_client, &first).await;
+    assert!(
+        matches!(result, Err(StoreError::Conflict)),
+        "a service user was assigned to two clients, got {result:?}"
+    );
+
+    // A deleted client is never assigned a service user
+    let deleted_client = create_client(&store).await;
+    OAuthClientStore::delete(&store, &deleted_client)
+        .await
+        .unwrap();
+    let assigned = OAuthClientStore::assign_api_user(&store, &deleted_client, &second)
+        .await
+        .unwrap();
+    assert!(assigned.is_none());
+    let deleted = OAuthClientStore::get(&store, &deleted_client, true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(None, deleted.api_user_id);
+}
+
+// Keys are listed on their client, deleted keys drop out of listings, and a thumbprint can
+// never be registered twice
+#[tokio::test]
+async fn test_oauth_client_keys() {
+    let db = TestDb::new("test_oauth_client_keys");
+    let store = PostgresStore::new(&db.url()).await.unwrap();
+
+    let client_id = create_client(&store).await;
+    let first = OAuthClientKeyStore::insert(&store, new_key(client_id, "thumbprint-a"))
+        .await
+        .unwrap();
+
+    // The key reads back from its JSONB column exactly as it was written
+    assert_eq!(new_key(client_id, "thumbprint-a").jwk, first.jwk);
+    let second = OAuthClientKeyStore::insert(&store, new_key(client_id, "thumbprint-b"))
+        .await
+        .unwrap();
+
+    // The client carries its keys
+    let client = OAuthClientStore::get(&store, &client_id, false)
+        .await
+        .unwrap()
+        .unwrap();
+    let thumbprints = client
+        .keys
+        .iter()
+        .map(|key| key.thumbprint.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        BTreeSet::from(["thumbprint-a", "thumbprint-b"]),
+        thumbprints
+    );
+
+    // Keys can be found by thumbprint, which is how an assertion's kid is resolved
+    let found = OAuthClientKeyStore::list(
+        &store,
+        OAuthClientKeyFilter {
+            thumbprint: Some(vec!["thumbprint-b".to_string()]),
+            ..Default::default()
+        },
+        &ListPagination::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        vec![second.id],
+        found.iter().map(|key| key.id).collect::<Vec<_>>()
+    );
+
+    // A deleted key leaves listings and its client, but is still retrievable when asked for
+    let deleted = OAuthClientKeyStore::delete(&store, &first.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(deleted.deleted_at.is_some());
+    assert!(
+        OAuthClientKeyStore::get(&store, &first.id, false)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let client = OAuthClientStore::get(&store, &client_id, false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        vec![second.id],
+        client.keys.iter().map(|key| key.id).collect::<Vec<_>>()
+    );
+
+    // Deleting again keeps the original deletion time
+    let deleted_again = OAuthClientKeyStore::delete(&store, &first.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(deleted.deleted_at, deleted_again.deleted_at);
+
+    // A thumbprint is unique across every client, including keys that have been deleted
+    let other_client = create_client(&store).await;
+    for thumbprint in ["thumbprint-a", "thumbprint-b"] {
+        let result = OAuthClientKeyStore::insert(&store, new_key(other_client, thumbprint)).await;
+        assert!(
+            matches!(result, Err(StoreError::Conflict)),
+            "{thumbprint} was registered twice, got {result:?}"
+        );
+    }
+}
+
+// An assertion is accepted once per client, and expired assertions can be pruned
+#[tokio::test]
+async fn test_oauth_client_assertions() {
+    let db = TestDb::new("test_oauth_client_assertions");
+    let store = PostgresStore::new(&db.url()).await.unwrap();
+
+    let client_id = create_client(&store).await;
+    let other_client = create_client(&store).await;
+    let expires_at = Utc::now() + TimeDelta::minutes(5);
+
+    let assertion =
+        |client: TypedUuid<OAuthClientId>, jti: &str, expires_at| NewOAuthClientAssertion {
+            oauth_client_id: client,
+            jti: jti.to_string(),
+            expires_at,
+        };
+
+    OAuthClientAssertionStore::record(&store, assertion(client_id, "jti-1", expires_at))
+        .await
+        .unwrap();
+
+    // Presenting the same jti again is a replay
+    let replay =
+        OAuthClientAssertionStore::record(&store, assertion(client_id, "jti-1", expires_at)).await;
+    assert!(
+        matches!(replay, Err(StoreError::Conflict)),
+        "a replayed assertion was accepted, got {replay:?}"
+    );
+
+    // The jti is chosen by the client, so another client may use the same value
+    OAuthClientAssertionStore::record(&store, assertion(other_client, "jti-1", expires_at))
+        .await
+        .unwrap();
+
+    // Only assertions that expired before the cutoff are pruned
+    let expired = Utc::now() - TimeDelta::minutes(10);
+    OAuthClientAssertionStore::record(&store, assertion(client_id, "jti-2", expired))
+        .await
+        .unwrap();
+    let pruned = OAuthClientAssertionStore::delete_expired(&store, Utc::now())
+        .await
+        .unwrap();
+    assert_eq!(1, pruned);
+
+    // A pruned assertion's jti no longer conflicts, while live ones still do
+    OAuthClientAssertionStore::record(&store, assertion(client_id, "jti-2", expires_at))
+        .await
+        .unwrap();
+    let replay =
+        OAuthClientAssertionStore::record(&store, assertion(client_id, "jti-1", expires_at)).await;
+    assert!(matches!(replay, Err(StoreError::Conflict)));
+}
+
+// A conditional write lands only when the record is unchanged since it was read, which is what
+// keeps concurrent permission changes from overwriting each other
+#[tokio::test]
+async fn test_conditional_updates() {
+    let db = TestDb::new("test_conditional_updates");
+    let store = PostgresStore::new(&db.url()).await.unwrap();
+
+    let user_id = create_user(&store).await;
+    let read = ApiUserStore::<TestPermission>::get(&store, &user_id, false)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let change = |permissions: Vec<TestPermission>| NewApiUser {
+        id: user_id,
+        permissions: permissions.into(),
+        groups: BTreeSet::new(),
+    };
+
+    // The first write from this read lands
+    let written = ApiUserStore::update(
+        &store,
+        change(vec![TestPermission::CreateApiUser]),
+        read.user.generation,
+    )
+    .await
+    .unwrap()
+    .expect("a write from a current read should land");
+    assert_eq!(read.user.generation + 1, written.user.generation);
+
+    // A second write from the same, now stale, read is rejected and changes nothing
+    let stale = ApiUserStore::update(
+        &store,
+        change(vec![TestPermission::GetApiKey(user_id)]),
+        read.user.generation,
+    )
+    .await
+    .unwrap();
+    assert!(stale.is_none());
+    let current = ApiUserStore::<TestPermission>::get(&store, &user_id, false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(written.user.permissions, current.user.permissions);
+
+    // A deleted user is never written
+    ApiUserStore::<TestPermission>::delete(&store, &user_id)
+        .await
+        .unwrap();
+    let deleted = ApiUserStore::update(&store, change(vec![]), current.user.generation)
+        .await
+        .unwrap();
+    assert!(deleted.is_none());
+
+    // Groups follow the same rule
+    let group_id = TypedUuid::new_v4();
+    let group = AccessGroupStore::<TestPermission>::upsert(
+        &store,
+        &NewAccessGroup {
+            id: group_id,
+            name: "engineering".to_string(),
+            permissions: Default::default(),
+        },
+    )
+    .await
+    .unwrap();
+    let change = |name: &str, permissions: Vec<TestPermission>| NewAccessGroup::<TestPermission> {
+        id: group_id,
+        name: name.to_string(),
+        permissions: permissions.into(),
+    };
+
+    // A write from the current read lands, and changes the permissions but never the name, even
+    // when a different name is supplied. Mappers resolve groups by name.
+    let written = AccessGroupStore::update(
+        &store,
+        &change("platform", vec![TestPermission::CreateApiUser]),
+        group.generation,
+    )
+    .await
+    .unwrap()
+    .expect("a write from a current read should land");
+    assert_eq!("engineering", written.name);
+    assert_eq!(
+        v_model::Permissions::from(vec![TestPermission::CreateApiUser]),
+        written.permissions
+    );
+    assert_eq!(group.generation + 1, written.generation);
+
+    // Upserting an existing group keeps its name too
+    let upserted = AccessGroupStore::upsert(
+        &store,
+        &change("other", vec![TestPermission::CreateApiUser]),
+    )
+    .await
+    .unwrap();
+    assert_eq!("engineering", upserted.name);
+
+    let stale = AccessGroupStore::update(&store, &change("engineering", vec![]), group.generation)
+        .await
+        .unwrap();
+    assert!(stale.is_none());
 }

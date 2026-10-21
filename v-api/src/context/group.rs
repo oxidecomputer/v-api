@@ -6,7 +6,7 @@ use newtype_uuid::TypedUuid;
 use std::sync::Arc;
 use v_model::{
     AccessGroup, AccessGroupId, NewAccessGroup,
-    permissions::Caller,
+    permissions::{Caller, PermissionStorage, Permissions},
     storage::{AccessGroupFilter, AccessGroupStore, ListPagination, StoreError},
 };
 
@@ -15,6 +15,13 @@ use crate::{
     permissions::{VAppPermission, VPermission},
     response::{OptionalResource, ResourceResult, resource_conflict, resource_restricted},
 };
+
+/// A change to a stored group. Each kind of change carries what is needed to check the caller's
+/// authority to make it.
+enum GroupChange<'a, T> {
+    AddPermission(T),
+    RemovePermission(&'a T),
+}
 
 #[derive(Clone)]
 pub struct GroupContext<T> {
@@ -126,21 +133,91 @@ where
         }
     }
 
-    pub async fn update_group(
+    /// Adds a permission to a group.
+    pub async fn add_permission_to_group(
         &self,
         caller: &Caller<T>,
-        group: NewAccessGroup<T>,
+        group_id: &TypedUuid<AccessGroupId>,
+        permission: T,
     ) -> ResourceResult<AccessGroup<T>, StoreError> {
-        if self.is_preset(&group.id) {
-            return resource_conflict();
-        }
+        self.modify_group(caller, group_id, GroupChange::AddPermission(permission))
+            .await
+    }
 
-        if caller.can(&VPermission::ManageGroup(group.id).into())
-            && caller.can_grant_all(&group.permissions)
-        {
-            Ok(AccessGroupStore::upsert(&*self.storage, &group).await?)
+    /// Removes a permission from a group.
+    pub async fn remove_permission_from_group(
+        &self,
+        caller: &Caller<T>,
+        group_id: &TypedUuid<AccessGroupId>,
+        permission: &T,
+    ) -> ResourceResult<AccessGroup<T>, StoreError> {
+        self.modify_group(caller, group_id, GroupChange::RemovePermission(permission))
+            .await
+    }
+
+    /// Applies a change to a stored group.
+    async fn modify_group(
+        &self,
+        caller: &Caller<T>,
+        group_id: &TypedUuid<AccessGroupId>,
+        change: GroupChange<'_, T>,
+    ) -> ResourceResult<AccessGroup<T>, StoreError> {
+        if self.is_preset(group_id) {
+            resource_conflict()
+        } else if Self::can_make_change(caller, group_id, &change) {
+            let current = self.get_group(caller, group_id).await?;
+
+            let mut update = NewAccessGroup {
+                id: current.id,
+                name: current.name,
+                permissions: current.permissions.expand_values(),
+            };
+            Self::apply_change(&mut update, change);
+            update.permissions = <T as PermissionStorage>::contract(&update.permissions);
+
+            match AccessGroupStore::update(&*self.storage, &update, current.generation).await? {
+                Some(updated) => Ok(updated),
+                None => {
+                    tracing::info!(
+                        ?group_id,
+                        generation = current.generation,
+                        "Group was written by someone else since it was read"
+                    );
+                    resource_conflict()
+                }
+            }
         } else {
             resource_restricted()
+        }
+    }
+
+    /// Returns true if the caller has the authority to make the change to the group
+    fn can_make_change(
+        caller: &Caller<T>,
+        group_id: &TypedUuid<AccessGroupId>,
+        change: &GroupChange<T>,
+    ) -> bool {
+        let can_manage = caller.can(&VPermission::ManageGroup(*group_id).into());
+
+        match change {
+            GroupChange::AddPermission(permission) => can_manage && caller.can_grant(permission),
+            GroupChange::RemovePermission(permission) => can_manage && caller.can_grant(permission),
+        }
+    }
+
+    fn apply_change(update: &mut NewAccessGroup<T>, change: GroupChange<T>) {
+        match change {
+            GroupChange::AddPermission(permission) => {
+                for value in Permissions::from_iter([permission])
+                    .expand_values()
+                    .into_iter()
+                {
+                    update.permissions.insert(value);
+                }
+            }
+            GroupChange::RemovePermission(permission) => {
+                update.permissions = update.permissions.without(permission);
+            }
         }
     }
 
@@ -167,7 +244,10 @@ where
 mod tests {
     use chrono::Utc;
     use newtype_uuid::{GenericUuid, TypedUuid};
-    use std::{collections::BTreeSet, sync::Arc};
+    use std::{
+        collections::BTreeSet,
+        sync::{Arc, Mutex},
+    };
     use uuid::Uuid;
     use v_model::{
         AccessGroup, AccessGroupSource, NewAccessGroup,
@@ -190,6 +270,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             deleted_at: None,
+            generation: 0,
         }
     }
 
@@ -202,6 +283,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             deleted_at: None,
+            generation: 0,
         }
     }
 
@@ -290,17 +372,15 @@ mod tests {
         let ctx = ctx_with_preset(vec![]);
         let preset = preset_group("admins");
 
-        let update = ctx
-            .update_group(
-                &admin_caller(),
-                NewAccessGroup {
-                    id: preset.id,
-                    name: "renamed".to_string(),
-                    permissions: Permissions::new(),
-                },
-            )
+        let add = ctx
+            .add_permission_to_group(&admin_caller(), &preset.id, VPermission::CreateGroup)
             .await;
-        assert!(matches!(update, Err(ResourceError::Conflict)));
+        assert!(matches!(add, Err(ResourceError::Conflict)));
+
+        let remove = ctx
+            .remove_permission_from_group(&admin_caller(), &preset.id, &VPermission::CreateGroup)
+            .await;
+        assert!(matches!(remove, Err(ResourceError::Conflict)));
 
         let delete = ctx.delete_group(&admin_caller(), &preset.id).await;
         assert!(matches!(delete, Err(ResourceError::Conflict)));
@@ -323,5 +403,137 @@ mod tests {
             .await;
 
         assert!(matches!(create, Err(ResourceError::Conflict)));
+    }
+
+    /// The permissions written by each successful group change
+    type GroupWrites = Arc<Mutex<Vec<Permissions<VPermission>>>>;
+
+    /// A context holding one stored group with the supplied permissions. Every write succeeds
+    /// and the written permissions are recorded.
+    fn ctx_with_group(
+        permissions: Permissions<VPermission>,
+    ) -> (
+        GroupContext<VPermission>,
+        AccessGroup<VPermission>,
+        GroupWrites,
+    ) {
+        let group = AccessGroup {
+            permissions,
+            ..dynamic_group("engineering")
+        };
+        let writes: GroupWrites = Arc::new(Mutex::new(vec![]));
+
+        let mut group_store = MockAccessGroupStore::new();
+        let stored = group.clone();
+        group_store
+            .expect_get()
+            .returning(move |_, _| Ok(Some(stored.clone())));
+        let recorder = writes.clone();
+        let template = group.clone();
+        group_store.expect_update().returning(move |update, _| {
+            recorder.lock().unwrap().push(update.permissions.clone());
+            Ok(Some(AccessGroup {
+                name: update.name.clone(),
+                permissions: update.permissions.clone(),
+                ..template.clone()
+            }))
+        });
+
+        let mut storage = MockStorage::new();
+        storage.access_group_store = Some(Arc::new(group_store));
+
+        (GroupContext::new(Arc::new(storage)), group, writes)
+    }
+
+    fn caller_with(permissions: Vec<VPermission>) -> Caller<VPermission> {
+        Caller {
+            id: TypedUuid::new_v4(),
+            permissions: permissions.into(),
+            extensions: Default::default(),
+        }
+    }
+
+    /// Every member receives a group's permissions, so adding one requires managing the group
+    /// and being able to grant the permission
+    #[tokio::test]
+    async fn adding_a_group_permission_requires_grant() {
+        let (ctx, group, writes) = ctx_with_group(Permissions::new());
+
+        let cannot_grant = caller_with(vec![VPermission::ManageGroup(group.id)]);
+        let refused = ctx
+            .add_permission_to_group(&cannot_grant, &group.id, VPermission::CreateMapper)
+            .await;
+        assert!(matches!(refused, Err(ResourceError::Restricted)));
+        assert!(writes.lock().unwrap().is_empty());
+
+        let can_grant = caller_with(vec![
+            VPermission::GetGroup(group.id),
+            VPermission::ManageGroup(group.id),
+            VPermission::CreateMapper,
+        ]);
+        let updated = ctx
+            .add_permission_to_group(&can_grant, &group.id, VPermission::CreateMapper)
+            .await
+            .unwrap();
+        assert!(updated.permissions.can(&VPermission::CreateMapper));
+    }
+
+    /// Removing a group permission requires being able to grant it, so the group's members never
+    /// lose permissions outside of the caller's authority
+    #[tokio::test]
+    async fn removing_a_group_permission_requires_grant() {
+        let (ctx, group, writes) =
+            ctx_with_group(vec![VPermission::CreateMapper, VPermission::CreateGroup].into());
+
+        let cannot_grant = caller_with(vec![VPermission::ManageGroup(group.id)]);
+        let refused = ctx
+            .remove_permission_from_group(&cannot_grant, &group.id, &VPermission::CreateMapper)
+            .await;
+        assert!(matches!(refused, Err(ResourceError::Restricted)));
+        assert!(writes.lock().unwrap().is_empty());
+
+        let can_grant = caller_with(vec![
+            VPermission::GetGroup(group.id),
+            VPermission::ManageGroup(group.id),
+            VPermission::CreateMapper,
+        ]);
+        let updated = ctx
+            .remove_permission_from_group(&can_grant, &group.id, &VPermission::CreateMapper)
+            .await
+            .unwrap();
+        assert!(!updated.permissions.can(&VPermission::CreateMapper));
+        assert!(updated.permissions.can(&VPermission::CreateGroup));
+    }
+
+    /// A write against a generation that has moved on is refused as a conflict after a single
+    /// attempt, and is never retried
+    #[tokio::test]
+    async fn a_stale_group_write_is_a_conflict() {
+        let group = dynamic_group("engineering");
+        let stored = group.clone();
+
+        let mut group_store = MockAccessGroupStore::new();
+        group_store
+            .expect_get()
+            .times(1)
+            .returning(move |_, _| Ok(Some(stored.clone())));
+        group_store
+            .expect_update()
+            .times(1)
+            .returning(|_, _| Ok(None));
+
+        let mut storage = MockStorage::new();
+        storage.access_group_store = Some(Arc::new(group_store));
+        let ctx = GroupContext::new(Arc::new(storage));
+
+        let manager = caller_with(vec![
+            VPermission::GetGroup(group.id),
+            VPermission::ManageGroup(group.id),
+            VPermission::CreateMapper,
+        ]);
+        let conflict = ctx
+            .add_permission_to_group(&manager, &group.id, VPermission::CreateMapper)
+            .await;
+        assert!(matches!(conflict, Err(ResourceError::Conflict)));
     }
 }

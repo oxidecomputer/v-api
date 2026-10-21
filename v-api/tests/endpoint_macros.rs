@@ -90,6 +90,7 @@ fn system_endpoints_are_registered() {
         "/api-user/{user_id}/token/{api_key_id}",
         "/group",
         "/group/{group_id}",
+        "/group/{group_id}/permission",
         "/login/magic/{channel}/send",
         "/login/oauth/{provider}/code/token",
         "/login/oauth/{provider}/device",

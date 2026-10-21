@@ -273,6 +273,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             deleted_at: None,
+            generation: 0,
         }
     }
 
@@ -296,8 +297,8 @@ mod tests {
                     providers: vec![],
                 }))
             });
-        user_store.expect_upsert().returning(|user| {
-            Ok(ApiUserInfo {
+        user_store.expect_update().returning(|user, _| {
+            Ok(Some(ApiUserInfo {
                 user: ApiUser {
                     id: user.id,
                     permissions: user.permissions,
@@ -305,10 +306,11 @@ mod tests {
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
                     deleted_at: None,
+                    generation: 0,
                 },
                 email: None,
                 providers: vec![],
-            })
+            }))
         });
 
         let mut store = MockMagicLinkStore::new();
