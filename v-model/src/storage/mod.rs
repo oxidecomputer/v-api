@@ -25,9 +25,10 @@ use crate::{
     NewApiUserContactEmail, NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMagicLink,
     NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, NewMapperEvent,
     NewOAuthClient, NewOAuthClientAssertion, NewOAuthClientKey, NewOAuthClientRedirectUri,
-    NewOAuthClientSecret, OAuthClient, OAuthClientAssertion, OAuthClientId, OAuthClientKey,
-    OAuthClientKeyId, OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId,
-    UserContactEmailId, UserId, UserProviderId,
+    NewOAuthClientSecret, NewServiceAccount, NewServiceAccountToken, OAuthClient,
+    OAuthClientAssertion, OAuthClientId, OAuthClientKey, OAuthClientKeyId, OAuthClientRedirectUri,
+    OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId, ServiceAccount, ServiceAccountToken,
+    ServiceAccountTokenId, UserContactEmailId, UserId, UserProviderId,
     schema_ext::{LoginAttemptState, MagicLinkAttemptState},
 };
 
@@ -146,7 +147,7 @@ pub trait ApiUserStore<T: Send + Sync> {
         filter: ApiUserFilter,
         pagination: &ListPagination,
     ) -> Result<Vec<ApiUserInfo<T>>, StoreError>;
-    async fn upsert(&self, api_user: NewApiUser<T>) -> Result<ApiUserInfo<T>, StoreError>;
+    async fn create(&self, api_user: NewApiUser<T>) -> Result<ApiUserInfo<T>, StoreError>;
     async fn update(
         &self,
         api_user: NewApiUser<T>,
@@ -304,7 +305,6 @@ pub trait LoginAttemptStore {
 #[derive(Debug, Default)]
 pub struct OAuthClientFilter {
     pub id: Option<Vec<TypedUuid<OAuthClientId>>>,
-    pub api_user_id: Option<Vec<TypedUuid<UserId>>>,
     pub deleted: bool,
 }
 
@@ -325,14 +325,6 @@ pub trait OAuthClientStore {
     async fn delete(
         &self,
         id: &TypedUuid<OAuthClientId>,
-    ) -> Result<Option<OAuthClient>, StoreError>;
-    /// Assign the service user that the client acts as when it authenticates with client
-    /// credentials. This is a one time operation that can not be undone. None is returned if there
-    /// the client has already been assigned a user.
-    async fn assign_api_user(
-        &self,
-        id: &TypedUuid<OAuthClientId>,
-        api_user_id: &TypedUuid<UserId>,
     ) -> Result<Option<OAuthClient>, StoreError>;
 }
 
@@ -357,6 +349,65 @@ pub trait OAuthClientRedirectUriStore {
         &self,
         id: &TypedUuid<OAuthRedirectUriId>,
     ) -> Result<Option<OAuthClientRedirectUri>, StoreError>;
+}
+
+#[cfg_attr(feature = "mock", automock)]
+#[async_trait]
+pub trait ServiceAccountStore<T: Send + Sync> {
+    /// The service account of an OAuth client, or `None` when the client has never been granted
+    /// a permission
+    async fn get(
+        &self,
+        id: &TypedUuid<OAuthClientId>,
+    ) -> Result<Option<ServiceAccount<T>>, StoreError>;
+    /// Store the first permissions of a service account. Fails with [`StoreError::Conflict`] when
+    /// the service account already exists, which means a concurrent change wrote it first.
+    async fn create(&self, account: NewServiceAccount<T>) -> Result<ServiceAccount<T>, StoreError>;
+    /// Write the service account's permissions only if its generation is still
+    /// `expected_generation`. Returns `None` without writing when another write has landed since
+    /// the read.
+    async fn update(
+        &self,
+        account: NewServiceAccount<T>,
+        expected_generation: i64,
+    ) -> Result<Option<ServiceAccount<T>>, StoreError>;
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct ServiceAccountTokenFilter {
+    pub oauth_client_id: Option<Vec<TypedUuid<OAuthClientId>>>,
+    /// Include tokens that have been revoked
+    pub revoked: bool,
+    /// Include tokens whose expiration has passed
+    pub expired: bool,
+}
+
+#[cfg_attr(feature = "mock", automock)]
+#[async_trait]
+pub trait ServiceAccountTokenStore {
+    /// A token by its id. Revoked tokens are only returned when `revoked` is true.
+    async fn get(
+        &self,
+        id: &TypedUuid<ServiceAccountTokenId>,
+        revoked: bool,
+    ) -> Result<Option<ServiceAccountToken>, StoreError>;
+    /// Tokens matching the filter, newest first
+    async fn list(
+        &self,
+        filter: ServiceAccountTokenFilter,
+        pagination: &ListPagination,
+    ) -> Result<Vec<ServiceAccountToken>, StoreError>;
+    /// Record a newly issued token. Fails with [`StoreError::Conflict`] when a token with the same
+    /// id already exists.
+    async fn create(
+        &self,
+        token: NewServiceAccountToken,
+    ) -> Result<ServiceAccountToken, StoreError>;
+    /// Revoke a token. Returns `None` when there is no unrevoked token with the id.
+    async fn revoke(
+        &self,
+        id: &TypedUuid<ServiceAccountTokenId>,
+    ) -> Result<Option<ServiceAccountToken>, StoreError>;
 }
 
 #[derive(Debug, Default)]

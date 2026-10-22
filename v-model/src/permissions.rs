@@ -23,7 +23,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
-use crate::{ApiUser, UserId};
+use crate::{ApiUser, OAuthClientId, UserId};
 
 pub trait Permission:
     Clone + Debug + Serialize + DeserializeOwned + PartialEq + Send + Sync + 'static
@@ -36,9 +36,18 @@ impl<T> Permission for T where
 
 pub type ArcMap = HashMap<TypeId, Arc<dyn Any + Send + Sync>>;
 
+/// Who a caller is acting as
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Principal {
+    /// A person, signed in through a login provider or acting through one of their API keys
+    User(TypedUuid<UserId>),
+    /// An OAuth client acting as itself through client credentials
+    ServiceAccount(TypedUuid<OAuthClientId>),
+}
+
 #[derive(Debug, Clone)]
 pub struct Caller<T> {
-    pub id: TypedUuid<UserId>,
+    pub principal: Principal,
     pub permissions: Permissions<T>,
     pub extensions: ArcMap,
 }
@@ -47,8 +56,17 @@ impl<T> Caller<T>
 where
     T: Permission,
 {
+    /// The user the caller is acting as, or `None` when the caller is a service account
+    pub fn user_id(&self) -> Option<TypedUuid<UserId>> {
+        match self.principal {
+            Principal::User(id) => Some(id),
+            Principal::ServiceAccount(_) => None,
+        }
+    }
+
+    /// Returns true if the caller is the given user. A service account is never a user.
     pub fn is(&self, id: &TypedUuid<UserId>) -> bool {
-        &self.id == id
+        self.user_id().as_ref() == Some(id)
     }
 
     pub fn insert<U>(&mut self, value: U) -> Option<Arc<U>>
@@ -121,7 +139,7 @@ where
 impl<T> From<Permissions<T>> for Caller<T> {
     fn from(value: Permissions<T>) -> Self {
         Self {
-            id: TypedUuid::new_v4(),
+            principal: Principal::User(TypedUuid::new_v4()),
             permissions: value,
             extensions: HashMap::new(),
         }
@@ -378,9 +396,12 @@ pub trait PermissionStorage {
     fn contract(_collection: &Permissions<Self>) -> Permissions<Self>
     where
         Self: Sized;
+    /// Resolves the permissions in a collection that are relative to whoever holds them. A caller
+    /// that is not a user has no actor, and permissions that refer to the actor's own user record
+    /// expand to nothing for them.
     fn expand(
         collection: &Permissions<Self>,
-        actor: &ApiUser<Self>,
+        actor: Option<&ApiUser<Self>>,
         actor_permissions: Option<&Permissions<Self>>,
         extensions: &ArcMap,
     ) -> Permissions<Self>
@@ -402,5 +423,40 @@ pub trait PermissionStorage {
         Self: Sized,
     {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use newtype_uuid::{GenericUuid, TypedUuid};
+
+    use super::{Caller, Permissions, Principal};
+
+    fn caller(principal: Principal) -> Caller<()> {
+        Caller {
+            principal,
+            permissions: Permissions::default(),
+            extensions: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_user_caller_is_that_user() {
+        let user_id = TypedUuid::new_v4();
+        let user = caller(Principal::User(user_id));
+
+        assert_eq!(Some(user_id), user.user_id());
+        assert!(user.is(&user_id));
+        assert!(!user.is(&TypedUuid::new_v4()));
+    }
+
+    /// A service account is never treated as a user, even one whose id has the same value
+    #[test]
+    fn a_service_account_is_never_a_user() {
+        let client_id = TypedUuid::new_v4();
+        let service_account = caller(Principal::ServiceAccount(client_id));
+
+        assert_eq!(None, service_account.user_id());
+        assert!(!service_account.is(&TypedUuid::from_untyped_uuid(client_id.into_untyped_uuid())));
     }
 }

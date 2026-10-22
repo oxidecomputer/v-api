@@ -37,7 +37,7 @@ export type GetUserResponse<Permission extends string = string> = {
 }
 
 /**
- * Access token claims, per RFC 9068. Note that `scp` is a single
+ * Access token claims, per RFC 9068 §2.2. Note that `scp` is a single
  * space-delimited string on the wire, not an array.
  */
 export type VApiAccessTokenClaims = {
@@ -45,6 +45,8 @@ export type VApiAccessTokenClaims = {
   aud: string
   sub: string
   prv: string
+  /** The client the token was issued through. For an OAuth login this is the OAuth client id. */
+  client_id: string
   scp: string
   exp: number
   nbf: number

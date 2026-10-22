@@ -24,14 +24,16 @@ use v_model::saga::{
 };
 use v_model::{
     AccessGroup, AccessGroupId, AccessGroupSource, ApiUserInfo, ApiUserProvider, LinkRequest,
-    Mapper, MapperSource, NewApiUserProvider, NewLinkRequest, Permissions, UserId, UserProviderId,
+    Mapper, MapperSource, NewApiUserProvider, NewLinkRequest, OAuthClientId, Permissions, UserId,
+    UserProviderId,
     permissions::{Caller, Permission},
     storage::{
         AccessGroupFilter, AccessGroupStore, AccessTokenStore, ApiKeyStore,
         ApiUserContactEmailStore, ApiUserFilter, ApiUserProviderFilter, ApiUserProviderStore,
         ApiUserStore, LinkRequestStore, ListPagination, LoginAttemptStore, MagicLinkAttemptStore,
         MagicLinkRedirectUriStore, MagicLinkSecretStore, MagicLinkStore, MapperEventStore,
-        MapperStore, OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore,
+        MapperStore, OAuthClientAssertionStore, OAuthClientKeyStore, OAuthClientRedirectUriStore,
+        OAuthClientSecretStore, OAuthClientStore, ServiceAccountStore, ServiceAccountTokenStore,
         StoreError,
         postgres::{PostgresError, PostgresStore},
     },
@@ -40,9 +42,12 @@ use v_model::{
 use crate::{
     authn::{
         AuthError, AuthToken, Sign, SigningKeyError, VerificationResult, Verify,
-        jwt::{Claims, DEFAULT_JWT_EXPIRATION, JwtSigner, JwtSignerError},
+        client_assertion::AssertionPolicy,
+        jwt::{
+            DEFAULT_JWT_EXPIRATION, JwtSigner, JwtSignerError, ServiceAccountClaims, UserClaims,
+        },
     },
-    config::{JwtConfig, ResolvedAsymmetricKey},
+    config::{ClientCredentialsConfig, JwtConfig, ResolvedAsymmetricKey},
     endpoints::login::{
         UserInfo,
         oauth::{
@@ -70,7 +75,10 @@ pub use magic_link::{MagicLinkContext, MagicLinkMessage, MagicLinkTarget};
 pub mod mapping;
 pub use mapping::MappingContext;
 pub mod oauth;
-pub use oauth::{OAuthContext, OAuthError};
+pub use oauth::{
+    ClientAuthenticationError, OAuthContext, OAuthError, RegisteredServiceAccountToken,
+    ServiceAccountCallerError,
+};
 #[cfg(feature = "sagas")]
 pub mod saga;
 #[cfg(feature = "sagas")]
@@ -89,6 +97,10 @@ pub trait VApiStorage<P: Send + Sync>:
     + OAuthClientStore
     + OAuthClientSecretStore
     + OAuthClientRedirectUriStore
+    + OAuthClientKeyStore
+    + OAuthClientAssertionStore
+    + ServiceAccountStore<P>
+    + ServiceAccountTokenStore
     + AccessGroupStore<P>
     + MapperStore
     + MapperEventStore
@@ -117,6 +129,10 @@ where
         + OAuthClientStore
         + OAuthClientSecretStore
         + OAuthClientRedirectUriStore
+        + OAuthClientKeyStore
+        + OAuthClientAssertionStore
+        + ServiceAccountStore<P>
+        + ServiceAccountTokenStore
         + AccessGroupStore<P>
         + MapperStore
         + MapperEventStore
@@ -144,6 +160,10 @@ pub trait VApiStorage<P: Send + Sync>:
     + OAuthClientStore
     + OAuthClientSecretStore
     + OAuthClientRedirectUriStore
+    + OAuthClientKeyStore
+    + OAuthClientAssertionStore
+    + ServiceAccountStore<P>
+    + ServiceAccountTokenStore
     + AccessGroupStore<P>
     + MapperStore
     + MapperEventStore
@@ -170,6 +190,10 @@ where
         + OAuthClientStore
         + OAuthClientSecretStore
         + OAuthClientRedirectUriStore
+        + OAuthClientKeyStore
+        + OAuthClientAssertionStore
+        + ServiceAccountStore<P>
+        + ServiceAccountTokenStore
         + AccessGroupStore<P>
         + MapperStore
         + MapperEventStore
@@ -186,6 +210,7 @@ where
 
 pub struct VContext<T> {
     public_url: String,
+    client_credentials: ClientCredentialsConfig,
     storage: Arc<dyn VApiStorage<T>>,
     auth: AuthContext<T>,
     pub group: GroupContext<T>,
@@ -253,6 +278,8 @@ pub enum VContextCallerError {
     Auth(#[from] AuthError),
     #[error(transparent)]
     Caller(#[from] UserContextError),
+    #[error(transparent)]
+    ServiceAccount(#[from] ServiceAccountCallerError),
 }
 
 impl From<VContextCallerError> for HttpError {
@@ -260,6 +287,25 @@ impl From<VContextCallerError> for HttpError {
         match value {
             VContextCallerError::Auth(inner) => inner.into(),
             VContextCallerError::Caller(inner) => inner.into(),
+            VContextCallerError::ServiceAccount(inner) => inner.into(),
+        }
+    }
+}
+
+impl From<ServiceAccountCallerError> for HttpError {
+    fn from(error: ServiceAccountCallerError) -> Self {
+        tracing::info!(?error, "Failed to authenticate service account");
+
+        match error {
+            ServiceAccountCallerError::FailedToAuthenticate
+            | ServiceAccountCallerError::InvalidToken => client_error(
+                ClientErrorStatusCode::UNAUTHORIZED,
+                "Failed to authenticate",
+            ),
+            ServiceAccountCallerError::Scope(_) => {
+                client_error(ClientErrorStatusCode::BAD_REQUEST, "Invalid scope")
+            }
+            ServiceAccountCallerError::Storage(_) => internal_error("Internal storage failed"),
         }
     }
 }
@@ -422,15 +468,51 @@ where
         self
     }
 
+    pub fn client_assertion_policy(&self) -> AssertionPolicy {
+        AssertionPolicy {
+            audience: self.issuer(),
+            now: Utc::now().timestamp(),
+            max_lifetime: self.client_credentials.max_assertion_lifetime,
+        }
+    }
+
+    pub async fn generate_service_account_token(
+        &self,
+        caller: &Caller<T>,
+        client_id: &TypedUuid<OAuthClientId>,
+        scope: Vec<String>,
+    ) -> ResourceResult<RegisteredServiceAccountToken, OAuthError> {
+        let expires_at =
+            Utc::now() + TimeDelta::try_seconds(self.client_credentials.token_expiration).unwrap();
+        let claims = ServiceAccountClaims::new(self, None, client_id, scope, expires_at);
+        let token = self
+            .oauth
+            .register_service_account_token(caller, self.jwt_signer(), &claims)
+            .await?;
+
+        tracing::info!(?client_id, "Generated service account token");
+
+        Ok(token)
+    }
+
     pub fn generate_claims(
         &self,
         api_user: &TypedUuid<UserId>,
         api_user_provider: &TypedUuid<UserProviderId>,
+        client_id: String,
         scope: Vec<String>,
-    ) -> Claims {
+    ) -> UserClaims {
         let expires_at =
             Utc::now() + TimeDelta::try_seconds(self.auth.default_jwt_expiration()).unwrap();
-        Claims::new(self, None, api_user, api_user_provider, scope, expires_at)
+        UserClaims::new(
+            self,
+            None,
+            api_user,
+            api_user_provider,
+            client_id,
+            scope,
+            expires_at,
+        )
     }
 
     pub fn insert_oauth_provider(
@@ -461,7 +543,12 @@ where
         auth: Option<&AuthToken>,
     ) -> Result<Caller<T>, VContextCallerError> {
         Ok(match auth {
-            Some(token) => {
+            Some(AuthToken::ServiceAccount(jwt)) => {
+                self.oauth
+                    .get_caller(&self.builtin_registration_user(), &jwt.claims)
+                    .await?
+            }
+            Some(AuthToken::User(token)) => {
                 self.user
                     .get_caller(&self.builtin_registration_user(), &self.auth, token)
                     .await?
@@ -609,20 +696,20 @@ where
         }
     }
 
+    /// Issues an access token to a user through the named client
     pub async fn generate_access_token(
         &self,
         caller: &Caller<T>,
         api_user: &TypedUuid<UserId>,
         api_user_provider: &TypedUuid<UserProviderId>,
+        client_id: String,
         scope: Vec<String>,
-    ) -> ResourceResult<RegisteredAccessToken, ApiError> {
-        let claims = self.generate_claims(api_user, api_user_provider, scope);
+    ) -> Result<RegisteredAccessToken, ApiError> {
+        let claims = self.generate_claims(api_user, api_user_provider, client_id, scope);
         let token = self
             .user
             .register_access_token(caller, self.jwt_signer(), api_user, &claims)
-            .await
-            // TODO: FIXME
-            .unwrap();
+            .await?;
 
         tracing::info!(api_user_id = ?api_user, "Generated access token");
 
@@ -784,6 +871,7 @@ pub struct VContextBuilder<T> {
     param_path: Option<PathBuf>,
     service_name: Option<String>,
     jwt_expiration: Option<i64>,
+    client_credentials: Option<ClientCredentialsConfig>,
     public_url: Option<String>,
     storage: Option<Arc<dyn VApiStorage<T>>>,
     storage_url: Option<String>,
@@ -813,6 +901,7 @@ where
             param_path: None,
             service_name: None,
             jwt_expiration: None,
+            client_credentials: None,
             public_url: None,
             storage: None,
             storage_url: None,
@@ -837,6 +926,11 @@ where
 
     pub fn with_jwt_expiration(mut self, expiration: i64) -> Self {
         self.jwt_expiration = Some(expiration);
+        self
+    }
+
+    pub fn with_client_credentials(mut self, config: ClientCredentialsConfig) -> Self {
+        self.client_credentials = Some(config);
         self
     }
 
@@ -1159,6 +1253,7 @@ where
 
         Ok(VContext {
             public_url,
+            client_credentials: self.client_credentials.unwrap_or_default(),
             storage: storage.clone(),
             auth: auth_ctx,
             group: group_ctx,
@@ -1183,21 +1278,23 @@ mod tests {
     use uuid::Uuid;
     use v_model::{
         AccessGroup, AccessGroupId, AccessGroupSource, AccessToken, AccessTokenId, ApiUser,
-        ApiUserInfo, ApiUserProvider, UserId,
-        permissions::{Caller, Permissions},
+        ApiUserInfo, ApiUserProvider, OAuthClient, OAuthClientId, ServiceAccount,
+        ServiceAccountToken, ServiceAccountTokenId, UserId,
+        permissions::{Caller, Permissions, Principal},
         storage::{
             AccessGroupFilter, ListPagination, MockAccessGroupStore, MockAccessTokenStore,
-            MockApiUserStore, StoreError,
+            MockApiUserStore, MockOAuthClientStore, MockServiceAccountStore,
+            MockServiceAccountTokenStore, StoreError,
         },
     };
 
     use crate::{
         VContextBuilder, VContextBuilderError,
         authn::{
-            AuthToken,
-            jwt::{Claims, Jwt},
+            AuthToken, UserToken,
+            jwt::{Jwt, ServiceAccountClaims, TokenClaims, UserClaims},
         },
-        context::user::UserContextError,
+        context::{ServiceAccountCallerError, user::UserContextError},
         permissions::VPermission,
         util::tests::{MockKey, mock_key},
     };
@@ -1236,18 +1333,21 @@ mod tests {
         };
 
         let user_token = ctx
-            .sign_jwt(&Claims::new(
+            .sign_jwt(&UserClaims::new(
                 ctx,
                 Some(token_id),
                 &user.id,
                 &provider.id,
+                "test-client".to_string(),
                 scope,
                 Utc::now().add(TimeDelta::try_seconds(300).unwrap()),
             ))
             .await
             .unwrap();
 
-        AuthToken::Jwt(Jwt::new(ctx, &user_token).await.unwrap())
+        AuthToken::User(UserToken::Session(
+            Jwt::new(ctx, &user_token).await.unwrap(),
+        ))
     }
 
     #[tokio::test]
@@ -1399,6 +1499,281 @@ mod tests {
         }
     }
 
+    /// Signs a token for a service account and reads it back the way a request would
+    async fn sign_and_read(
+        ctx: &VContext<VPermission>,
+        claims: &ServiceAccountClaims,
+    ) -> AuthToken {
+        let token = ctx.sign_jwt(claims).await.unwrap();
+        Jwt::<TokenClaims>::new(ctx, &token).await.unwrap().into()
+    }
+
+    async fn service_account_token(
+        ctx: &VContext<VPermission>,
+        token_id: TypedUuid<ServiceAccountTokenId>,
+        client_id: TypedUuid<OAuthClientId>,
+        scope: &[&str],
+    ) -> AuthToken {
+        sign_and_read(
+            ctx,
+            &ServiceAccountClaims::new(
+                ctx,
+                Some(token_id),
+                &client_id,
+                scope.iter().map(|scope| scope.to_string()).collect(),
+                Utc::now().add(TimeDelta::try_seconds(300).unwrap()),
+            ),
+        )
+        .await
+    }
+
+    /// Storage holding one live client and its service account. Tokens are known only when they
+    /// are listed in `tokens`, as the token id and the client it was issued to.
+    async fn service_account_ctx(
+        client_id: TypedUuid<OAuthClientId>,
+        permissions: Option<Permissions<VPermission>>,
+        tokens: Vec<(TypedUuid<ServiceAccountTokenId>, TypedUuid<OAuthClientId>)>,
+    ) -> VContext<VPermission> {
+        let mut client_store = MockOAuthClientStore::new();
+        client_store.expect_get().returning(move |id, deleted| {
+            Ok((id == &client_id && !deleted).then(|| OAuthClient {
+                id: *id,
+                secrets: vec![],
+                redirect_uris: vec![],
+                keys: vec![],
+                created_at: Utc::now(),
+                deleted_at: None,
+            }))
+        });
+
+        let mut account_store = MockServiceAccountStore::new();
+        account_store.expect_get().returning(move |id| {
+            Ok(permissions.clone().map(|permissions| ServiceAccount {
+                id: *id,
+                permissions,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                generation: 0,
+            }))
+        });
+
+        let mut token_store = MockServiceAccountTokenStore::new();
+        token_store.expect_get().returning(move |id, _| {
+            Ok(tokens.iter().find(|(token_id, _)| token_id == id).map(
+                |(token_id, oauth_client_id)| ServiceAccountToken {
+                    id: *token_id,
+                    oauth_client_id: *oauth_client_id,
+                    expires_at: Utc::now() + TimeDelta::try_seconds(300).unwrap(),
+                    revoked_at: None,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                },
+            ))
+        });
+
+        let mut storage = MockStorage::new();
+        storage.oauth_client_store = Some(Arc::new(client_store));
+        storage.service_account_store = Some(Arc::new(account_store));
+        storage.service_account_token_store = Some(Arc::new(token_store));
+
+        mock_context(Arc::new(storage)).await
+    }
+
+    fn assert_invalid_service_account_token(
+        result: Result<Caller<VPermission>, VContextCallerError>,
+    ) {
+        assert!(
+            matches!(
+                result,
+                Err(VContextCallerError::ServiceAccount(
+                    ServiceAccountCallerError::InvalidToken
+                ))
+            ),
+            "{result:?}"
+        );
+    }
+
+    /// Each kind of token is read back as the kind of principal it was issued for
+    #[tokio::test]
+    async fn tokens_are_read_as_the_principal_they_were_issued_for() {
+        let ctx = mock_context(Arc::new(MockStorage::new())).await;
+
+        let service =
+            service_account_token(&ctx, TypedUuid::new_v4(), TypedUuid::new_v4(), &[]).await;
+        assert!(matches!(service, AuthToken::ServiceAccount(_)));
+
+        let user_token = ctx
+            .sign_jwt(&UserClaims::new(
+                &ctx,
+                None,
+                &TypedUuid::new_v4(),
+                &TypedUuid::new_v4(),
+                "test-client".to_string(),
+                vec![],
+                Utc::now().add(TimeDelta::try_seconds(300).unwrap()),
+            ))
+            .await
+            .unwrap();
+        let user: AuthToken = Jwt::<TokenClaims>::new(&ctx, &user_token)
+            .await
+            .unwrap()
+            .into();
+        assert!(matches!(user, AuthToken::User(UserToken::Session(_))));
+    }
+
+    /// A service account caller holds the permissions of its service account, and is never a user
+    #[tokio::test]
+    async fn a_service_account_token_resolves_to_the_service_account() {
+        let client_id = TypedUuid::new_v4();
+        let token_id = TypedUuid::new_v4();
+        let held: Permissions<VPermission> =
+            vec![VPermission::CreateGroup, VPermission::GetMappersAll].into();
+        let ctx =
+            service_account_ctx(client_id, Some(held.clone()), vec![(token_id, client_id)]).await;
+
+        let token = service_account_token(&ctx, token_id, client_id, &["full"]).await;
+        let caller = ctx.get_caller_from_token(Some(&token)).await.unwrap();
+
+        assert_eq!(Principal::ServiceAccount(client_id), caller.principal);
+        assert_eq!(None, caller.user_id());
+        assert_eq!(held, caller.permissions);
+        assert!(caller.extensions.is_empty());
+    }
+
+    /// The scope of a token narrows what the service account holds and never adds to it
+    #[tokio::test]
+    async fn a_service_account_token_is_narrowed_by_its_scope() {
+        let client_id = TypedUuid::new_v4();
+        let token_id = TypedUuid::new_v4();
+        let held: Permissions<VPermission> =
+            vec![VPermission::CreateGroup, VPermission::GetMappersAll].into();
+        let ctx = service_account_ctx(client_id, Some(held), vec![(token_id, client_id)]).await;
+
+        let token =
+            service_account_token(&ctx, token_id, client_id, &["group:info:w", "user:info:r"])
+                .await;
+        let caller = ctx.get_caller_from_token(Some(&token)).await.unwrap();
+
+        assert_eq!(
+            Permissions::<VPermission>::from(vec![VPermission::CreateGroup]),
+            caller.permissions
+        );
+
+        let token = service_account_token(&ctx, token_id, client_id, &[]).await;
+        let caller = ctx.get_caller_from_token(Some(&token)).await.unwrap();
+        assert!(caller.permissions.is_empty());
+    }
+
+    /// A client that has never been granted anything resolves to a caller that holds nothing
+    #[tokio::test]
+    async fn a_service_account_without_permissions_holds_nothing() {
+        let client_id = TypedUuid::new_v4();
+        let token_id = TypedUuid::new_v4();
+        let ctx = service_account_ctx(client_id, None, vec![(token_id, client_id)]).await;
+
+        let token = service_account_token(&ctx, token_id, client_id, &["full"]).await;
+        let caller = ctx.get_caller_from_token(Some(&token)).await.unwrap();
+
+        assert_eq!(Principal::ServiceAccount(client_id), caller.principal);
+        assert!(caller.permissions.is_empty());
+    }
+
+    /// Permissions over the holder's own user or joined groups mean nothing without a user record,
+    /// while value sets still resolve to their values
+    #[tokio::test]
+    async fn user_relative_permissions_resolve_to_nothing_for_a_service_account() {
+        let client_id = TypedUuid::new_v4();
+        let token_id = TypedUuid::new_v4();
+        let group_id = TypedUuid::new_v4();
+        let held: Permissions<VPermission> = vec![
+            VPermission::GetApiUserSelf,
+            VPermission::GetGroupsJoined,
+            VPermission::ManageGroups([group_id].into()),
+        ]
+        .into();
+        let ctx = service_account_ctx(client_id, Some(held), vec![(token_id, client_id)]).await;
+
+        let token = service_account_token(&ctx, token_id, client_id, &["full"]).await;
+        let caller = ctx.get_caller_from_token(Some(&token)).await.unwrap();
+
+        assert_eq!(
+            Permissions::<VPermission>::from(vec![VPermission::ManageGroup(group_id)]),
+            caller.permissions
+        );
+    }
+
+    /// A token that is unknown or revoked, or that was issued to a different client, is refused
+    #[tokio::test]
+    async fn a_service_account_token_must_be_known_and_issued_to_the_client() {
+        let client_id = TypedUuid::new_v4();
+        let other_client_id = TypedUuid::new_v4();
+        let foreign_token_id = TypedUuid::new_v4();
+        let ctx = service_account_ctx(
+            client_id,
+            Some(vec![VPermission::CreateGroup].into()),
+            vec![(foreign_token_id, other_client_id)],
+        )
+        .await;
+
+        let unknown = service_account_token(&ctx, TypedUuid::new_v4(), client_id, &["full"]).await;
+        assert_invalid_service_account_token(ctx.get_caller_from_token(Some(&unknown)).await);
+
+        let foreign = service_account_token(&ctx, foreign_token_id, client_id, &["full"]).await;
+        assert_invalid_service_account_token(ctx.get_caller_from_token(Some(&foreign)).await);
+    }
+
+    /// A token whose subject and client id name different clients is refused
+    #[tokio::test]
+    async fn a_service_account_token_must_name_one_client() {
+        let client_id = TypedUuid::new_v4();
+        let token_id = TypedUuid::new_v4();
+        let ctx = service_account_ctx(
+            client_id,
+            Some(vec![VPermission::CreateGroup].into()),
+            vec![(token_id, client_id)],
+        )
+        .await;
+
+        let mut claims = ServiceAccountClaims::new(
+            &ctx,
+            Some(token_id),
+            &client_id,
+            vec!["full".to_string()],
+            Utc::now().add(TimeDelta::try_seconds(300).unwrap()),
+        );
+        claims.sub = TypedUuid::new_v4();
+        let token = sign_and_read(&ctx, &claims).await;
+
+        assert_invalid_service_account_token(ctx.get_caller_from_token(Some(&token)).await);
+    }
+
+    /// A token for a client that is deleted or does not exist is refused
+    #[tokio::test]
+    async fn a_service_account_token_for_a_missing_client_is_refused() {
+        let client_id = TypedUuid::new_v4();
+        let missing_client_id = TypedUuid::new_v4();
+        let token_id = TypedUuid::new_v4();
+        let ctx = service_account_ctx(
+            client_id,
+            Some(vec![VPermission::CreateGroup].into()),
+            vec![(token_id, missing_client_id)],
+        )
+        .await;
+
+        let token = service_account_token(&ctx, token_id, missing_client_id, &["full"]).await;
+        let result = ctx.get_caller_from_token(Some(&token)).await;
+
+        assert!(
+            matches!(
+                result,
+                Err(VContextCallerError::ServiceAccount(
+                    ServiceAccountCallerError::FailedToAuthenticate
+                ))
+            ),
+            "{result:?}"
+        );
+    }
+
     #[tokio::test]
     async fn test_preset_group_membership_grants_permissions() {
         let mut storage = MockStorage::new();
@@ -1538,7 +1913,7 @@ mod tests {
         };
 
         let caller = Caller {
-            id: user_id,
+            principal: Principal::User(user_id),
             permissions: vec![
                 VPermission::GetApiUsersAll,
                 VPermission::GetGroupsAll,
@@ -1560,7 +1935,7 @@ mod tests {
         // Leaving the group takes away CreateGroup, which this caller can not grant, so it may
         // not remove the user even though it can manage the group's membership
         let cannot_grant = Caller {
-            id: user_id,
+            principal: Principal::User(user_id),
             permissions: vec![
                 VPermission::GetApiUsersAll,
                 VPermission::GetGroupsAll,
@@ -1748,7 +2123,7 @@ pub(crate) mod test_mocks {
         NewApiUser, NewApiUserContactEmail, NewApiUserProvider, NewLoginAttempt, NewMagicLink,
         NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, OAuthClientId,
         OAuthRedirectUriId, OAuthSecretId, UserContactEmailId, UserId, UserProviderId,
-        permissions::Caller,
+        permissions::{Caller, Principal},
         schema_ext::MagicLinkAttemptState,
         storage::{
             AccessGroupStore, AccessTokenStore, ApiKeyStore, ApiUserContactEmailStore,
@@ -1759,9 +2134,12 @@ pub(crate) mod test_mocks {
             MockApiUserContactEmailStore, MockApiUserProviderStore, MockApiUserStore,
             MockLinkRequestStore, MockLoginAttemptStore, MockMagicLinkAttemptStore,
             MockMagicLinkRedirectUriStore, MockMagicLinkSecretStore, MockMagicLinkStore,
-            MockMapperEventStore, MockMapperStore, MockOAuthClientRedirectUriStore,
-            MockOAuthClientSecretStore, MockOAuthClientStore, OAuthClientRedirectUriStore,
-            OAuthClientSecretStore, OAuthClientStore, StoreError,
+            MockMapperEventStore, MockMapperStore, MockOAuthClientAssertionStore,
+            MockOAuthClientKeyStore, MockOAuthClientRedirectUriStore, MockOAuthClientSecretStore,
+            MockOAuthClientStore, MockServiceAccountStore, MockServiceAccountTokenStore,
+            OAuthClientAssertionStore, OAuthClientKeyFilter, OAuthClientKeyStore,
+            OAuthClientRedirectUriStore, OAuthClientSecretStore, OAuthClientStore,
+            ServiceAccountStore, ServiceAccountTokenStore, StoreError,
         },
     };
 
@@ -1869,6 +2247,10 @@ pub(crate) mod test_mocks {
         pub oauth_client_store: Option<Arc<MockOAuthClientStore>>,
         pub oauth_client_secret_store: Option<Arc<MockOAuthClientSecretStore>>,
         pub oauth_client_redirect_uri_store: Option<Arc<MockOAuthClientRedirectUriStore>>,
+        pub oauth_client_key_store: Option<Arc<MockOAuthClientKeyStore>>,
+        pub oauth_client_assertion_store: Option<Arc<MockOAuthClientAssertionStore>>,
+        pub service_account_store: Option<Arc<MockServiceAccountStore<VPermission>>>,
+        pub service_account_token_store: Option<Arc<MockServiceAccountTokenStore>>,
         pub access_group_store: Option<Arc<MockAccessGroupStore<VPermission>>>,
         pub mapper_store: Option<Arc<MockMapperStore>>,
         pub mapper_event_store: Option<Arc<MockMapperEventStore>>,
@@ -1895,6 +2277,10 @@ pub(crate) mod test_mocks {
                 oauth_client_store: None,
                 oauth_client_secret_store: None,
                 oauth_client_redirect_uri_store: None,
+                oauth_client_key_store: None,
+                oauth_client_assertion_store: None,
+                service_account_store: None,
+                service_account_token_store: None,
                 access_group_store: None,
                 mapper_store: None,
                 mapper_event_store: None,
@@ -1934,11 +2320,11 @@ pub(crate) mod test_mocks {
                 .await
         }
 
-        async fn upsert(
+        async fn create(
             &self,
             api_user: NewApiUser<VPermission>,
         ) -> Result<v_model::ApiUserInfo<VPermission>, v_model::storage::StoreError> {
-            self.api_user_store.as_ref().unwrap().upsert(api_user).await
+            self.api_user_store.as_ref().unwrap().create(api_user).await
         }
 
         async fn update(
@@ -2244,18 +2630,6 @@ pub(crate) mod test_mocks {
         ) -> Result<Option<v_model::OAuthClient>, v_model::storage::StoreError> {
             self.oauth_client_store.as_ref().unwrap().delete(id).await
         }
-
-        async fn assign_api_user(
-            &self,
-            id: &TypedUuid<OAuthClientId>,
-            api_user_id: &TypedUuid<UserId>,
-        ) -> Result<Option<v_model::OAuthClient>, v_model::storage::StoreError> {
-            self.oauth_client_store
-                .as_ref()
-                .unwrap()
-                .assign_api_user(id, api_user_id)
-                .await
-        }
     }
 
     #[async_trait]
@@ -2304,6 +2678,159 @@ pub(crate) mod test_mocks {
                 .as_ref()
                 .unwrap()
                 .delete(id)
+                .await
+        }
+    }
+
+    #[async_trait]
+    impl OAuthClientKeyStore for MockStorage {
+        async fn get(
+            &self,
+            id: &TypedUuid<v_model::OAuthClientKeyId>,
+            deleted: bool,
+        ) -> Result<Option<v_model::OAuthClientKey>, StoreError> {
+            self.oauth_client_key_store
+                .as_ref()
+                .unwrap()
+                .get(id, deleted)
+                .await
+        }
+
+        async fn list(
+            &self,
+            filter: OAuthClientKeyFilter,
+            pagination: &ListPagination,
+        ) -> Result<Vec<v_model::OAuthClientKey>, StoreError> {
+            self.oauth_client_key_store
+                .as_ref()
+                .unwrap()
+                .list(filter, pagination)
+                .await
+        }
+
+        async fn insert(
+            &self,
+            key: v_model::NewOAuthClientKey,
+        ) -> Result<v_model::OAuthClientKey, StoreError> {
+            self.oauth_client_key_store
+                .as_ref()
+                .unwrap()
+                .insert(key)
+                .await
+        }
+
+        async fn delete(
+            &self,
+            id: &TypedUuid<v_model::OAuthClientKeyId>,
+        ) -> Result<Option<v_model::OAuthClientKey>, StoreError> {
+            self.oauth_client_key_store
+                .as_ref()
+                .unwrap()
+                .delete(id)
+                .await
+        }
+    }
+
+    #[async_trait]
+    impl OAuthClientAssertionStore for MockStorage {
+        async fn record(
+            &self,
+            assertion: v_model::NewOAuthClientAssertion,
+        ) -> Result<v_model::OAuthClientAssertion, StoreError> {
+            self.oauth_client_assertion_store
+                .as_ref()
+                .unwrap()
+                .record(assertion)
+                .await
+        }
+
+        async fn delete_expired(&self, before: chrono::DateTime<Utc>) -> Result<usize, StoreError> {
+            self.oauth_client_assertion_store
+                .as_ref()
+                .unwrap()
+                .delete_expired(before)
+                .await
+        }
+    }
+
+    #[async_trait]
+    impl ServiceAccountStore<VPermission> for MockStorage {
+        async fn get(
+            &self,
+            id: &TypedUuid<OAuthClientId>,
+        ) -> Result<Option<v_model::ServiceAccount<VPermission>>, StoreError> {
+            self.service_account_store.as_ref().unwrap().get(id).await
+        }
+
+        async fn create(
+            &self,
+            account: v_model::NewServiceAccount<VPermission>,
+        ) -> Result<v_model::ServiceAccount<VPermission>, StoreError> {
+            self.service_account_store
+                .as_ref()
+                .unwrap()
+                .create(account)
+                .await
+        }
+
+        async fn update(
+            &self,
+            account: v_model::NewServiceAccount<VPermission>,
+            expected_generation: i64,
+        ) -> Result<Option<v_model::ServiceAccount<VPermission>>, StoreError> {
+            self.service_account_store
+                .as_ref()
+                .unwrap()
+                .update(account, expected_generation)
+                .await
+        }
+    }
+
+    #[async_trait]
+    impl ServiceAccountTokenStore for MockStorage {
+        async fn get(
+            &self,
+            id: &TypedUuid<v_model::ServiceAccountTokenId>,
+            revoked: bool,
+        ) -> Result<Option<v_model::ServiceAccountToken>, StoreError> {
+            self.service_account_token_store
+                .as_ref()
+                .unwrap()
+                .get(id, revoked)
+                .await
+        }
+
+        async fn list(
+            &self,
+            filter: v_model::storage::ServiceAccountTokenFilter,
+            pagination: &ListPagination,
+        ) -> Result<Vec<v_model::ServiceAccountToken>, StoreError> {
+            self.service_account_token_store
+                .as_ref()
+                .unwrap()
+                .list(filter, pagination)
+                .await
+        }
+
+        async fn create(
+            &self,
+            token: v_model::NewServiceAccountToken,
+        ) -> Result<v_model::ServiceAccountToken, StoreError> {
+            self.service_account_token_store
+                .as_ref()
+                .unwrap()
+                .create(token)
+                .await
+        }
+
+        async fn revoke(
+            &self,
+            id: &TypedUuid<v_model::ServiceAccountTokenId>,
+        ) -> Result<Option<v_model::ServiceAccountToken>, StoreError> {
+            self.service_account_token_store
+                .as_ref()
+                .unwrap()
+                .revoke(id)
                 .await
         }
     }
@@ -2734,12 +3261,13 @@ pub(crate) mod test_mocks {
         let result = ctx
             .generate_access_token(
                 &Caller {
-                    id: TypedUuid::from_untyped_uuid(Uuid::new_v4()),
+                    principal: Principal::User(TypedUuid::from_untyped_uuid(Uuid::new_v4())),
                     permissions: vec![VPermission::CreateAccessToken].into(),
                     extensions: HashMap::default(),
                 },
                 &api_user_id,
                 &api_user_provider_id,
+                "test-client".to_string(),
                 vec![],
             )
             .await;

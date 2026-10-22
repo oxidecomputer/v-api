@@ -663,10 +663,7 @@ fn system_permission_tokens() -> TokenStream {
             CreateUserApiProviderLinkToken,
             #[v_api(scope(to = "group:info:w", from = "group:info:w"))]
             CreateGroup,
-            #[v_api(
-                contract(kind = drop, variant = GetGroupsJoined),
-                scope(to = "group:info:r")
-            )]
+            #[v_api(scope(to = "group:info:r"))]
             GetGroup(newtype_uuid::TypedUuid<v_model::AccessGroupId>),
             #[v_api(
                 expand(kind = iter, variant = GetGroup, source = actor, field = groups)
@@ -1230,8 +1227,10 @@ fn permission_storage_expand_tokens(
 
                         quote! {
                             #permission_type::#variant_ident => {
-                                for f0 in &#source.#field {
-                                    expanded.push(#permission_type::#target_variant(f0.clone()))
+                                if let Some(#source) = #source {
+                                    for f0 in &#source.#field {
+                                        expanded.push(#permission_type::#target_variant(f0.clone()))
+                                    }
                                 }
                             }
                         }
@@ -1258,7 +1257,11 @@ fn permission_storage_expand_tokens(
                             ExternalSource::Actor => {
                                 let source = source.to_ident();
                                 quote! {
-                                    #permission_type::#variant_ident => expanded.push(#permission_type::#target_variant(#source.#field.clone())),
+                                    #permission_type::#variant_ident => {
+                                        if let Some(#source) = #source {
+                                            expanded.push(#permission_type::#target_variant(#source.#field.clone()))
+                                        }
+                                    }
                                 }
                             },
                             ExternalSource::Extension => {
@@ -1291,7 +1294,7 @@ fn permission_storage_expand_tokens(
     quote! {
         fn expand(
             collection: &v_model::Permissions<Self>,
-            actor: &v_model::ApiUser<Self>,
+            actor: Option<&v_model::ApiUser<Self>>,
             actor_permissions: Option<&v_model::Permissions<Self>>,
             extensions: &v_model::ArcMap,
         ) -> v_model::Permissions<Self> {

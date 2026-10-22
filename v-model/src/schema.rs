@@ -204,7 +204,6 @@ diesel::table! {
         id -> Uuid,
         created_at -> Timestamptz,
         deleted_at -> Nullable<Timestamptz>,
-        api_user_id -> Nullable<Uuid>,
     }
 }
 
@@ -248,6 +247,27 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    service_account (id) {
+        id -> Uuid,
+        permissions -> Jsonb,
+        generation -> Int8,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    service_account_token (id) {
+        id -> Uuid,
+        oauth_client_id -> Uuid,
+        expires_at -> Timestamptz,
+        revoked_at -> Nullable<Timestamptz>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
 #[cfg(feature = "sagas")]
 diesel::table! {
     sagas (saga_id) {
@@ -280,11 +300,12 @@ diesel::joinable!(api_user_provider -> api_user (api_user_id));
 diesel::joinable!(magic_link_attempt -> magic_link_client (magic_link_client_id));
 diesel::joinable!(magic_link_client_redirect_uri -> magic_link_client (magic_link_client_id));
 diesel::joinable!(magic_link_client_secret -> magic_link_client (magic_link_client_id));
-diesel::joinable!(oauth_client -> api_user (api_user_id));
 diesel::joinable!(oauth_client_assertion -> oauth_client (oauth_client_id));
 diesel::joinable!(oauth_client_key -> oauth_client (oauth_client_id));
 diesel::joinable!(oauth_client_redirect_uri -> oauth_client (oauth_client_id));
 diesel::joinable!(oauth_client_secret -> oauth_client (oauth_client_id));
+diesel::joinable!(service_account -> oauth_client (id));
+diesel::joinable!(service_account_token -> oauth_client (oauth_client_id));
 
 #[cfg(feature = "sagas")]
 diesel::joinable!(saga_events -> sagas (saga_id));
@@ -309,4 +330,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     oauth_client_key,
     oauth_client_redirect_uri,
     oauth_client_secret,
+    service_account,
+    service_account_token,
 );

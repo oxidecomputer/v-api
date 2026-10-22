@@ -97,6 +97,12 @@ fn system_endpoints_are_registered() {
         "/magic/client",
         "/mapper",
         "/oauth/client/{client_id}/secret",
+        "/oauth/client/{client_id}/service-account/permission",
+        "/oauth/client/{client_id}/service-account/token",
+        "/oauth/client/{client_id}/service-account/token/{token_id}",
+        "/oauth/client/{client_id}/service-account/key",
+        "/oauth/client/{client_id}/service-account/key/{key_id}",
+        "/oauth/token",
         "/self",
     ] {
         assert!(paths.contains(expected), "{expected} was not registered");

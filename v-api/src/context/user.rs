@@ -13,7 +13,7 @@ use v_model::{
     AccessGroup, AccessToken, ApiKey, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserInfo,
     ApiUserProvider, ArcMap, NewAccessToken, NewApiKey, NewApiUser, NewApiUserContactEmail,
     NewApiUserProvider, Permissions, UserId, UserProviderId,
-    permissions::{AsScope, Caller, Permission, PermissionError, PermissionStorage},
+    permissions::{AsScope, Caller, Permission, PermissionError, PermissionStorage, Principal},
     storage::{
         AccessGroupFilter, AccessGroupStore, AccessTokenStore, ApiKeyFilter, ApiKeyStore,
         ApiUserContactEmailStore, ApiUserFilter, ApiUserProviderFilter, ApiUserProviderStore,
@@ -24,8 +24,8 @@ use v_model::{
 use crate::{
     VApiStorage,
     authn::{
-        AuthToken, Verify,
-        jwt::{Claims, JwtSigner, JwtSignerError},
+        UserToken, Verify,
+        jwt::{JwtSigner, JwtSignerError, UserClaims},
     },
     permissions::{VAppPermission, VPermission},
     response::{
@@ -147,7 +147,7 @@ where
         &self,
         registration_user: &Caller<T>,
         verifier: &U,
-        token: &AuthToken,
+        token: &UserToken,
     ) -> Result<Caller<T>, UserContextError>
     where
         U: Verify,
@@ -192,7 +192,7 @@ where
             BasePermissions::Restricted(permissions) => {
                 let token_permissions = <T as PermissionStorage>::expand(
                     permissions,
-                    &info.user,
+                    Some(&info.user),
                     Some(&user_permissions),
                     &extensions,
                 );
@@ -203,12 +203,12 @@ where
         tracing::trace!(token = ?base_permissions, user = ?user_permissions, combined = ?combined_permissions, "Computed caller permissions");
 
         let caller: Caller<T> = Caller {
-            id: info.user.id,
+            principal: Principal::User(info.user.id),
             permissions: combined_permissions.into_iter().collect::<Permissions<T>>(),
             extensions,
         };
 
-        tracing::info!(?caller.id, "Resolved caller");
+        tracing::info!(?caller.principal, "Resolved caller");
         tracing::debug!(?caller.permissions, "Caller permissions");
 
         Ok(caller)
@@ -218,13 +218,13 @@ where
         &self,
         caller: &Caller<T>,
         verifier: &U,
-        auth: &AuthToken,
+        auth: &UserToken,
     ) -> Result<(TypedUuid<UserId>, BasePermissions<T>), UserContextError>
     where
         U: Verify,
     {
         match auth {
-            AuthToken::ApiKey(api_key) => {
+            UserToken::ApiKey(api_key) => {
                 async {
                     tracing::debug!("Attempt to authenticate");
 
@@ -276,8 +276,8 @@ where
                 .instrument(info_span!("Test api key"))
                 .await
             }
-            AuthToken::Jwt(jwt) => {
-                // AuthnToken::Jwt can only be generated from a verified JWT
+            UserToken::Session(jwt) => {
+                // AuthnToken::Session can only be generated from a verified JWT
                 let permissions = if jwt.claims.scp.iter().any(|s| s == "full") {
                     BasePermissions::Full
                 } else {
@@ -337,7 +337,7 @@ where
         let permissions = groups
             .into_iter()
             .fold(Permissions::new(), |mut aggregate, group| {
-                let mut expanded = <T as PermissionStorage>::expand(&group.permissions, user, Some(&user.permissions), extensions);
+                let mut expanded = <T as PermissionStorage>::expand(&group.permissions, Some(user), Some(&user.permissions), extensions);
 
                 tracing::trace!(group_id = ?group.id, group_name = ?group.name, permissions = ?expanded, "Transformed group into permission set");
                 aggregate.append(&mut expanded);
@@ -350,7 +350,7 @@ where
 
     // API User Operations
 
-    #[instrument(skip(self, caller), fields(caller = ?caller.id))]
+    #[instrument(skip(self, caller), fields(caller = ?caller.principal))]
     pub async fn get_api_user(
         &self,
         caller: &Caller<T>,
@@ -359,8 +359,12 @@ where
         let mut info = self.get_stored_api_user(caller, id).await?;
         let extensions = self.get_extensions(&info.user).await;
 
-        info.user.permissions =
-            <T as PermissionStorage>::expand(&info.user.permissions, &info.user, None, &extensions);
+        info.user.permissions = <T as PermissionStorage>::expand(
+            &info.user.permissions,
+            Some(&info.user),
+            None,
+            &extensions,
+        );
 
         Ok(info)
     }
@@ -380,7 +384,7 @@ where
         }
     }
 
-    #[instrument(skip(self, caller, filter, pagination), fields(caller = ?caller.id))]
+    #[instrument(skip(self, caller, filter, pagination), fields(caller = ?caller.principal))]
     pub async fn list_api_user(
         &self,
         caller: &Caller<T>,
@@ -394,7 +398,7 @@ where
         Ok(users)
     }
 
-    #[instrument(skip(self, caller), fields(caller = ?caller.id))]
+    #[instrument(skip(self, caller), fields(caller = ?caller.principal))]
     pub async fn create_api_user(
         &self,
         caller: &Caller<T>,
@@ -407,16 +411,23 @@ where
             .flat_map(|g| g.permissions.iter().cloned())
             .collect();
 
-        if caller.can(&VPermission::CreateApiUser.into())
-            && caller.can_grant_all(&permissions)
+        if caller.all(
+            [
+                VPermission::CreateApiUser.into(),
+                VPermission::ManageGroupMembershipsAll.into(),
+            ]
+            .iter(),
+        ) && caller.can_grant_all(&permissions)
             && caller.can_grant_all(&group_permissions)
         {
-            let new_user = NewApiUser {
+            let mut new_user = NewApiUser {
                 id,
                 permissions,
                 groups: groups.into_iter().map(|g| g.id).collect(),
             };
-            self.save_api_user(new_user).await
+
+            new_user.permissions = <T as PermissionStorage>::contract(&new_user.permissions);
+            Ok(ApiUserStore::create(&*self.storage, new_user).await?)
         } else {
             resource_restricted()
         }
@@ -424,7 +435,7 @@ where
 
     /// Adds permissions directly to a user. The caller must be able to manage the user's
     /// permissions and grant every new permission for any permissions to be added.
-    #[instrument(skip(self, caller, user_id, new_permissions), fields(caller = ?caller.id))]
+    #[instrument(skip(self, caller, user_id, new_permissions), fields(caller = ?caller.principal))]
     pub async fn add_permissions_to_user(
         &self,
         caller: &Caller<T>,
@@ -443,7 +454,7 @@ where
 
     /// Adds a permission directly to a user. The caller must be able to manage the user's
     /// permissions and grant the permission.
-    #[instrument(skip(self, caller, user_id, permission), fields(caller = ?caller.id))]
+    #[instrument(skip(self, caller, user_id, permission), fields(caller = ?caller.principal))]
     pub async fn add_permission_to_user(
         &self,
         caller: &Caller<T>,
@@ -462,7 +473,7 @@ where
 
     /// Removes a permission held directly by a user. This does not affect permissions
     /// attributed through group memberships.
-    #[instrument(skip(self, caller, user_id, permission), fields(caller = ?caller.id))]
+    #[instrument(skip(self, caller, user_id, permission), fields(caller = ?caller.principal))]
     pub async fn remove_permission_from_user(
         &self,
         caller: &Caller<T>,
@@ -583,7 +594,7 @@ where
 
         if !can_manage_membership || !can_grant_permissions {
             tracing::warn!(
-                caller = ?caller.id,
+                caller = ?caller.principal,
                 group_id = ?group.id,
                 group_name = ?group.name,
                 action,
@@ -596,16 +607,7 @@ where
         can_manage_membership && can_grant_permissions
     }
 
-    /// Contracts permissions and stores a new user.
-    async fn save_api_user(
-        &self,
-        mut api_user: NewApiUser<T>,
-    ) -> ResourceResult<ApiUserInfo<T>, StoreError> {
-        api_user.permissions = <T as PermissionStorage>::contract(&api_user.permissions);
-        Ok(ApiUserStore::upsert(&*self.storage, api_user).await?)
-    }
-
-    #[instrument(skip(self, caller, token, api_user_id), fields(caller = ?caller.id))]
+    #[instrument(skip(self, caller, token, api_user_id), fields(caller = ?caller.principal))]
     pub async fn create_api_user_token(
         &self,
         caller: &Caller<T>,
@@ -616,7 +618,7 @@ where
 
         // If the user is requesting a token for themselves, they can grant an unbounded token.
         // If the request is for a different user, then a permission boundary must be provided.
-        let self_token = &caller.id == api_user_id;
+        let self_token = caller.is(api_user_id);
         let has_boundary = token.permission_boundary.is_some();
         let can_grant = token
             .permission_boundary
@@ -774,7 +776,7 @@ where
         caller: &Caller<T>,
         signer: &JwtSigner,
         api_user: &TypedUuid<UserId>,
-        claims: &Claims,
+        claims: &UserClaims,
     ) -> ResourceResult<RegisteredAccessToken, UserContextError> {
         let token = self
             .create_access_token(
@@ -824,7 +826,7 @@ mod tests {
     use newtype_uuid::TypedUuid;
     use v_model::{
         ApiKey, NewApiKey, UserId,
-        permissions::{Caller, Permissions},
+        permissions::{Caller, Permissions, Principal},
         storage::MockApiKeyStore,
     };
 
@@ -857,7 +859,7 @@ mod tests {
 
     fn make_caller(id: TypedUuid<UserId>, permissions: Vec<VPermission>) -> Caller<VPermission> {
         Caller {
-            id,
+            principal: Principal::User(id),
             permissions: permissions.into(),
             extensions: HashMap::default(),
         }

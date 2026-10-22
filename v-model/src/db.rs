@@ -16,7 +16,7 @@ use crate::{
         api_user_provider, link_request, login_attempt, magic_link_attempt, magic_link_client,
         magic_link_client_redirect_uri, magic_link_client_secret, mapper, mapper_event,
         oauth_client, oauth_client_assertion, oauth_client_key, oauth_client_redirect_uri,
-        oauth_client_secret,
+        oauth_client_secret, service_account, service_account_token,
     },
     schema_ext::MapperSource,
     schema_ext::{LoginAttemptState, MagicLinkAttemptState},
@@ -114,7 +114,27 @@ pub struct OAuthClientModel {
     pub id: Uuid,
     pub created_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
-    pub api_user_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
+#[diesel(table_name = service_account)]
+pub struct ServiceAccountModel<T> {
+    pub id: Uuid,
+    pub permissions: Permissions<T>,
+    pub generation: i64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
+#[diesel(table_name = service_account_token)]
+pub struct ServiceAccountTokenModel {
+    pub id: Uuid,
+    pub oauth_client_id: Uuid,
+    pub expires_at: DateTime<Utc>,
+    pub revoked_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]

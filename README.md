@@ -76,11 +76,19 @@ The following endpoints are injected by the `inject_endpoints` macro:
 | DELETE | /oauth/client/{client_id}/secret/{secret_id} | Delete an existing secret from an OAuth client |
 | POST | /oauth/client/{client_id}/redirect_uri | Add a redirect URI to an OAuth cleint |
 | DELETE | /oauth/client/{client_id}/redirect_uri/{redirect_uri_id} | Delete an existing redirect URI from an OAuth client |
+| GET | /oauth/client/{client_id}/service-account/permission | View the permissions an OAuth client holds as a service account |
+| POST | /oauth/client/{client_id}/service-account/permission | Grant a single permission to an OAuth client's service account |
+| DELETE | /oauth/client/{client_id}/service-account/permission | Remove a single permission from an OAuth client's service account |
+| GET | /oauth/client/{client_id}/service-account/token | View the unexpired, unrevoked tokens issued to an OAuth client's service account |
+| DELETE | /oauth/client/{client_id}/service-account/token/{token_id} | Revoke a token issued to an OAuth client's service account |
+| POST | /oauth/client/{client_id}/service-account/key | Register an Ed25519 public key that an OAuth client's assertions are verified with |
+| DELETE | /oauth/client/{client_id}/service-account/key/{key_id} | Remove a public key from an OAuth client |
 | GET | /login/oauth/{provider}/code/authorize | Start an OAuth authorization_code flow |
 | GET | /login/oauth/{provider}/code/callback | Internal url for handling return calls from external OAuth providers |
 | POST | /login/oauth/{provider}/code/token | Complete an authorization_code flow by exchanging an authorization code for an access token |
 | GET | /login/oauth/{provider}/device | Start an OAuth device_code flow |
 | POST | /login/oauth/{provider}/device/exchange | Complete a device_code flow by exchanging a request for an access token |
+| POST | /oauth/token | Issue an access token to an OAuth client's service account through a client_credentials grant authenticated with a `private_key_jwt` assertion |
 | GET | /.well-known/openid-configuration | Retrive OpenID configuartion information. Specifically the jwks url |
 | GET | /.well-known/jwks.json | Retrieve JWKS for verifying access tokens |
 | GET | /self | View information about the calling user |

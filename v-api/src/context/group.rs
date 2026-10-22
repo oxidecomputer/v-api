@@ -251,7 +251,7 @@ mod tests {
     use uuid::Uuid;
     use v_model::{
         AccessGroup, AccessGroupSource, NewAccessGroup,
-        permissions::{Caller, Permissions},
+        permissions::{Caller, Permissions, Principal},
         storage::{AccessGroupFilter, MockAccessGroupStore},
     };
 
@@ -305,7 +305,7 @@ mod tests {
 
     fn admin_caller() -> Caller<VPermission> {
         Caller {
-            id: TypedUuid::new_v4(),
+            principal: Principal::User(TypedUuid::new_v4()),
             permissions: vec![
                 VPermission::GetGroupsAll,
                 VPermission::CreateGroup,
@@ -447,7 +447,7 @@ mod tests {
 
     fn caller_with(permissions: Vec<VPermission>) -> Caller<VPermission> {
         Caller {
-            id: TypedUuid::new_v4(),
+            principal: Principal::User(TypedUuid::new_v4()),
             permissions: permissions.into(),
             extensions: Default::default(),
         }

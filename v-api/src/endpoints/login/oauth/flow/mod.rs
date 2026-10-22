@@ -2,8 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use dropshot::{HttpError, HttpResponseOk};
-use oauth2::StandardRevocableToken;
+use dropshot::{HttpCodedResponse, HttpError, HttpResponseHeaders, HttpResponseOk};
+use http::{
+    HeaderMap, HeaderValue,
+    header::{CACHE_CONTROL, PRAGMA},
+};
+use oauth2::{
+    ClientId, ClientSecret, EndpointNotSet, EndpointSet, RevocationUrl, StandardRevocableToken,
+    basic::BasicClient,
+};
 use secrecy::{ExposeSecret, SecretString};
 use v_model::{LoginAttempt, permissions::PermissionStorage};
 
@@ -13,17 +20,56 @@ use crate::{
     endpoints::login::UserInfo,
     permissions::{VAppPermission, VPermission},
 };
+use error::{OAuthErrorCode, OAuthErrorResponse};
 
+pub mod client_credentials;
 pub mod code;
 pub mod device_token;
+pub mod error;
 
 pub use code::OAuthAuthzCodeExchangeResponse;
 
+/// The grant type recorded on login attempts that run through the device flow (RFC 8628 §3.4)
+pub(crate) const DEVICE_CODE_GRANT_TYPE: &str = "urn:ietf:params:oauth:grant-type:device_code";
+
+/// The scope a client requested, once it has been checked to parse. An absent or empty scope
+/// means no permissions, and the special scope "full" asks for every permission the principal
+/// holds.
+pub(crate) fn requested_scope<T>(scope: Option<&str>) -> Result<String, OAuthErrorResponse>
+where
+    T: VAppPermission,
+{
+    let scope = scope.unwrap_or_default();
+    match T::from_scope_arg(scope) {
+        Ok(_) => Ok(scope.to_string()),
+        Err(err) => {
+            tracing::warn!(?err, ?scope, "Client requested an invalid scope");
+            Err(OAuthErrorResponse::new(
+                OAuthErrorCode::InvalidScope,
+                Some(format!("Invalid scope: {scope}").as_str()),
+            ))
+        }
+    }
+}
+
+/// Marks a response that carries an access token as one that must never be cached. Required by
+/// RFC 6749 §5.1
+pub(crate) fn mark_uncacheable(headers: &mut HeaderMap) {
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(PRAGMA, HeaderValue::from_static("no-cache"));
+}
+
+/// Wraps a token response body in the headers RFC 6749 §5.1 requires of it
+pub(crate) fn token_response<T>(body: T) -> HttpResponseHeaders<T>
+where
+    T: HttpCodedResponse,
+{
+    let mut response = HttpResponseHeaders::new_unnamed(body);
+    mark_uncacheable(response.headers_mut());
+    response
+}
+
 /// Tokens issued by the upstream identity provider during a code exchange.
-///
-/// These are held separately from [`UserInfo`] so that the caller can decide,
-/// after the permission check has run, whether to hand them back to the client
-/// or revoke them.
 #[derive(Default)]
 pub(crate) struct UpstreamTokens {
     pub access_token: Option<SecretString>,
@@ -60,7 +106,7 @@ where
     // a token at all. Refresh tokens are long lived, so it is important that we do not
     // simply drop one that we requested but are not handing back.
     if !provide_idp_token {
-        revoke_upstream_tokens(provider, &upstream).await;
+        revoke_upstream_tokens(provider, attempt, &upstream).await;
     }
 
     tracing::info!(api_user_id = ?api_user_info.user.id, "Retrieved api user to generate access token for");
@@ -77,6 +123,7 @@ where
             &ctx.builtin_registration_user(),
             &api_user_info.user.id,
             &api_user_provider.id,
+            attempt.client_id.to_string(),
             scope,
         )
         .await?;
@@ -142,16 +189,66 @@ where
     }
 }
 
+/// An upstream client that can only revoke tokens
+type RevocationClient =
+    BasicClient<EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet, EndpointNotSet>;
+
+/// Builds the client that revocations for a login attempt are sent as.
+fn revocation_client(
+    provider: &dyn OAuthProvider,
+    attempt: &LoginAttempt,
+) -> Option<RevocationClient> {
+    let (client_id, client_secret, endpoint) = if attempt.grant_type == DEVICE_CODE_GRANT_TYPE {
+        let remote = &provider.device_code_flow_info()?.remote;
+        (
+            &remote.client_id,
+            &remote.client_secret,
+            remote.revocation_endpoint.as_ref()?,
+        )
+    } else {
+        let remote = &provider.authz_code_flow_info()?.remote;
+        (
+            &remote.client_id,
+            &remote.client_secret,
+            remote.revocation_endpoint.as_ref()?,
+        )
+    };
+
+    let revocation_url = RevocationUrl::new(endpoint.clone())
+        .inspect_err(|err| tracing::warn!(?err, "Provider revocation endpoint is not a valid URL"))
+        .ok()?;
+
+    Some(
+        BasicClient::new(ClientId::new(client_id.clone()))
+            .set_client_secret(ClientSecret::new(
+                client_secret.0.expose_secret().to_string(),
+            ))
+            .set_revocation_url(revocation_url),
+    )
+}
+
 /// Revoke every upstream IdP token that will not be handed back to the caller.
 ///
-/// The refresh token is revoked first because, per RFC 7009 §2.1, revoking a
-/// refresh token also invalidates the access tokens issued under the same
-/// grant. The access token is revoked afterwards for providers that do not
-/// cascade.
-async fn revoke_upstream_tokens(provider: &dyn OAuthProvider, upstream: &UpstreamTokens) {
+/// Per RFC 7009 §2.1, revoking a refresh token invalidates the access tokens
+/// issued under the same grant. We revoke the access tokens as well in the
+/// event the provider fails to cascade.
+pub(crate) async fn revoke_upstream_tokens(
+    provider: &dyn OAuthProvider,
+    attempt: &LoginAttempt,
+    upstream: &UpstreamTokens,
+) {
+    let client = match revocation_client(provider, attempt) {
+        Some(client) => client,
+        None => {
+            tracing::debug!("Provider does not support token revocation");
+            return;
+        }
+    };
+
     if let Some(refresh_token) = &upstream.refresh_token {
         revoke_upstream_token(
             provider,
+            &client,
             oauth2::RefreshToken::new(refresh_token.expose_secret().to_string()).into(),
         )
         .await;
@@ -160,47 +257,61 @@ async fn revoke_upstream_tokens(provider: &dyn OAuthProvider, upstream: &Upstrea
     if let Some(access_token) = &upstream.access_token {
         revoke_upstream_token(
             provider,
+            &client,
             oauth2::AccessToken::new(access_token.expose_secret().to_string()).into(),
         )
         .await;
     }
 }
 
-/// Revoke a single upstream IdP token if the provider supports revocation.
-/// Failures are logged but do not propagate — callers should not fail the
-/// overall exchange just because revocation was unsuccessful.
-async fn revoke_upstream_token(provider: &dyn OAuthProvider, token: StandardRevocableToken) {
-    let provider_info = match provider.authz_code_flow_info() {
-        Some(info) => info,
-        None => return,
-    };
-
-    if provider_info.remote.revocation_endpoint.is_some() {
-        let client = match provider.as_web_client() {
-            Ok(c) => c,
-            Err(err) => {
-                tracing::warn!(
-                    ?err,
-                    "Failed to build web client for upstream token revocation"
-                );
-                return;
-            }
-        };
-        let oauth_client: oauth2_reqwest::ReqwestClient = provider.client().clone().into();
-        match client.revoke_token(token) {
-            Ok(req) => {
-                if let Err(err) = req.request_async(&oauth_client).await {
-                    tracing::warn!(?err, "Failed to revoke upstream IdP token");
-                }
-            }
-            Err(err) => {
-                tracing::warn!(
-                    ?err,
-                    "Failed to build revocation request for upstream token"
-                );
+/// Revoke a single upstream IdP token. Failures are logged but do not propagate, since the
+/// overall exchange should not fail just because revocation was unsuccessful.
+async fn revoke_upstream_token(
+    provider: &dyn OAuthProvider,
+    client: &RevocationClient,
+    token: StandardRevocableToken,
+) {
+    let oauth_client: oauth2_reqwest::ReqwestClient = provider.client().clone().into();
+    match client.revoke_token(token) {
+        Ok(req) => {
+            if let Err(err) = req.request_async(&oauth_client).await {
+                tracing::warn!(?err, "Failed to revoke upstream IdP token");
             }
         }
-    } else {
-        tracing::debug!("Provider does not support token revocation")
+        Err(err) => {
+            tracing::warn!(
+                ?err,
+                "Failed to build revocation request for upstream token"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use dropshot::{HttpResponse, HttpResponseOk};
+    use http::header::{CACHE_CONTROL, PRAGMA};
+
+    use super::token_response;
+
+    /// Every token response forbids caching, as RFC 6749 §5.1 requires
+    #[test]
+    fn token_responses_are_never_cached() {
+        let response = token_response(HttpResponseOk(())).to_result().unwrap();
+
+        assert_eq!(
+            Some("no-store"),
+            response
+                .headers()
+                .get(CACHE_CONTROL)
+                .and_then(|value| value.to_str().ok())
+        );
+        assert_eq!(
+            Some("no-cache"),
+            response
+                .headers()
+                .get(PRAGMA)
+                .and_then(|value| value.to_str().ok())
+        );
     }
 }

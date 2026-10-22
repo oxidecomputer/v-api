@@ -8,12 +8,13 @@ mod macros {
     macro_rules! v_system_endpoints {
         ($context_type:ident, $permission_type:ident) => {
             use dropshot::{
-                endpoint, HttpError, HttpResponseCreated, HttpResponseOk,
+                endpoint, HttpError, HttpResponseCreated, HttpResponseHeaders, HttpResponseOk,
                 HttpResponseTemporaryRedirect, HttpResponseUpdatedNoContent, Path, Query,
                 RequestContext, TypedBody, Body,
             };
             use http::Response;
-            use v_model::{Mapper, ApiUserContactEmail, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret, AccessGroup, ApiUser, MagicLink, MagicLinkRedirectUri, MagicLinkSecret};
+            use v_api::authn::client_key::SubmittedJwk;
+            use v_model::{Mapper, ApiUserContactEmail, OAuthClient, OAuthClientKey, OAuthClientRedirectUri, OAuthClientSecret, AccessGroup, ApiUser, MagicLink, MagicLinkRedirectUri, MagicLinkSecret};
 
             use v_api::endpoints::{
                 api_user::{
@@ -62,13 +63,24 @@ mod macros {
                     },
                     oauth::{
                         client::{
-                            create_oauth_client_op, create_oauth_client_redirect_uri_op,
-                            create_oauth_client_secret_op, delete_oauth_client_redirect_uri_op,
-                            delete_oauth_client_secret_op, get_oauth_client_op, list_oauth_clients_op,
+                            add_oauth_client_key_op, add_oauth_client_permission_op,
+                            get_oauth_client_permissions_op, remove_oauth_client_permission_op,
+                            list_service_account_tokens_op, ListServiceAccountTokensPath,
+                            revoke_service_account_token_op, RevokeServiceAccountTokenPath,
+                            OAuthClientPermissionParams, OAuthClientPermissionPath,
+                            create_oauth_client_op,
+                            create_oauth_client_redirect_uri_op, create_oauth_client_secret_op,
+                            delete_oauth_client_key_op, delete_oauth_client_redirect_uri_op,
+                            delete_oauth_client_secret_op,
+                            get_oauth_client_op, list_oauth_clients_op, AddOAuthClientKeyPath,
                             AddOAuthClientRedirectBody, AddOAuthClientRedirectPath,
-                            AddOAuthClientSecretPath, DeleteOAuthClientRedirectPath,
-                            DeleteOAuthClientSecretPath, GetOAuthClientPath,
-                            InitialOAuthClientSecretResponse,
+                            AddOAuthClientSecretPath, DeleteOAuthClientKeyPath,
+                            DeleteOAuthClientRedirectPath, DeleteOAuthClientSecretPath,
+                            GetOAuthClientPath, InitialOAuthClientSecretResponse,
+                        },
+                        flow::client_credentials::{
+                            client_credentials_token_op, ClientCredentialsTokenBody,
+                            ClientCredentialsTokenResponse,
                         },
                         flow::code::{
                             authz_code_callback_op, authz_code_exchange_op, authz_code_redirect_op,
@@ -176,6 +188,94 @@ mod macros {
                 delete_oauth_client_redirect_uri_op(&rqctx, path).await
             }
 
+            /// List the permissions an OAuth client's service account has
+            #[endpoint {
+                method = GET,
+                path = "/oauth/client/{client_id}/service-account/permission"
+            }]
+            pub async fn get_oauth_client_permissions(
+                rqctx: RequestContext<$context_type>,
+                path: Path<OAuthClientPermissionPath>,
+            ) -> Result<HttpResponseOk<v_model::Permissions<$permission_type>>, HttpError> {
+                get_oauth_client_permissions_op(&rqctx, path).await
+            }
+
+            /// Grant a permission to an OAuth client's service account
+            #[endpoint {
+                method = POST,
+                path = "/oauth/client/{client_id}/service-account/permission"
+            }]
+            pub async fn add_oauth_client_permission(
+                rqctx: RequestContext<$context_type>,
+                path: Path<OAuthClientPermissionPath>,
+                body: TypedBody<OAuthClientPermissionParams<$permission_type>>,
+            ) -> Result<HttpResponseOk<v_model::Permissions<$permission_type>>, HttpError> {
+                add_oauth_client_permission_op(&rqctx, path, body.into_inner()).await
+            }
+
+            /// Remove a permission from an OAuth client's service account
+            #[endpoint {
+                method = DELETE,
+                path = "/oauth/client/{client_id}/service-account/permission"
+            }]
+            pub async fn remove_oauth_client_permission(
+                rqctx: RequestContext<$context_type>,
+                path: Path<OAuthClientPermissionPath>,
+                body: TypedBody<OAuthClientPermissionParams<$permission_type>>,
+            ) -> Result<HttpResponseOk<v_model::Permissions<$permission_type>>, HttpError> {
+                remove_oauth_client_permission_op(&rqctx, path, body.into_inner()).await
+            }
+
+            /// List the service account tokens issued to an OAuth client that have neither
+            /// expired nor been revoked
+            #[endpoint {
+                method = GET,
+                path = "/oauth/client/{client_id}/service-account/token"
+            }]
+            pub async fn list_service_account_tokens(
+                rqctx: RequestContext<$context_type>,
+                path: Path<ListServiceAccountTokensPath>,
+            ) -> Result<HttpResponseOk<Vec<v_model::ServiceAccountToken>>, HttpError> {
+                list_service_account_tokens_op(&rqctx, path).await
+            }
+
+            /// Revoke one of the service account tokens issued to an OAuth client
+            #[endpoint {
+                method = DELETE,
+                path = "/oauth/client/{client_id}/service-account/token/{token_id}"
+            }]
+            pub async fn revoke_service_account_token(
+                rqctx: RequestContext<$context_type>,
+                path: Path<RevokeServiceAccountTokenPath>,
+            ) -> Result<HttpResponseOk<v_model::ServiceAccountToken>, HttpError> {
+                revoke_service_account_token_op(&rqctx, path).await
+            }
+
+            /// Register a public key for an OAuth client's client credential authentication
+            #[endpoint {
+                method = POST,
+                path = "/oauth/client/{client_id}/service-account/key"
+            }]
+            pub async fn add_oauth_client_key(
+                rqctx: RequestContext<$context_type>,
+                path: Path<AddOAuthClientKeyPath>,
+                body: TypedBody<SubmittedJwk>,
+            ) -> Result<HttpResponseOk<OAuthClientKey>, HttpError> {
+                add_oauth_client_key_op(&rqctx, path, body).await
+            }
+
+            /// Remove a public key from an OAuth client
+            #[endpoint {
+                method = DELETE,
+                path = "/oauth/client/{client_id}/service-account/key/{key_id}"
+            }]
+            pub async fn delete_oauth_client_key(
+                rqctx: RequestContext<$context_type>,
+                path: Path<DeleteOAuthClientKeyPath>,
+            ) -> Result<HttpResponseOk<OAuthClientKey>, HttpError> {
+                delete_oauth_client_key_op(&rqctx, path).await
+            }
+
             // MAGIC LINK CLIENT
 
             /// List Magic Link clients
@@ -274,7 +374,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<OAuthProviderNameParam>,
                 query: Query<OAuthAuthzCodeQuery>,
-            ) -> Result<HttpResponseTemporaryRedirect, HttpError> {
+            ) -> Result<HttpResponseTemporaryRedirect, v_api::endpoints::login::oauth::flow::error::OAuthErrorResponse> {
                 authz_code_redirect_op(&rqctx, path, query).await
             }
 
@@ -302,7 +402,7 @@ mod macros {
                 query: Query<OAuthAuthzCodeExchangeQuery>,
                 path: Path<OAuthProviderNameParam>,
                 body: TypedBody<OAuthAuthzCodeExchangeBody>,
-            ) -> Result<HttpResponseOk<OAuthAuthzCodeExchangeResponse>, HttpError> {
+            ) -> Result<HttpResponseHeaders<HttpResponseOk<OAuthAuthzCodeExchangeResponse>>, v_api::endpoints::login::oauth::flow::error::OAuthErrorResponse> {
                 authz_code_exchange_op(&rqctx, query, path, body).await
             }
 
@@ -345,7 +445,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<OAuthProviderNameParam>,
                 body: TypedBody<DeviceAuthorizationRequest>,
-            ) -> Result<Response<Body>, HttpError> {
+            ) -> Result<Response<Body>, v_api::endpoints::login::oauth::flow::error::OAuthErrorResponse> {
                 device_authz_op(&rqctx, path, body).await
             }
 
@@ -360,8 +460,23 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 path: Path<OAuthProviderNameParam>,
                 body: TypedBody<DeviceTokenExchangeRequest>,
-            ) -> Result<Response<Body>, HttpError> {
+            ) -> Result<Response<Body>, v_api::endpoints::login::oauth::flow::error::OAuthErrorResponse> {
                 exchange_device_token_op(&rqctx, path, body).await
+            }
+
+            // CLIENT CREDENTIALS
+
+            /// Issue an access token to an OAuth client for authenticating as a service account
+            #[endpoint {
+                method = POST,
+                path = "/oauth/token",
+                content_type = "application/x-www-form-urlencoded",
+            }]
+            pub async fn client_credentials_token(
+                rqctx: RequestContext<$context_type>,
+                body: TypedBody<ClientCredentialsTokenBody>,
+            ) -> Result<HttpResponseHeaders<HttpResponseOk<ClientCredentialsTokenResponse>>, v_api::endpoints::login::oauth::flow::error::OAuthErrorResponse> {
+                client_credentials_token_op(&rqctx, body).await
             }
 
             // MAGIC LINK
@@ -388,7 +503,7 @@ mod macros {
                 rqctx: RequestContext<$context_type>,
                 _path: Path<MagicLinkPath>,
                 body: TypedBody<MagicLinkExchangeRequest>,
-            ) -> Result<HttpResponseOk<MagicLinkExchangeResponse>, HttpError> {
+            ) -> Result<HttpResponseHeaders<HttpResponseOk<MagicLinkExchangeResponse>>, HttpError> {
               magic_link_exchange_op(&rqctx, body).await
             }
 
@@ -798,6 +913,20 @@ mod macros {
                 .expect("Failed to register endpoint");
             $api.register(delete_oauth_client_redirect_uri)
                 .expect("Failed to register endpoint");
+            $api.register(get_oauth_client_permissions)
+                .expect("Failed to register endpoint");
+            $api.register(add_oauth_client_permission)
+                .expect("Failed to register endpoint");
+            $api.register(remove_oauth_client_permission)
+                .expect("Failed to register endpoint");
+            $api.register(list_service_account_tokens)
+                .expect("Failed to register endpoint");
+            $api.register(revoke_service_account_token)
+                .expect("Failed to register endpoint");
+            $api.register(add_oauth_client_key)
+                .expect("Failed to register endpoint");
+            $api.register(delete_oauth_client_key)
+                .expect("Failed to register endpoint");
 
             // OAuth Authorization Login
             $api.register(authz_code_redirect)
@@ -815,6 +944,10 @@ mod macros {
             $api.register(device_authz)
                 .expect("Failed to register endpoint");
             $api.register(exchange_device_token)
+                .expect("Failed to register endpoint");
+
+            // Client Credentials
+            $api.register(client_credentials_token)
                 .expect("Failed to register endpoint");
 
             // Magic Link Client Management

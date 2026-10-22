@@ -8,7 +8,7 @@ use db::{
     ApiUserProviderModel, LinkRequestModel, LoginAttemptModel, MagicLinkAttemptModel,
     MagicLinkModel, MagicLinkRedirectUriModel, MagicLinkSecretModel, MapperEventModel, MapperModel,
     OAuthClientAssertionModel, OAuthClientKeyModel, OAuthClientModel, OAuthClientRedirectUriModel,
-    OAuthClientSecretModel,
+    OAuthClientSecretModel, ServiceAccountModel, ServiceAccountTokenModel,
 };
 use jwk::PublicJwk;
 use newtype_uuid::{GenericUuid, TypedUuid, TypedUuidKind, TypedUuidTag};
@@ -378,7 +378,7 @@ impl From<LoginAttemptModel> for LoginAttempt {
             pkce_challenge_method: value.pkce_challenge_method,
             authz_code: value.authz_code,
             expires_at: value.expires_at,
-            error: None,
+            error: value.error,
             provider: value.provider,
             provider_pkce_verifier: value.provider_pkce_verifier,
             provider_authz_code: value.provider_authz_code,
@@ -407,8 +407,6 @@ impl TypedUuidKind for OAuthClientId {
 pub struct OAuthClient {
     pub id: TypedUuid<OAuthClientId>,
     #[partial(NewOAuthClient(skip))]
-    pub api_user_id: Option<TypedUuid<UserId>>,
-    #[partial(NewOAuthClient(skip))]
     pub secrets: Vec<OAuthClientSecret>,
     #[partial(NewOAuthClient(skip))]
     pub redirect_uris: Vec<OAuthClientRedirectUri>,
@@ -429,7 +427,6 @@ impl OAuthClient {
     ) -> Self {
         OAuthClient {
             id: TypedUuid::from_untyped_uuid(client.id),
-            api_user_id: client.api_user_id.map(TypedUuid::from_untyped_uuid),
             secrets,
             redirect_uris,
             keys,
@@ -442,6 +439,77 @@ impl OAuthClient {
 impl From<OAuthClientModel> for OAuthClient {
     fn from(value: OAuthClientModel) -> Self {
         OAuthClient::new(value, vec![], vec![], vec![])
+    }
+}
+
+/// The permissions an OAuth client holds when it acts as a service account through client
+/// credentials. The id is the id of the client.
+///
+/// A service account holds permissions directly. It belongs to no groups, and permissions that are
+/// relative to whoever holds them do not apply to it.
+#[partial(NewServiceAccount)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ServiceAccount<T> {
+    pub id: TypedUuid<OAuthClientId>,
+    pub permissions: Permissions<T>,
+    #[partial(NewServiceAccount(skip))]
+    pub created_at: DateTime<Utc>,
+    #[partial(NewServiceAccount(skip))]
+    pub updated_at: DateTime<Utc>,
+    /// Incremented by every write to the stored record. A change is only written when this still
+    /// matches the value that was read, so concurrent changes can not overwrite each other. It is
+    /// internal to storage and is not part of the API.
+    #[partial(NewServiceAccount(skip))]
+    #[serde(skip)]
+    pub generation: i64,
+}
+
+impl<T> From<ServiceAccountModel<T>> for ServiceAccount<T> {
+    fn from(value: ServiceAccountModel<T>) -> Self {
+        ServiceAccount {
+            id: TypedUuid::from_untyped_uuid(value.id),
+            permissions: value.permissions,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+            generation: value.generation,
+        }
+    }
+}
+
+#[derive(JsonSchema)]
+pub enum ServiceAccountTokenId {}
+impl TypedUuidKind for ServiceAccountTokenId {
+    fn tag() -> TypedUuidTag {
+        const TAG: TypedUuidTag = TypedUuidTag::new("service-account-token");
+        TAG
+    }
+}
+
+/// An access token issued to an OAuth client acting as a service account
+#[partial(NewServiceAccountToken)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ServiceAccountToken {
+    pub id: TypedUuid<ServiceAccountTokenId>,
+    pub oauth_client_id: TypedUuid<OAuthClientId>,
+    pub expires_at: DateTime<Utc>,
+    #[partial(NewServiceAccountToken(skip))]
+    pub revoked_at: Option<DateTime<Utc>>,
+    #[partial(NewServiceAccountToken(skip))]
+    pub created_at: DateTime<Utc>,
+    #[partial(NewServiceAccountToken(skip))]
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<ServiceAccountTokenModel> for ServiceAccountToken {
+    fn from(value: ServiceAccountTokenModel) -> Self {
+        ServiceAccountToken {
+            id: TypedUuid::from_untyped_uuid(value.id),
+            oauth_client_id: TypedUuid::from_untyped_uuid(value.oauth_client_id),
+            expires_at: value.expires_at,
+            revoked_at: value.revoked_at,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
     }
 }
 
@@ -525,8 +593,7 @@ impl TypedUuidKind for OAuthClientKeyId {
 pub struct OAuthClientKey {
     pub id: TypedUuid<OAuthClientKeyId>,
     pub oauth_client_id: TypedUuid<OAuthClientId>,
-    /// The RFC 7638 thumbprint of the key, which also serves as its `kid`. Unique across all
-    /// clients.
+    /// The RFC 7638 §3 thumbprint of the key. Unique across all clients.
     pub thumbprint: String,
     pub jwk: PublicJwk,
     #[partial(NewOAuthClientKey(skip))]

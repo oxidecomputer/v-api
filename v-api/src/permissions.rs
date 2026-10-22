@@ -26,7 +26,7 @@ pub enum VPermission {}
 #[cfg(test)]
 mod tests {
     use newtype_uuid::TypedUuid;
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeSet, HashSet};
     use v_model::permissions::{PermissionStorage, Permissions};
 
     use super::VPermission;
@@ -108,5 +108,42 @@ mod tests {
         let remaining = VPermission::contract(&stored.without(&VPermission::GetApiUserSelf));
         assert!(!remaining.iter().any(|p| p == &VPermission::GetApiUserSelf));
         assert!(remaining.iter().any(|p| p == &VPermission::GetGroupsJoined));
+    }
+
+    /// Without an actor the permissions that need one resolve to nothing, while value sets and
+    /// aliases of the given permissions still resolve
+    #[test]
+    fn expanding_without_an_actor() {
+        let client = TypedUuid::new_v4();
+        let group = TypedUuid::new_v4();
+        let held: Permissions<VPermission> = vec![
+            VPermission::GetApiUserSelf,
+            VPermission::GetGroupsJoined,
+            VPermission::ManageGroups(BTreeSet::from([group])),
+            VPermission::GetOAuthClientsAssigned,
+            VPermission::GetOAuthClient(client),
+        ]
+        .into();
+
+        let expanded = VPermission::expand(&held, None, Some(&held), &Default::default());
+
+        assert_eq!(
+            HashSet::from([
+                VPermission::ManageGroup(group),
+                VPermission::GetOAuthClient(client),
+            ]),
+            expanded.into_iter().collect::<HashSet<_>>()
+        );
+    }
+
+    /// A permission over one specific group is stored as it was granted. It is never widened
+    /// into the permission over every group the holder has joined.
+    #[test]
+    fn a_single_group_grant_is_kept_as_written() {
+        let group = TypedUuid::new_v4();
+        let stored = VPermission::contract(&vec![VPermission::GetGroup(group)].into());
+
+        assert!(stored.can(&VPermission::GetGroup(group)));
+        assert!(!stored.iter().any(|p| p == &VPermission::GetGroupsJoined));
     }
 }

@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "kty")]
 #[non_exhaustive]
 pub enum PublicJwk {
-    /// An Octet Key Pair key as defined by RFC 8037
+    /// An Octet Key Pair key as defined by RFC 8037 §2
     #[serde(rename = "OKP")]
     Okp(OkpPublicKey),
 }
@@ -46,8 +46,8 @@ pub enum OkpPublicKey {
     },
 }
 
-/// RFC 7515: Encodes fixed size key material as unpadded base64url.
-mod base64url_bytes {
+/// Encodes fixed size key material as unpadded base64url, as defined by RFC 7515 §2.
+pub mod base64url_bytes {
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
 

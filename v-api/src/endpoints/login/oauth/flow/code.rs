@@ -6,7 +6,7 @@ use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use chrono::{TimeDelta, Utc};
 use cookie::{Cookie, SameSite};
 use dropshot::{
-    ClientErrorStatusCode, HttpError, HttpResponseOk, HttpResponseTemporaryRedirect, Path, Query,
+    HttpError, HttpResponseHeaders, HttpResponseOk, HttpResponseTemporaryRedirect, Path, Query,
     RequestContext, RequestInfo, SharedExtractor, TypedBody, http_response_temporary_redirect,
 };
 use dropshot_authorization_header::basic::BasicAuth;
@@ -30,7 +30,8 @@ use v_model::{
 };
 
 use super::super::{OAuthProvider, OAuthProviderNameParam};
-use super::UpstreamTokens;
+use super::error::{OAuthErrorCode, OAuthErrorResponse};
+use super::{UpstreamTokens, requested_scope, token_response};
 use crate::endpoints::login::UserInfoProvider;
 use crate::{
     authn::key::RawKey,
@@ -102,57 +103,6 @@ fn login_attempt_clear_cookies(public_url: &str) -> Result<Vec<HeaderValue>, Htt
         .collect()
 }
 
-// RFC 6749 §5.2 shaped error
-#[derive(Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq)]
-struct OAuthError {
-    error: OAuthErrorCode,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error_description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error_uri: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    state: Option<String>,
-}
-
-impl OAuthError {
-    pub fn new(error: OAuthErrorCode, error_description: Option<&str>) -> Self {
-        Self {
-            error,
-            error_description: error_description.map(|s| s.to_string()),
-            error_uri: None,
-            state: None,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-enum OAuthErrorCode {
-    AccessDenied,
-    InvalidClient,
-    InvalidGrant,
-    InvalidRequest,
-    InvalidScope,
-    ServerError,
-    TemporarilyUnavailable,
-    UnauthorizedClient,
-    UnsupportedGrantType,
-    UnsupportedResponseType,
-}
-
-impl From<OAuthError> for HttpError {
-    fn from(value: OAuthError) -> Self {
-        let serialized = serde_json::to_string(&value).unwrap();
-        HttpError {
-            headers: None,
-            status_code: ClientErrorStatusCode::BAD_REQUEST.into(),
-            error_code: None,
-            external_message: serialized.clone(),
-            internal_message: serialized,
-        }
-    }
-}
-
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
 pub struct OAuthAuthzCodeQuery {
     pub client_id: TypedUuid<OAuthClientId>,
@@ -160,7 +110,7 @@ pub struct OAuthAuthzCodeQuery {
     pub response_type: String,
     pub state: String,
     pub scope: Option<String>,
-    /// PKCE code challenge (RFC 7636). Required for all authorization code flows.
+    /// PKCE code challenge (RFC 7636 §4.2). Required for all authorization code flows.
     pub code_challenge: String,
     /// PKCE code challenge method. Must be "S256".
     pub code_challenge_method: String,
@@ -176,31 +126,77 @@ pub struct OAuthAuthzCodeRedirectHeaders {
 /// Validate the PKCE code challenge. For S256, this must be a base64url-no-pad
 /// encoding of a SHA256 hash, which is always exactly 43 characters of [A-Za-z0-9_-]
 /// (RFC 7636 §4.2).
-fn validate_code_challenge(code_challenge: &str) -> Result<(), OAuthError> {
+fn validate_code_challenge(code_challenge: &str) -> Result<&str, OAuthErrorResponse> {
     if !BASE64_URL_SAFE_NO_PAD
         .decode(code_challenge)
         .is_ok_and(|bytes| bytes.len() == 32)
     {
-        Err(OAuthError::new(
+        Err(OAuthErrorResponse::new(
             OAuthErrorCode::InvalidRequest,
             Some(
                 "Invalid code_challenge. Must be a base64url-encoded SHA256 hash (43 characters).",
             ),
         ))
     } else {
-        Ok(())
+        Ok(code_challenge)
+    }
+}
+
+/// Validate that the PKCE challenge method is S256. The plain method is never accepted.
+fn validate_code_challenge_method(method: &str) -> Result<&str, OAuthErrorResponse> {
+    if method == "S256" {
+        Ok(method)
+    } else {
+        Err(OAuthErrorResponse::new(
+            OAuthErrorCode::InvalidRequest,
+            Some("Unsupported code_challenge_method. Only S256 is supported."),
+        ))
     }
 }
 
 /// Validate that response_type is "code" per RFC 6749 §4.1.1.
-fn validate_response_type(response_type: &str) -> Result<(), OAuthError> {
+fn validate_response_type(response_type: &str) -> Result<(), OAuthErrorResponse> {
     if response_type == "code" {
         Ok(())
     } else {
-        Err(OAuthError::new(
+        Err(OAuthErrorResponse::new(
             OAuthErrorCode::UnsupportedResponseType,
             Some("Only response_type=code is supported"),
         ))
+    }
+}
+
+/// An authorization request that has passed every check that does not depend on stored state
+struct AuthorizationRequest {
+    redirect_uri: String,
+    state: String,
+    scope: String,
+    code_challenge: String,
+    code_challenge_method: String,
+}
+
+impl AuthorizationRequest {
+    /// Checks an authorization request. Only response_type=code is supported (RFC 6749 §4.1.1),
+    /// PKCE is required with the S256 method (RFC 7636 §4.2), and the scope must parse. An absent
+    /// scope means no permissions, and the special scope "full" asks for all of them.
+    fn parse<T>(query: OAuthAuthzCodeQuery) -> Result<Self, OAuthErrorResponse>
+    where
+        T: VAppPermission,
+    {
+        validate_response_type(&query.response_type).and_then(|()| {
+            let code_challenge_method =
+                validate_code_challenge_method(&query.code_challenge_method)?.to_string();
+            let code_challenge = validate_code_challenge(&query.code_challenge)?.to_string();
+            let scope = requested_scope::<T>(query.scope.as_deref())?;
+
+            Ok(Self {
+                redirect_uri: query.redirect_uri,
+                state: query.state,
+                scope,
+                code_challenge,
+                code_challenge_method,
+            })
+        })
     }
 }
 
@@ -210,7 +206,7 @@ async fn get_oauth_client<T>(
     ctx: &VContext<T>,
     client_id: &TypedUuid<OAuthClientId>,
     redirect_uri: &str,
-) -> Result<OAuthClient, OAuthError>
+) -> Result<OAuthClient, OAuthErrorResponse>
 where
     T: VAppPermission + PermissionStorage,
 {
@@ -222,19 +218,20 @@ where
             tracing::error!(?err, "Failed to lookup OAuth client");
 
             match err {
-                ResourceError::DoesNotExist => {
-                    OAuthError::new(OAuthErrorCode::InvalidClient, Some("Unknown client id"))
-                }
+                ResourceError::DoesNotExist => OAuthErrorResponse::new(
+                    OAuthErrorCode::InvalidClient,
+                    Some("Unknown client id"),
+                ),
                 // Given that the builtin caller should have access to all OAuth clients, any other
                 // error is considered an internal error
-                _ => OAuthError::new(OAuthErrorCode::ServerError, None),
+                _ => OAuthErrorResponse::new(OAuthErrorCode::ServerError, None),
             }
         })?;
 
     if client.is_redirect_uri_valid(redirect_uri) {
         Ok(client)
     } else {
-        Err(OAuthError::new(
+        Err(OAuthErrorResponse::new(
             OAuthErrorCode::InvalidRequest,
             Some("Invalid redirect uri"),
         ))
@@ -272,7 +269,7 @@ pub async fn authz_code_redirect_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<OAuthProviderNameParam>,
     query: Query<OAuthAuthzCodeQuery>,
-) -> Result<HttpResponseTemporaryRedirect, HttpError>
+) -> Result<HttpResponseTemporaryRedirect, OAuthErrorResponse>
 where
     T: VAppPermission + PermissionStorage,
 {
@@ -280,23 +277,11 @@ where
     let path = path.into_inner();
     let query = query.into_inner();
 
-    get_oauth_client(ctx, &query.client_id, &query.redirect_uri).await?;
+    let client = get_oauth_client(ctx, &query.client_id, &query.redirect_uri).await?;
 
-    tracing::debug!(?query.client_id, ?query.redirect_uri, "Verified client id and redirect uri");
+    tracing::debug!(?client.id, ?query.redirect_uri, "Verified client id and redirect uri");
 
-    // Validate response_type. Only "code" is supported (RFC 6749 §4.1.1).
-    validate_response_type(&query.response_type)?;
-
-    // Validate the client's PKCE challenge method. Only S256 is supported.
-    if query.code_challenge_method != "S256" {
-        Err(OAuthError::new(
-            OAuthErrorCode::InvalidRequest,
-            Some("Unsupported code_challenge_method. Only S256 is supported."),
-        ))?;
-    }
-
-    // Validate the PKCE code challenge (RFC 7636 §4.2).
-    validate_code_challenge(&query.code_challenge)?;
+    let request = AuthorizationRequest::parse::<T>(query)?;
 
     // Find the configured provider for the requested remote backend. We should always have a valid
     // provider value, so if this fails then a 500 is returned
@@ -307,24 +292,12 @@ where
 
     tracing::debug!(provider = ?provider.name(), "Acquired OAuth provider for authz code login");
 
-    // Check that the passed in scopes are valid. A None scope means no permissions.
-    // Use the special scope "full" to request all permissions.
-    if let Some(ref scope) = query.scope
-        && let Err(err) = T::from_scope_arg(scope)
-    {
-        tracing::warn!(?err, ?scope, "Client submitted an invalid scope");
-        Err(OAuthError::new(
-            OAuthErrorCode::InvalidScope,
-            Some(format!("Invalid scope: {}", scope).as_str()),
-        ))?;
-    }
-
     // Construct a new login attempt with the minimum required values
     let mut attempt = NewLoginAttempt::new(
         provider.name().to_string(),
-        query.client_id,
-        Some(query.redirect_uri),
-        query.scope.unwrap_or_default(),
+        client.id,
+        Some(request.redirect_uri),
+        request.scope,
         "authorization_code".to_string(),
     )
     .map_err(|err| {
@@ -339,12 +312,12 @@ where
     // Store the client's state value as-is. Per RFC 6749 §4.1.1, the authorization server
     // MUST return the state parameter unmodified. The value will be properly percent-encoded
     // when it is placed into the redirect URL by `callback_url()` via `append_pair`.
-    attempt.state = Some(query.state);
+    attempt.state = Some(request.state);
 
     // Always store the client's PKCE challenge so we can verify it during the token exchange.
     // This is the client-to-v-api PKCE leg and is mandatory for all flows.
-    attempt.pkce_challenge = Some(query.code_challenge);
-    attempt.pkce_challenge_method = Some(query.code_challenge_method);
+    attempt.pkce_challenge = Some(request.code_challenge);
+    attempt.pkce_challenge_method = Some(request.code_challenge_method);
 
     // If the remote provider supports PKCE, also set up a challenge for the v-api-to-remote leg.
     // This is independent of the client-to-v-api PKCE above.
@@ -365,12 +338,12 @@ where
 
     tracing::info!(?attempt.id, "Created login attempt");
 
-    oauth_redirect_response(
+    Ok(oauth_redirect_response(
         ctx.public_url(),
         &*provider,
         &attempt,
         remote_pkce_challenge,
-    )
+    )?)
 }
 
 fn oauth_redirect_response(
@@ -481,7 +454,9 @@ pub struct OAuthAuthzCodeReturnQuery {
     pub error: Option<String>,
 }
 
-#[instrument(skip(rqctx), err(Debug))]
+// The query carries the authorization code the upstream provider issued, which must not be
+// recorded in the request span
+#[instrument(skip(rqctx, query), err(Debug))]
 pub async fn authz_code_callback_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<OAuthProviderNameParam>,
@@ -645,7 +620,7 @@ pub struct OAuthAuthzCodeExchangeBody {
     pub redirect_uri: String,
     pub grant_type: String,
     pub code: String,
-    /// PKCE code verifier (RFC 7636). Required for all authorization code exchanges.
+    /// PKCE code verifier (RFC 7636 §4.1). Required for all authorization code exchanges.
     pub code_verifier: String,
 }
 
@@ -678,7 +653,7 @@ pub async fn authz_code_exchange_op<T>(
     query: Query<OAuthAuthzCodeExchangeQuery>,
     path: Path<OAuthProviderNameParam>,
     body: TypedBody<OAuthAuthzCodeExchangeBody>,
-) -> Result<HttpResponseOk<OAuthAuthzCodeExchangeResponse>, HttpError>
+) -> Result<HttpResponseHeaders<HttpResponseOk<OAuthAuthzCodeExchangeResponse>>, OAuthErrorResponse>
 where
     T: VAppPermission + PermissionStorage,
 {
@@ -739,7 +714,7 @@ where
             Some(OpenApiSecretString(SecretString::from(client_secret))),
         )),
         (None, (Some(client_id), Some(client_secret))) => Ok((client_id, Some(client_secret))),
-        (None, (Some(client_id), _)) if provider.authz_code_pkce_flow_info().is_some() => {
+        (None, (Some(client_id), _)) if is_public_client(&*provider, &client_id) => {
             Ok((client_id, None))
         }
         _ => Err(bad_request("Missing client credentials")),
@@ -747,8 +722,8 @@ where
 
     tracing::debug!("Attempting code exchange");
 
-    // Verify the submitted client credentials
-    authorize_code_exchange(
+    // Authenticate the client from the submitted credentials
+    let client = authorize_code_exchange(
         ctx,
         &*provider,
         &body.grant_type,
@@ -760,22 +735,23 @@ where
 
     tracing::debug!("Authorized code exchange");
 
-    // Lookup the request assigned to this code
-    let mut attempt = ctx
+    // Lookup the request assigned to this code, which must be valid and must match the client
+    // that authenticated
+    let attempt = ctx
         .login
         .get_login_attempt_for_code(&body.code, &provider.name().to_string())
         .await
         .map_err(to_internal_error)?
-        .ok_or(OAuthError::new(OAuthErrorCode::InvalidGrant, None))?;
-
-    // Verify that the login attempt is valid and matches the submitted client credentials
-    verify_login_attempt(
-        &attempt,
-        &provider.name().to_string(),
-        client_id,
-        &body.redirect_uri,
-        &body.code_verifier,
-    )?;
+        .ok_or(OAuthErrorResponse::new(OAuthErrorCode::InvalidGrant, None))
+        .and_then(|attempt| {
+            verify_login_attempt(
+                attempt,
+                &provider.name().to_string(),
+                client.id,
+                &body.redirect_uri,
+                &body.code_verifier,
+            )
+        })?;
 
     tracing::debug!("Verified login attempt");
 
@@ -784,7 +760,7 @@ where
     // ensuring that a concurrent request using the same authorization code will fail.
     // Per RFC 6749 §4.1.2, authorization codes MUST be single-use.
     let attempt_id = attempt.id;
-    attempt = ctx
+    let attempt = ctx
         .login
         .claim_login_attempt(attempt)
         .await
@@ -794,7 +770,7 @@ where
                 ?attempt_id,
                 "Failed to claim login attempt (may have been consumed by a concurrent request)"
             );
-            OAuthError::new(
+            OAuthErrorResponse::new(
                 OAuthErrorCode::InvalidGrant,
                 Some("Authorization code has already been used"),
             )
@@ -810,17 +786,24 @@ where
 
     tracing::debug!("Retrieved user information from remote provider");
 
-    super::complete_exchange(
-        ctx,
-        info,
-        &*provider,
-        &attempt,
-        query.request_idp_token,
-        upstream,
-    )
-    .await
+    Ok(token_response(
+        super::complete_exchange(
+            ctx,
+            info,
+            &*provider,
+            &attempt,
+            query.request_idp_token,
+            upstream,
+        )
+        .await?,
+    ))
 }
 
+/// The client a code exchange authenticates as.
+///
+/// The exchange must ask for the authorization code grant (RFC 6749 §4.1.3). A client secret that
+/// was provided must be valid. One may only be omitted by the public client the provider's PKCE
+/// flow is configured with.
 async fn authorize_code_exchange<T>(
     ctx: &VContext<T>,
     provider: &dyn OAuthProvider,
@@ -828,27 +811,22 @@ async fn authorize_code_exchange<T>(
     client_id: TypedUuid<OAuthClientId>,
     client_secret: Option<&SecretString>,
     redirect_uri: &str,
-) -> Result<(), OAuthError>
+) -> Result<OAuthClient, OAuthErrorResponse>
 where
     T: VAppPermission + PermissionStorage,
 {
     let client = get_oauth_client(ctx, &client_id, redirect_uri).await?;
 
-    // Verify that we received the expected grant type
     if grant_type != "authorization_code" {
-        Err(OAuthError::new(OAuthErrorCode::UnsupportedGrantType, None))?;
-    }
-
-    tracing::debug!(grant_type, "Verified grant type");
-
-    // If we were provided a client secret, then it must be verified. If a client secret was not
-    // provided, then we can skip this step as long as the provider supports pkce_only
-    // authentication.
-    if let Some(client_secret) = client_secret {
+        Err(OAuthErrorResponse::new(
+            OAuthErrorCode::UnsupportedGrantType,
+            None,
+        ))
+    } else if let Some(client_secret) = client_secret {
         let client_secret = RawKey::try_from(client_secret).map_err(|err| {
             tracing::warn!(?err, "Failed to parse OAuth client secret");
 
-            OAuthError::new(
+            OAuthErrorResponse::new(
                 OAuthErrorCode::InvalidRequest,
                 Some("Malformed client secret"),
             )
@@ -857,54 +835,65 @@ where
         tracing::debug!("Constructed client secret");
 
         if !client.is_secret_valid(&client_secret, ctx) {
-            Err(OAuthError::new(
+            Err(OAuthErrorResponse::new(
                 OAuthErrorCode::InvalidClient,
                 Some("Invalid client secret"),
             ))
         } else {
             tracing::debug!("Verified client secret validity");
 
-            Ok(())
+            Ok(client)
         }
-    } else if provider.authz_code_pkce_flow_info().is_some() {
-        Ok(())
+    } else if is_public_client(provider, &client.id) {
+        Ok(client)
     } else {
-        Err(OAuthError::new(
+        Err(OAuthErrorResponse::new(
             OAuthErrorCode::InvalidRequest,
             Some("Client secret required"),
         ))
     }
 }
 
+/// Verify that this client is the client that has been named as the PKCE client for the given
+/// provider.
+fn is_public_client(provider: &dyn OAuthProvider, client_id: &TypedUuid<OAuthClientId>) -> bool {
+    provider
+        .authz_code_pkce_flow_info()
+        .is_some_and(|info| &info.client_id == client_id)
+}
+
+/// The login attempt a code was issued for, provided the exchange matches it. The provider, the
+/// client, and the redirect URI must all match, the attempt must be awaiting exchange and not
+/// expired, and the PKCE verifier must match the challenge the client sent at authorization.
 fn verify_login_attempt(
-    attempt: &LoginAttempt,
+    attempt: LoginAttempt,
     provider: &str,
     client_id: TypedUuid<OAuthClientId>,
     redirect_uri: &str,
     code_verifier: &str,
-) -> Result<(), OAuthError> {
+) -> Result<LoginAttempt, OAuthErrorResponse> {
     if attempt.provider != provider {
-        Err(OAuthError::new(
+        Err(OAuthErrorResponse::new(
             OAuthErrorCode::InvalidGrant,
             Some("Provider mismatch"),
         ))
     } else if attempt.client_id != client_id {
-        Err(OAuthError::new(
+        Err(OAuthErrorResponse::new(
             OAuthErrorCode::InvalidGrant,
             Some("Invalid client id"),
         ))
     } else if attempt.redirect_uri.as_deref() != Some(redirect_uri) {
-        Err(OAuthError::new(
+        Err(OAuthErrorResponse::new(
             OAuthErrorCode::InvalidGrant,
             Some("Invalid redirect uri"),
         ))
     } else if attempt.attempt_state != LoginAttemptState::RemoteAuthenticated {
-        Err(OAuthError::new(
+        Err(OAuthErrorResponse::new(
             OAuthErrorCode::InvalidGrant,
             Some("Grant is in an invalid state"),
         ))
     } else if attempt.expires_at.map(|t| t <= Utc::now()).unwrap_or(true) {
-        Err(OAuthError::new(
+        Err(OAuthErrorResponse::new(
             OAuthErrorCode::InvalidGrant,
             Some("Grant has expired"),
         ))
@@ -917,9 +906,9 @@ fn verify_login_attempt(
                 let computed_challenge = BASE64_URL_SAFE_NO_PAD.encode(hash);
 
                 if challenge == computed_challenge {
-                    Ok(())
+                    Ok(attempt)
                 } else {
-                    Err(OAuthError::new(
+                    Err(OAuthErrorResponse::new(
                         OAuthErrorCode::InvalidGrant,
                         Some("Invalid pkce verifier"),
                     ))
@@ -927,7 +916,7 @@ fn verify_login_attempt(
             }
             // PKCE is mandatory for all authorization code flows. A missing challenge
             // means the login attempt was not properly initialized.
-            None => Err(OAuthError::new(
+            None => Err(OAuthErrorResponse::new(
                 OAuthErrorCode::InvalidGrant,
                 Some("Login attempt is missing a PKCE challenge"),
             )),
@@ -1016,7 +1005,7 @@ mod tests {
     use uuid::Uuid;
     use v_model::{
         AccessToken, ApiUser, ApiUserInfo, ApiUserProvider, LoginAttempt, NewApiUser,
-        NewApiUserProvider, OAuthClient, OAuthClientRedirectUri, OAuthClientSecret,
+        NewApiUserProvider, OAuthClient, OAuthClientId, OAuthClientRedirectUri, OAuthClientSecret,
         schema_ext::LoginAttemptState,
         storage::{
             MockAccessGroupStore, MockAccessTokenStore, MockApiUserProviderStore, MockApiUserStore,
@@ -1026,7 +1015,7 @@ mod tests {
 
     use crate::{
         authn::{
-            jwt::{Claims, Jwt},
+            jwt::{Jwt, UserClaims},
             key::RawKey,
         },
         context::{
@@ -1036,11 +1025,11 @@ mod tests {
         endpoints::login::{
             ExternalUserId, UserInfo,
             oauth::{
-                OAuthProviderName,
+                OAuthProvider, OAuthProviderName,
                 flow::{
                     code::{
-                        LOGIN_ATTEMPT_COOKIE, OAuthAuthzCodeReturnQuery, OAuthError,
-                        OAuthErrorCode, authz_code_callback_op_inner, verify_csrf,
+                        LOGIN_ATTEMPT_COOKIE, OAuthAuthzCodeReturnQuery, OAuthErrorCode,
+                        OAuthErrorResponse, authz_code_callback_op_inner, verify_csrf,
                         verify_login_attempt,
                     },
                     should_provide_idp_token,
@@ -1133,7 +1122,6 @@ mod tests {
             .returning(move |_, _| {
                 Ok(Some(OAuthClient {
                     id: client_id,
-                    api_user_id: None,
                     keys: vec![],
                     secrets: vec![],
                     redirect_uris: vec![OAuthClientRedirectUri {
@@ -1165,7 +1153,6 @@ mod tests {
             ctx,
             OAuthClient {
                 id: client_id,
-                api_user_id: None,
                 keys: vec![],
                 secrets: vec![OAuthClientSecret {
                     id: TypedUuid::new_v4(),
@@ -1193,7 +1180,6 @@ mod tests {
         let client_id = TypedUuid::new_v4();
         let client = OAuthClient {
             id: client_id,
-            api_user_id: None,
             keys: vec![],
             secrets: vec![],
             redirect_uris: vec![OAuthClientRedirectUri {
@@ -1697,7 +1683,7 @@ mod tests {
 
         // 3. Verify a successful exchange with a client secret
         assert_eq!(
-            (),
+            client_id,
             authorize_code_exchange(
                 &ctx,
                 &*provider,
@@ -1708,66 +1694,92 @@ mod tests {
             )
             .await
             .unwrap()
+            .id
         );
     }
 
+    /// Only the public client a provider's PKCE flow is configured with may exchange a code
+    /// without a secret. A confidential client on the same provider still needs its secret.
     #[tokio::test]
-    async fn test_exchange_requires_secret_except_for_pkce_only() {
+    async fn test_exchange_requires_secret_except_for_the_public_client() {
         let (mut ctx, client, _) = mock_client().await;
         let client_id = client.id;
         let redirect_uri = client.redirect_uris[0].redirect_uri.clone();
+
+        let provider = ctx
+            .get_oauth_provider(&OAuthProviderName::Google)
+            .await
+            .unwrap();
+
+        // The provider factory picks a fresh proxy client id each time it runs, so this instance
+        // is kept for both reading the id and performing the exchanges
+        let pkce_provider = ctx
+            .get_oauth_provider(&OAuthProviderName::Zendesk)
+            .await
+            .unwrap();
+        let public_client_id = pkce_provider.authz_code_pkce_flow_info().unwrap().client_id;
+        let public_client = OAuthClient {
+            id: public_client_id,
+            ..client.clone()
+        };
 
         let mut client_store = MockOAuthClientStore::new();
         client_store
             .expect_get()
             .with(eq(client_id), eq(false))
             .returning(move |_, _| Ok(Some(client.clone())));
+        client_store
+            .expect_get()
+            .with(eq(public_client_id), eq(false))
+            .returning(move |_, _| Ok(Some(public_client.clone())));
 
         let mut storage = MockStorage::new();
         storage.oauth_client_store = Some(Arc::new(client_store));
-
         ctx.set_storage(Arc::new(storage));
 
-        let provider = ctx
-            .get_oauth_provider(&OAuthProviderName::Google)
+        async fn exchange_without_secret(
+            ctx: &VContext<VPermission>,
+            provider: &dyn OAuthProvider,
+            client_id: TypedUuid<OAuthClientId>,
+            redirect_uri: &str,
+        ) -> Result<OAuthClient, OAuthErrorResponse> {
+            authorize_code_exchange(
+                ctx,
+                provider,
+                "authorization_code",
+                client_id,
+                None,
+                redirect_uri,
+            )
             .await
-            .unwrap();
-        let pkce_only_provider = ctx
-            .get_oauth_provider(&OAuthProviderName::Zendesk)
-            .await
-            .unwrap();
+        }
 
-        // 1. Verify exchange fails when not passing a client secret for a client that does not
-        // support pkce_only
+        // 1. A provider without a public client always requires a secret
         assert_eq!(
             Some("Client secret required".to_string()),
-            authorize_code_exchange(
-                &ctx,
-                &*provider,
-                "authorization_code",
-                client_id,
-                None,
-                &redirect_uri,
-            )
-            .await
-            .unwrap_err()
-            .error_description
+            exchange_without_secret(&ctx, &*provider, client_id, &redirect_uri)
+                .await
+                .unwrap_err()
+                .error_description
         );
 
-        // 2. Verify exchange passes when omitting the client secret for a client that does
-        // support pkce_only
+        // 2. A confidential client on a provider that has a public client still requires its
+        // secret. Only the configured public client is exempt.
         assert_eq!(
-            (),
-            authorize_code_exchange(
-                &ctx,
-                &*pkce_only_provider,
-                "authorization_code",
-                client_id,
-                None,
-                &redirect_uri,
-            )
-            .await
-            .unwrap()
+            Some("Client secret required".to_string()),
+            exchange_without_secret(&ctx, &*pkce_provider, client_id, &redirect_uri)
+                .await
+                .unwrap_err()
+                .error_description
+        );
+
+        // 3. The configured public client may omit its secret
+        assert_eq!(
+            public_client_id,
+            exchange_without_secret(&ctx, &*pkce_provider, public_client_id, &redirect_uri)
+                .await
+                .unwrap()
+                .id
         );
     }
 
@@ -1808,7 +1820,7 @@ mod tests {
         );
 
         assert_eq!(
-            (),
+            client_id,
             authorize_code_exchange(
                 &ctx,
                 &*provider,
@@ -1819,6 +1831,7 @@ mod tests {
             )
             .await
             .unwrap()
+            .id
         );
     }
 
@@ -1881,7 +1894,7 @@ mod tests {
         );
 
         assert_eq!(
-            (),
+            client_id,
             authorize_code_exchange(
                 &ctx,
                 &*provider,
@@ -1892,6 +1905,7 @@ mod tests {
             )
             .await
             .unwrap()
+            .id
         );
     }
 
@@ -1927,14 +1941,9 @@ mod tests {
         };
 
         assert_eq!(
-            OAuthError {
-                error: OAuthErrorCode::InvalidGrant,
-                error_description: Some("Invalid client id".to_string()),
-                error_uri: None,
-                state: None,
-            },
+            OAuthErrorResponse::new(OAuthErrorCode::InvalidGrant, Some("Invalid client id")),
             verify_login_attempt(
-                &bad_client_id,
+                bad_client_id.clone(),
                 &attempt.provider,
                 attempt.client_id,
                 attempt.redirect_uri.as_deref().unwrap(),
@@ -1949,14 +1958,9 @@ mod tests {
         };
 
         assert_eq!(
-            OAuthError {
-                error: OAuthErrorCode::InvalidGrant,
-                error_description: Some("Invalid redirect uri".to_string()),
-                error_uri: None,
-                state: None,
-            },
+            OAuthErrorResponse::new(OAuthErrorCode::InvalidGrant, Some("Invalid redirect uri")),
             verify_login_attempt(
-                &bad_redirect_uri,
+                bad_redirect_uri.clone(),
                 &attempt.provider,
                 attempt.client_id,
                 attempt.redirect_uri.as_deref().unwrap(),
@@ -1971,14 +1975,12 @@ mod tests {
         };
 
         assert_eq!(
-            OAuthError {
-                error: OAuthErrorCode::InvalidGrant,
-                error_description: Some("Grant is in an invalid state".to_string()),
-                error_uri: None,
-                state: None,
-            },
+            OAuthErrorResponse::new(
+                OAuthErrorCode::InvalidGrant,
+                Some("Grant is in an invalid state")
+            ),
             verify_login_attempt(
-                &unconfirmed_state,
+                unconfirmed_state.clone(),
                 &attempt.provider,
                 attempt.client_id,
                 attempt.redirect_uri.as_deref().unwrap(),
@@ -1993,14 +1995,12 @@ mod tests {
         };
 
         assert_eq!(
-            OAuthError {
-                error: OAuthErrorCode::InvalidGrant,
-                error_description: Some("Grant is in an invalid state".to_string()),
-                error_uri: None,
-                state: None,
-            },
+            OAuthErrorResponse::new(
+                OAuthErrorCode::InvalidGrant,
+                Some("Grant is in an invalid state")
+            ),
             verify_login_attempt(
-                &already_used_state,
+                already_used_state.clone(),
                 &attempt.provider,
                 attempt.client_id,
                 attempt.redirect_uri.as_deref().unwrap(),
@@ -2015,14 +2015,12 @@ mod tests {
         };
 
         assert_eq!(
-            OAuthError {
-                error: OAuthErrorCode::InvalidGrant,
-                error_description: Some("Grant is in an invalid state".to_string()),
-                error_uri: None,
-                state: None,
-            },
+            OAuthErrorResponse::new(
+                OAuthErrorCode::InvalidGrant,
+                Some("Grant is in an invalid state")
+            ),
             verify_login_attempt(
-                &failed_state,
+                failed_state.clone(),
                 &attempt.provider,
                 attempt.client_id,
                 attempt.redirect_uri.as_deref().unwrap(),
@@ -2037,14 +2035,9 @@ mod tests {
         };
 
         assert_eq!(
-            OAuthError {
-                error: OAuthErrorCode::InvalidGrant,
-                error_description: Some("Grant has expired".to_string()),
-                error_uri: None,
-                state: None,
-            },
+            OAuthErrorResponse::new(OAuthErrorCode::InvalidGrant, Some("Grant has expired")),
             verify_login_attempt(
-                &expired,
+                expired.clone(),
                 &attempt.provider,
                 attempt.client_id,
                 attempt.redirect_uri.as_deref().unwrap(),
@@ -2062,14 +2055,12 @@ mod tests {
         };
 
         assert_eq!(
-            OAuthError {
-                error: OAuthErrorCode::InvalidGrant,
-                error_description: Some("Login attempt is missing a PKCE challenge".to_string()),
-                error_uri: None,
-                state: None,
-            },
+            OAuthErrorResponse::new(
+                OAuthErrorCode::InvalidGrant,
+                Some("Login attempt is missing a PKCE challenge")
+            ),
             verify_login_attempt(
-                &missing_challenge,
+                missing_challenge.clone(),
                 &attempt.provider,
                 attempt.client_id,
                 attempt.redirect_uri.as_deref().unwrap(),
@@ -2084,14 +2075,9 @@ mod tests {
         };
 
         assert_eq!(
-            OAuthError {
-                error: OAuthErrorCode::InvalidGrant,
-                error_description: Some("Invalid pkce verifier".to_string()),
-                error_uri: None,
-                state: None,
-            },
+            OAuthErrorResponse::new(OAuthErrorCode::InvalidGrant, Some("Invalid pkce verifier")),
             verify_login_attempt(
-                &invalid_pkce,
+                invalid_pkce.clone(),
                 &attempt.provider,
                 attempt.client_id,
                 attempt.redirect_uri.as_deref().unwrap(),
@@ -2101,15 +2087,16 @@ mod tests {
         );
 
         assert_eq!(
-            (),
+            attempt.id,
             verify_login_attempt(
-                &attempt,
+                attempt.clone(),
                 &attempt.provider,
                 attempt.client_id,
                 attempt.redirect_uri.as_deref().unwrap(),
                 verifier.secret().as_str(),
             )
             .unwrap()
+            .id
         );
     }
 
@@ -2143,14 +2130,9 @@ mod tests {
 
         // Exchanging against a different provider must fail
         assert_eq!(
-            OAuthError {
-                error: OAuthErrorCode::InvalidGrant,
-                error_description: Some("Provider mismatch".to_string()),
-                error_uri: None,
-                state: None,
-            },
+            OAuthErrorResponse::new(OAuthErrorCode::InvalidGrant, Some("Provider mismatch")),
             verify_login_attempt(
-                &attempt,
+                attempt.clone(),
                 "github",
                 attempt.client_id,
                 attempt.redirect_uri.as_deref().unwrap(),
@@ -2161,15 +2143,16 @@ mod tests {
 
         // Exchanging against the correct provider must succeed
         assert_eq!(
-            (),
+            attempt.id,
             verify_login_attempt(
-                &attempt,
+                attempt.clone(),
                 "google",
                 attempt.client_id,
                 attempt.redirect_uri.as_deref().unwrap(),
                 verifier.secret().as_str(),
             )
             .unwrap()
+            .id
         );
     }
 
@@ -2432,10 +2415,9 @@ mod tests {
                 })
             });
 
-        // ApiUserStore: upsert creates a user with the specified permissions
         let mut user_store = MockApiUserStore::new();
         user_store
-            .expect_upsert()
+            .expect_create()
             .returning(move |u: NewApiUser<VPermission>| {
                 Ok(ApiUserInfo {
                     user: ApiUser {
@@ -2884,7 +2866,6 @@ mod tests {
             .returning(move |_, _| {
                 Ok(Some(OAuthClient {
                     id: client_id,
-                    api_user_id: None,
                     keys: vec![],
                     secrets: vec![],
                     redirect_uris: vec![], // No registered URIs
@@ -3033,7 +3014,7 @@ mod tests {
             "Exchange response scope must be empty when the login attempt has no scope",
         );
 
-        let jwt = Jwt::<Claims>::new(&ctx, &response.access_token)
+        let jwt = Jwt::<UserClaims>::new(&ctx, &response.access_token)
             .await
             .expect("JWT should decode successfully");
 
@@ -3080,7 +3061,7 @@ mod tests {
             "Exchange response must echo back the full scope",
         );
 
-        let jwt = Jwt::<Claims>::new(&ctx, &response.access_token)
+        let jwt = Jwt::<UserClaims>::new(&ctx, &response.access_token)
             .await
             .expect("JWT should decode successfully");
 
@@ -3127,7 +3108,7 @@ mod tests {
             "Exchange response must echo back the explicit scope",
         );
 
-        let jwt = Jwt::<Claims>::new(&ctx, &response.access_token)
+        let jwt = Jwt::<UserClaims>::new(&ctx, &response.access_token)
             .await
             .expect("JWT should decode successfully");
 

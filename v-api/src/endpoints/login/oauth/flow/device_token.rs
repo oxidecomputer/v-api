@@ -11,14 +11,17 @@ use oauth2::{
     CsrfToken, EmptyExtraTokenFields, StandardTokenResponse, TokenResponse, basic::BasicTokenType,
 };
 use schemars::JsonSchema;
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::ops::Add;
 use tap::TapFallible;
 use tracing::instrument;
 use url::Url;
-use v_model::{NewLoginAttempt, OAuthClientId, permissions::PermissionStorage};
+use v_model::{
+    LoginAttempt, NewLoginAttempt, OAuthClientId, permissions::PermissionStorage,
+    schema_ext::LoginAttemptState,
+};
 
 use super::super::OAuthProviderNameParam;
 use crate::endpoints::login::UserInfoProvider;
@@ -27,8 +30,28 @@ use crate::{
     permissions::VAppPermission, response::internal_error, util::response::bad_request,
 };
 
-use super::{UpstreamTokens, complete_exchange};
+use super::{
+    DEVICE_CODE_GRANT_TYPE, UpstreamTokens, complete_exchange,
+    error::{OAuthErrorCode, OAuthErrorResponse},
+    mark_uncacheable, requested_scope, revoke_upstream_tokens,
+};
 use crate::endpoints::login::oauth::OAuthProviderDeviceInfo;
+
+/// Verify that this client is the client that has been named as the device client for the given
+/// provider.
+fn configured_device_client(
+    device_info: &OAuthProviderDeviceInfo,
+    client_id: TypedUuid<OAuthClientId>,
+) -> Result<TypedUuid<OAuthClientId>, OAuthErrorResponse> {
+    if device_info.client_id == client_id {
+        Ok(client_id)
+    } else {
+        Err(OAuthErrorResponse::new(
+            OAuthErrorCode::InvalidClient,
+            Some("client_id is not the provider's device client"),
+        ))
+    }
+}
 
 #[instrument(skip(rqctx), err(Debug))]
 pub async fn get_device_provider_op<T>(
@@ -101,7 +124,7 @@ pub async fn device_authz_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<OAuthProviderNameParam>,
     body: TypedBody<DeviceAuthorizationRequest>,
-) -> Result<Response<Body>, HttpError>
+) -> Result<Response<Body>, OAuthErrorResponse>
 where
     T: VAppPermission + PermissionStorage,
 {
@@ -117,25 +140,20 @@ where
     let device_info = provider
         .device_code_flow_info()
         .ok_or_else(|| bad_request("Provider does not support device code flow"))?;
+    let client_id = configured_device_client(device_info, body.client_id)?;
 
-    // Validate the client_id. In the future we may tie maximum scopes to a
-    // client as well
-    let _client = ctx
+    // The device client must also be a registered client. In the future we may tie maximum
+    // scopes to a client as well
+    let registered_client = ctx
         .oauth
-        .get_oauth_client(&ctx.builtin_registration_user(), &body.client_id)
+        .get_oauth_client(&ctx.builtin_registration_user(), &client_id)
         .await
-        .map_err(|_| bad_request("Unknown client id"))?;
+        .map_err(|_| {
+            OAuthErrorResponse::new(OAuthErrorCode::InvalidClient, Some("Unknown client id"))
+        })?;
 
     // An omitted scope means no permissions
-    let scope = body.scope.unwrap_or_default();
-    if let Err(err) = T::from_scope_arg(&scope) {
-        tracing::warn!(?err, ?scope, "Client submitted an invalid scope");
-        return Ok(error_response(
-            StatusCode::BAD_REQUEST,
-            "invalid_scope",
-            Some(format!("Invalid scope: {}", scope)),
-        ));
-    }
+    let scope = requested_scope::<T>(body.scope.as_deref())?;
 
     // Proxy the device authorization request to the upstream provider
     let client = reqwest::Client::new();
@@ -188,10 +206,10 @@ where
     // redirect_uri — the token is returned directly via the exchange endpoint.
     let mut attempt = NewLoginAttempt::new(
         provider.name().to_string(),
-        body.client_id,
+        registered_client.id,
         None,
         scope,
-        "urn:ietf:params:oauth:grant-type:device_code".to_string(),
+        DEVICE_CODE_GRANT_TYPE.to_string(),
     )
     .map_err(|err| {
         tracing::error!(?err, "Failed to construct login attempt");
@@ -283,7 +301,7 @@ pub async fn exchange_device_token_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: Path<OAuthProviderNameParam>,
     body: TypedBody<DeviceTokenExchangeRequest>,
-) -> Result<Response<Body>, HttpError>
+) -> Result<Response<Body>, OAuthErrorResponse>
 where
     T: VAppPermission + PermissionStorage,
 {
@@ -299,49 +317,30 @@ where
     let device_info = provider
         .device_code_flow_info()
         .ok_or_else(|| bad_request("Provider does not support device code flow"))?;
+    let client_id = configured_device_client(device_info, body.client_id)?;
 
     tracing::debug!(provider = ?provider.name(), "Acquired OAuth provider for device token exchange");
 
-    // Validate grant_type per RFC 8628 §3.4
-    if !validate_device_grant_type(&body.grant_type) {
-        return Ok(error_response(
-            StatusCode::BAD_REQUEST,
-            "unsupported_grant_type",
-            Some("grant_type must be urn:ietf:params:oauth:grant-type:device_code".to_string()),
-        ));
-    }
+    // Only the device code grant is accepted (RFC 8628 §3.4)
+    let grant_type = device_grant_type(&body.grant_type)?;
 
-    // Look up the login attempt by the v-api-issued device code and client_id.
+    // Look up the login attempt by the v-api-issued device code and client_id. Only an attempt
+    // that is still open and has not expired can be exchanged.
     let attempt = ctx
         .login
-        .get_login_attempt_for_device_code(&body.device_code, &body.client_id)
+        .get_login_attempt_for_device_code(&body.device_code, &client_id)
         .await
         .map_err(|err| {
             tracing::error!(?err, "Failed to look up device login attempt");
             internal_error("Failed to look up login attempt")
         })?
-        .ok_or_else(|| bad_request("Unknown device code or client id"))?;
-
-    // Verify the attempt is still in the New state
-    if attempt.attempt_state != v_model::schema_ext::LoginAttemptState::New {
-        return Ok(error_response(
-            StatusCode::BAD_REQUEST,
-            "invalid_grant",
-            Some("Device code has already been exchanged".to_string()),
-        ));
-    }
-
-    // Check expiration - An attempt without an expiration is by default
-    // expired.
-    // TODO: Change expires_at to be non-optional. A login attempt should always
-    // have an expiration.
-    if attempt.expires_at.map(|t| t <= Utc::now()).unwrap_or(true) {
-        return Ok(error_response(
-            StatusCode::BAD_REQUEST,
-            "expired_token",
-            Some("The device code has expired".to_string()),
-        ));
-    }
+        .ok_or_else(|| {
+            OAuthErrorResponse::new(
+                OAuthErrorCode::InvalidGrant,
+                Some("Unknown device code or client id"),
+            )
+        })
+        .and_then(exchangeable)?;
 
     // Retrieve the real upstream device_code from the login attempt and proxy
     // the token exchange to the upstream provider.
@@ -357,7 +356,7 @@ where
     let upstream_request = UpstreamDeviceTokenRequest {
         client_id: device_info.remote.client_id.clone(),
         device_code: upstream_device_code,
-        grant_type: body.grant_type.clone(),
+        grant_type: grant_type.to_string(),
         client_secret: device_info
             .remote
             .client_secret
@@ -400,17 +399,35 @@ where
 
     match parsed {
         Ok(parsed) => {
-            // Success! The user has completed the device authorization.
 
-            // Claim the login attempt (New -> Complete)
-            let attempt = ctx
-                .login
-                .claim_device_login_attempt(attempt)
-                .await
-                .map_err(|err| {
-                    tracing::warn!(?err, "Failed to claim device login attempt");
-                    internal_error("Failed to claim login attempt")
-                })?;
+            // The upstream tokens are kept so that whatever is not handed back to the caller can
+            // be revoked
+            let upstream = UpstreamTokens {
+                access_token: Some(SecretString::from(parsed.access_token().secret().as_str())),
+                refresh_token: parsed
+                    .refresh_token()
+                    .map(|token| SecretString::from(token.secret().as_str())),
+            };
+
+            // Claim the login attempt (New -> Complete). The attempt can only be claimed after
+            // the upstream exchange, since every earlier poll must leave it open. Losing the claim
+            // means a concurrent poll completed first, so the tokens this poll obtained are
+            // revoked rather than left live and unaccounted for.
+            let claimed = ctx.login.claim_device_login_attempt(attempt.clone()).await;
+            let attempt = match claimed {
+                Ok(attempt) => Ok(attempt),
+                Err(err) => {
+                    tracing::warn!(
+                        ?err,
+                        "Device login attempt was completed by a concurrent poll"
+                    );
+                    revoke_upstream_tokens(&*provider, &attempt, &upstream).await;
+                    Err(OAuthErrorResponse::new(
+                        OAuthErrorCode::InvalidGrant,
+                        Some("Device code has already been exchanged"),
+                    ))
+                }
+            }?;
 
             // Fetch user info from the upstream provider
             let info = provider
@@ -421,27 +438,20 @@ where
 
             tracing::debug!("Verified and validated OAuth user via device flow");
 
-            let response = complete_exchange(
-                ctx,
-                info,
-                &*provider,
-                &attempt,
-                false,
-                UpstreamTokens::default(),
-            )
-            .await?;
+            let response =
+                complete_exchange(ctx, info, &*provider, &attempt, false, upstream).await?;
 
             let exchange_response = response.0;
 
-            tracing::trace!(
-                ?exchange_response,
-                "Received device authorization response from upstream provider"
-            );
+            tracing::debug!("Completed device authorization exchange");
 
-            Ok(Response::builder()
+            let mut token_response = Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(serde_json::to_string(&exchange_response).unwrap().into())?)
+                .body(serde_json::to_string(&exchange_response).unwrap().into())?;
+            mark_uncacheable(token_response.headers_mut());
+
+            Ok(token_response)
         }
         Err(_) => {
             // Could not parse as a token — might be a GitHub-style 200 error
@@ -457,26 +467,40 @@ where
     }
 }
 
-/// Validate the grant_type for device code exchange per RFC 8628 §3.4.
-fn validate_device_grant_type(grant_type: &str) -> bool {
-    grant_type == "urn:ietf:params:oauth:grant-type:device_code"
+/// The grant type of a device code exchange, which must be the device code grant (RFC 8628 §3.4)
+fn device_grant_type(grant_type: &str) -> Result<&'static str, OAuthErrorResponse> {
+    if grant_type == DEVICE_CODE_GRANT_TYPE {
+        Ok(DEVICE_CODE_GRANT_TYPE)
+    } else {
+        Err(OAuthErrorResponse::new(
+            OAuthErrorCode::UnsupportedGrantType,
+            Some("grant_type must be urn:ietf:params:oauth:grant-type:device_code"),
+        ))
+    }
 }
 
-/// Build a JSON error response body.
-fn error_response(status: StatusCode, error: &str, description: Option<String>) -> Response<Body> {
-    Response::builder()
-        .status(status)
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(
-            serde_json::to_vec(&ProxyTokenError {
-                error: error.to_string(),
-                error_description: description,
-                error_uri: None,
-            })
-            .unwrap()
-            .into(),
-        )
-        .unwrap()
+/// The attempt, provided its device code can still be exchanged. That is while the attempt is
+/// open and has not expired.
+///
+/// An attempt without an expiration is treated as expired.
+fn exchangeable(attempt: LoginAttempt) -> Result<LoginAttempt, OAuthErrorResponse> {
+    if attempt.attempt_state != LoginAttemptState::New {
+        Err(OAuthErrorResponse::new(
+            OAuthErrorCode::InvalidGrant,
+            Some("Device code has already been exchanged"),
+        ))
+    } else if attempt
+        .expires_at
+        .is_none_or(|expires_at| expires_at <= Utc::now())
+    {
+        // TODO: Change expires_at to be non-optional. A login attempt should always have an expiration.
+        Err(OAuthErrorResponse::new(
+            OAuthErrorCode::ExpiredToken,
+            Some("The device code has expired"),
+        ))
+    } else {
+        Ok(attempt)
+    }
 }
 
 /// Headers that are safe to forward from an upstream OAuth provider response.
@@ -526,14 +550,10 @@ fn handle_token_parse_failure(
             tracing::warn!("Remote OAuth provider returned a response that we do not understand");
 
             Response::new(
-                serde_json::to_vec(&ProxyTokenError {
-                    error: "access_denied".to_string(),
-                    error_description: Some(format!(
-                        "{} returned a malformed response",
-                        provider_name
-                    )),
-                    error_uri: None,
-                })
+                serde_json::to_vec(&OAuthErrorResponse::new(
+                    OAuthErrorCode::AccessDenied,
+                    Some(format!("{} returned a malformed response", provider_name).as_str()),
+                ))
                 .unwrap()
                 .into(),
             )
@@ -557,7 +577,31 @@ mod tests {
     };
     use hyper::body::Bytes;
 
-    use super::{handle_token_parse_failure, proxy_upstream_response, validate_device_grant_type};
+    use newtype_uuid::TypedUuid;
+
+    use super::{
+        configured_device_client, device_grant_type, handle_token_parse_failure,
+        proxy_upstream_response,
+    };
+    use crate::endpoints::login::oauth::OAuthProviderDeviceInfo;
+
+    /// Only the client the provider's device flow is configured for may run it
+    #[test]
+    fn only_the_configured_device_client_may_run_the_device_flow() {
+        let device_client = TypedUuid::new_v4();
+        let device_info = OAuthProviderDeviceInfo::for_test(device_client);
+
+        assert_eq!(
+            Ok(device_client),
+            configured_device_client(&device_info, device_client)
+        );
+
+        let refused = configured_device_client(&device_info, TypedUuid::new_v4()).unwrap_err();
+        assert_eq!(
+            serde_json::to_value(&refused).unwrap()["error"],
+            serde_json::json!("invalid_client")
+        );
+    }
 
     #[test]
     fn test_upstream_set_cookie_is_stripped_from_error_response() {
@@ -681,29 +725,23 @@ mod tests {
 
     #[test]
     fn test_valid_device_grant_type_is_accepted() {
-        assert!(validate_device_grant_type(
-            "urn:ietf:params:oauth:grant-type:device_code"
-        ));
+        assert!(device_grant_type("urn:ietf:params:oauth:grant-type:device_code").is_ok());
     }
 
     #[test]
     fn test_invalid_device_grant_type_is_rejected() {
-        assert!(!validate_device_grant_type("authorization_code"));
+        assert!(device_grant_type("authorization_code").is_err());
     }
 
     #[test]
     fn test_empty_device_grant_type_is_rejected() {
-        assert!(!validate_device_grant_type(""));
+        assert!(device_grant_type("").is_err());
     }
 
     #[test]
     fn test_device_grant_type_rejects_similar_values() {
-        assert!(!validate_device_grant_type("device_code"));
-        assert!(!validate_device_grant_type(
-            "urn:ietf:params:oauth:grant-type:device_Code"
-        ));
-        assert!(!validate_device_grant_type(
-            "urn:ietf:params:oauth:grant-type:authorization_code"
-        ));
+        assert!(device_grant_type("device_code").is_err());
+        assert!(device_grant_type("urn:ietf:params:oauth:grant-type:device_Code").is_err());
+        assert!(device_grant_type("urn:ietf:params:oauth:grant-type:authorization_code").is_err());
     }
 }
