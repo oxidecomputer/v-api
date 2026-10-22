@@ -399,7 +399,6 @@ where
 
     match parsed {
         Ok(parsed) => {
-
             // The upstream tokens are kept so that whatever is not handed back to the caller can
             // be revoked
             let upstream = UpstreamTokens {
