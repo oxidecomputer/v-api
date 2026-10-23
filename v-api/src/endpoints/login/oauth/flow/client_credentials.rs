@@ -10,7 +10,7 @@ use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
-use v_model::{OAuthClient, OAuthClientId, permissions::PermissionStorage};
+use v_model::{OAuthClientId, permissions::PermissionStorage};
 
 use super::{
     error::{OAuthErrorCode, OAuthErrorResponse},
@@ -88,21 +88,6 @@ fn client_assertion<'a>(
     }
 }
 
-/// The authenticated client, provided it is the one the request names. A client id in the
-/// request is optional, but when present it must name the client that signed the assertion.
-fn requested_client(
-    requested: Option<TypedUuid<OAuthClientId>>,
-    authenticated: OAuthClient,
-) -> Result<OAuthClient, OAuthErrorResponse> {
-    if requested.is_none_or(|client_id| client_id == authenticated.id) {
-        Ok(authenticated)
-    } else {
-        Err(invalid_client(
-            "client_id does not match the client that issued the assertion",
-        ))
-    }
-}
-
 #[instrument(skip(rqctx, body), err(Debug))]
 pub async fn client_credentials_token_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
@@ -135,6 +120,7 @@ where
         .authenticate_client(
             &registration_user,
             assertion,
+            body.client_id.as_ref(),
             &ctx.client_assertion_policy(),
         )
         .await
@@ -147,12 +133,15 @@ where
                 tracing::error!("Registration user is not allowed to authenticate clients");
                 OAuthErrorResponse::new(OAuthErrorCode::ServerError, None)
             }
+            ClientAuthenticationError::ClientMismatch => {
+                tracing::info!("Refused client assertion for a different client");
+                invalid_client("client_id does not match the client that issued the assertion")
+            }
             err => {
                 tracing::info!(?err, "Refused client assertion");
                 invalid_client("Client authentication failed")
             }
-        })
-        .and_then(|client| requested_client(body.client_id, client))?;
+        })?;
 
     let token = ctx
         .generate_service_account_token(
@@ -623,32 +612,48 @@ mod tests {
     #[tokio::test]
     async fn a_client_id_must_match_the_assertion_when_present() {
         let fixture = fixture().await;
+        let assertion = fixture.assertion();
 
         let mismatched = client_credentials_token_inner(
             &fixture.ctx,
             &no_headers(),
             ClientCredentialsTokenBody {
                 client_id: Some(TypedUuid::new_v4()),
-                ..fixture.request(fixture.assertion(), None)
+                ..fixture.request(assertion.clone(), None)
             },
         )
         .await;
         assert_eq!(StatusCode::UNAUTHORIZED, get_status(&mismatched));
         assert_eq!("invalid_client", error_code(&mismatched));
         assert!(fixture.recorded.lock().unwrap().tokens.is_empty());
+        assert_eq!(
+            0,
+            fixture.recorded_assertions(),
+            "a refused request must not consume the assertion"
+        );
 
-        for client_id in [Some(fixture.client_id), None] {
-            let accepted = client_credentials_token_inner(
-                &fixture.ctx,
-                &no_headers(),
-                ClientCredentialsTokenBody {
-                    client_id,
-                    ..fixture.request(fixture.assertion(), None)
-                },
-            )
-            .await;
-            assert_eq!(StatusCode::OK, get_status(&accepted), "{client_id:?}");
-        }
+        // The same assertion is still usable once the request names the right client
+        let corrected = client_credentials_token_inner(
+            &fixture.ctx,
+            &no_headers(),
+            ClientCredentialsTokenBody {
+                client_id: Some(fixture.client_id),
+                ..fixture.request(assertion, None)
+            },
+        )
+        .await;
+        assert_eq!(StatusCode::OK, get_status(&corrected));
+
+        let without_client_id = client_credentials_token_inner(
+            &fixture.ctx,
+            &no_headers(),
+            ClientCredentialsTokenBody {
+                client_id: None,
+                ..fixture.request(fixture.assertion(), None)
+            },
+        )
+        .await;
+        assert_eq!(StatusCode::OK, get_status(&without_client_id));
         assert_eq!(2, fixture.recorded.lock().unwrap().tokens.len());
     }
 

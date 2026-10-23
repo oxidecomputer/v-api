@@ -54,6 +54,8 @@ pub enum ClientAuthenticationError {
     UnknownClient,
     #[error("Assertion names a key that the client does not hold")]
     UnknownKey,
+    #[error("Request names a different client than the one that signed the assertion")]
+    ClientMismatch,
     #[error("Assertion has already been used")]
     Replay,
     #[error("Caller is not allowed to authenticate clients")]
@@ -210,6 +212,7 @@ where
         &self,
         caller: &Caller<T>,
         assertion: &str,
+        requested_client: Option<&TypedUuid<OAuthClientId>>,
         policy: &AssertionPolicy,
     ) -> Result<OAuthClient, ClientAuthenticationError> {
         let unverified = UnverifiedAssertion::parse(assertion)?;
@@ -226,7 +229,11 @@ where
 
         if let Some(key) = key {
             let claims = unverified.verify(&key.jwk, policy)?;
-            if key.oauth_client_id == claims.iss {
+            if key.oauth_client_id != claims.iss {
+                Err(ClientAuthenticationError::UnknownKey)
+            } else if requested_client.is_some_and(|requested| requested != &claims.iss) {
+                Err(ClientAuthenticationError::ClientMismatch)
+            } else {
                 let client = self
                     .get_oauth_client(caller, &claims.iss)
                     .await
@@ -269,8 +276,6 @@ where
                 } else {
                     Err(ClientAuthenticationError::Restricted)
                 }
-            } else {
-                Err(ClientAuthenticationError::UnknownKey)
             }
         } else {
             Err(ClientAuthenticationError::UnknownKey)
