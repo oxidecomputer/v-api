@@ -5,6 +5,7 @@
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::endpoints::login::{ExternalUserId, UserInfo};
 
@@ -17,13 +18,31 @@ pub struct GitHubUsernameMapper {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct GitHubUsernameMapperData {
     github_username: String,
     groups: Vec<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct GitHubUsernameMapperDataV1 {
+    github_username: String,
+    permissions: Option<Value>,
+    #[serde(default)]
+    groups: Vec<String>,
+}
+
 impl GitHubUsernameMapper {
     pub fn new(data: GitHubUsernameMapperData) -> Self {
+        Self {
+            github_username: data.github_username,
+            grants: MappingGrants {
+                groups: data.groups,
+            },
+        }
+    }
+
+    pub fn from_v1(data: GitHubUsernameMapperDataV1) -> Self {
         Self {
             github_username: data.github_username,
             grants: MappingGrants {

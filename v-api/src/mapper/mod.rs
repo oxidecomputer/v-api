@@ -3,10 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use async_trait::async_trait;
-use default::DefaultMapperData;
-use email_address::EmailAddressMapperData;
-use email_domain::EmailDomainMapperData;
-use github_username::GitHubUsernameMapperData;
+use default::{DefaultMapperData, DefaultMapperDataV1};
+use email_address::{EmailAddressMapperData, EmailAddressMapperDataV1};
+use email_domain::{EmailDomainMapperData, EmailDomainMapperDataV1};
+use github_username::{GitHubUsernameMapperData, GitHubUsernameMapperDataV1};
 use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -44,7 +44,7 @@ pub enum MappingEngineError {
     Other(Box<dyn StdError + Send + Sync + 'static>),
 }
 
-/// The groups a mapping rule assigns to a user.
+/// What a mapping rule assigns to a user.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MappingGrants {
     /// Names of the groups a matched user is added to.
@@ -54,7 +54,8 @@ pub struct MappingGrants {
 /// Interface for generating mapping rules from mapper configurations
 pub trait MappingEngine: Send + Sync + 'static {
     // TODO: Would love to fix this so it isn't a Value...
-    /// Creates a mapping rule from a blob of rule data.
+    /// Creates a mapping rule from a blob of rule data. This must be backwards compatible in terms
+    /// of reading and parsing rules. The output is expected to be a current rule.
     fn create_mapping(&self, rule: &Value) -> Result<Box<dyn MapperRule>, MappingEngineError>;
     // TODO: Would love to fix this so it isn't a Value...
     /// Validates whether the provided data represents a known mapping rule.
@@ -92,7 +93,8 @@ pub(crate) fn resolve_mapped_groups<T>(
 #[derive(Default)]
 pub struct DefaultMappingEngine;
 
-/// The default mapping rule configurations that are supported by the default mapping engine
+/// Current mapping rules that have dropped support for direct permission assignments, and require
+/// at least one group assignment.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "rule", rename_all = "snake_case")]
 pub enum MappingRulesData {
@@ -103,28 +105,68 @@ pub enum MappingRulesData {
     GitHubUsername(GitHubUsernameMapperData),
 }
 
+/// V1 rules can carry permission assignments which are no longer supported.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "rule", rename_all = "snake_case")]
+pub enum MappingRulesDataV1 {
+    Default(DefaultMapperDataV1),
+    EmailAddress(EmailAddressMapperDataV1),
+    EmailDomain(EmailDomainMapperDataV1),
+    #[serde(rename = "github_username")]
+    GitHubUsername(GitHubUsernameMapperDataV1),
+}
+
+/// A rule as it may be stored. This may be either a legacy v1 rule or a current rule.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum StoredMappingRule {
+    Current(MappingRulesData),
+    V1(MappingRulesDataV1),
+}
+
+impl From<StoredMappingRule> for Box<dyn MapperRule> {
+    fn from(rule: StoredMappingRule) -> Self {
+        match rule {
+            StoredMappingRule::Current(MappingRulesData::Default(data)) => {
+                Box::new(DefaultMapper::new(data))
+            }
+            StoredMappingRule::Current(MappingRulesData::EmailAddress(data)) => {
+                Box::new(EmailAddressMapper::new(data))
+            }
+            StoredMappingRule::Current(MappingRulesData::EmailDomain(data)) => {
+                Box::new(EmailDomainMapper::new(data))
+            }
+            StoredMappingRule::Current(MappingRulesData::GitHubUsername(data)) => {
+                Box::new(GitHubUsernameMapper::new(data))
+            }
+            StoredMappingRule::V1(MappingRulesDataV1::Default(data)) => {
+                Box::new(DefaultMapper::from_v1(data))
+            }
+            StoredMappingRule::V1(MappingRulesDataV1::EmailAddress(data)) => {
+                Box::new(EmailAddressMapper::from_v1(data))
+            }
+            StoredMappingRule::V1(MappingRulesDataV1::EmailDomain(data)) => {
+                Box::new(EmailDomainMapper::from_v1(data))
+            }
+            StoredMappingRule::V1(MappingRulesDataV1::GitHubUsername(data)) => {
+                Box::new(GitHubUsernameMapper::from_v1(data))
+            }
+        }
+    }
+}
+
 impl MappingEngine for DefaultMappingEngine {
     fn create_mapping(&self, rule: &Value) -> Result<Box<dyn MapperRule>, MappingEngineError> {
-        serde_json::from_value::<MappingRulesData>(rule.clone())
+        serde_json::from_value::<StoredMappingRule>(rule.clone())
             .map_err(|err| {
                 tracing::error!(?err, "Failed to translate stored rule to mapper");
                 MappingEngineError::Other(Box::new(err))
             })
-            .map(|rule| {
-                let mapping: Box<dyn MapperRule> = match rule {
-                    MappingRulesData::Default(data) => Box::new(DefaultMapper::new(data)),
-                    MappingRulesData::EmailAddress(data) => Box::new(EmailAddressMapper::new(data)),
-                    MappingRulesData::EmailDomain(data) => Box::new(EmailDomainMapper::new(data)),
-                    MappingRulesData::GitHubUsername(data) => {
-                        Box::new(GitHubUsernameMapper::new(data))
-                    }
-                };
-                mapping
-            })
+            .map(Box::<dyn MapperRule>::from)
     }
 
     fn validate_mapping_data(&self, value: &Value) -> bool {
-        serde_json::from_value::<MappingRulesData>(value.clone())
+        serde_json::from_value::<StoredMappingRule>(value.clone())
             .tap_err(|err| {
                 tracing::warn!(?value, ?err, "Failed to parse mapping rule");
             })
@@ -136,11 +178,87 @@ impl MappingEngine for DefaultMappingEngine {
 mod tests {
     use chrono::Utc;
     use newtype_uuid::TypedUuid;
+    use serde_json::{Value, json};
     use v_model::{AccessGroup, AccessGroupSource, permissions::Permissions};
 
     use crate::permissions::VPermission;
 
-    use super::resolve_mapped_groups;
+    use super::{DefaultMappingEngine, MappingEngine, resolve_mapped_groups};
+
+    fn create(rule: Value) -> super::MappingGrants {
+        DefaultMappingEngine
+            .create_mapping(&rule)
+            .unwrap_or_else(|err| panic!("{rule} was not read: {err}"))
+            .grants()
+            .clone()
+    }
+
+    /// One rule of each type in the original shape, granting permissions alongside groups
+    fn original_rules(permissions: &Value) -> Vec<Value> {
+        vec![
+            json!({ "rule": "default", "permissions": permissions, "groups": ["a"] }),
+            json!({ "rule": "email_address", "email": "a@example.com", "permissions": permissions, "groups": ["a"] }),
+            json!({ "rule": "email_domain", "domain": "example.com", "permissions": permissions, "groups": ["a"] }),
+            json!({ "rule": "github_username", "github_username": "a", "permissions": permissions, "groups": ["a"] }),
+        ]
+    }
+
+    /// Rules stored before mappers were limited to groups keep only their groups
+    #[test]
+    fn reads_rules_in_the_original_shape() {
+        let permissions = serde_json::to_value(Permissions::<VPermission>::from(vec![
+            VPermission::CreateGroup,
+        ]))
+        .unwrap();
+
+        for rule in original_rules(&permissions) {
+            let grants = create(rule.clone());
+            assert_eq!(vec!["a".to_string()], grants.groups, "{rule}");
+        }
+    }
+
+    /// In the original shape a rule could leave out its groups entirely
+    #[test]
+    fn reads_original_rules_without_groups() {
+        let permissions = serde_json::to_value(Permissions::<VPermission>::from(vec![
+            VPermission::CreateGroup,
+        ]))
+        .unwrap();
+        let grants = create(json!({ "rule": "default", "permissions": permissions }));
+
+        assert!(grants.groups.is_empty());
+
+        let grants = create(json!({ "rule": "email_domain", "domain": "example.com" }));
+        assert!(grants.groups.is_empty());
+    }
+
+    /// A rule in the current shape grants only groups
+    #[test]
+    fn current_rules_grant_no_permissions() {
+        let grants = create(json!({ "rule": "default", "groups": ["a"] }));
+
+        assert_eq!(vec!["a".to_string()], grants.groups);
+    }
+
+    #[test]
+    fn all_rules_should_validate() {
+        let engine = DefaultMappingEngine;
+        let permissions = serde_json::to_value(Permissions::<VPermission>::from(vec![
+            VPermission::CreateGroup,
+        ]))
+        .unwrap();
+
+        assert!(engine.validate_mapping_data(&json!({ "rule": "default", "groups": ["a"] })));
+
+        for rule in original_rules(&permissions) {
+            assert!(engine.validate_mapping_data(&rule), "{rule}");
+        }
+        assert!(engine.validate_mapping_data(&json!({ "rule": "default" })));
+        assert!(
+            engine
+                .validate_mapping_data(&json!({ "rule": "email_domain", "domain": "example.com" }))
+        );
+    }
 
     fn group(name: &str) -> AccessGroup<VPermission> {
         AccessGroup {

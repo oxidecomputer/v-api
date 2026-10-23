@@ -610,7 +610,7 @@ where
             .await
             .inner_err_into()?;
 
-        tracing::debug!(?mapped_groups, "Computed mapped groups");
+        tracing::debug!(?mapped_groups, "Computed mapped fields");
 
         if is_new_user {
             tracing::info!(
@@ -1211,7 +1211,7 @@ where
                 "Loaded preset mappers from configuration"
             );
 
-            // Validate all preset mappers before setting them
+            // Validate all preset mappers before setting them.
             for mapper in &preset_mappers {
                 if !mapping_ctx.validate(&mapper.rule) {
                     return Err(VContextBuilderError::InvalidMapperRule(

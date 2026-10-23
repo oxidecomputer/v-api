@@ -15,7 +15,7 @@ use v_model::{
 use crate::{
     VApiStorage,
     endpoints::login::UserInfo,
-    mapper::{MappingEngine, resolve_mapped_groups},
+    mapper::{MappingEngine, MappingRulesData, resolve_mapped_groups},
     permissions::{VAppPermission, VPermission},
     response::{OptionalResource, ResourceResult, resource_restricted},
 };
@@ -63,13 +63,17 @@ where
         match &self.engine {
             Some(engine) => {
                 tracing::trace!(?value, "Validating mapping rule");
-                engine.validate_mapping_data(value)
+                engine.validate_mapping_data(value) && self.is_current_mapper_version(value)
             }
             None => {
                 tracing::warn!("No mapping rule is installed to validate rules");
                 false
             }
         }
+    }
+
+    fn is_current_mapper_version(&self, value: &Value) -> bool {
+        serde_json::from_value::<MappingRulesData>(value.clone()).is_ok()
     }
 
     pub async fn get_mappers(
@@ -100,6 +104,7 @@ where
         new_mapper: &NewMapper,
     ) -> ResourceResult<Mapper, StoreError> {
         if caller.can(&VPermission::CreateMapper.into())
+            && self.validate(&new_mapper.rule)
             && self.can_grant_mapping(caller, visible_groups, &new_mapper.rule)
         {
             Ok(MapperStore::upsert(&*self.storage, new_mapper).await?)
@@ -484,5 +489,48 @@ mod tests {
             .unwrap();
 
         assert_eq!(BTreeSet::from([engineering.id]), groups);
+    }
+
+    /// New mappers must use the current shape, even when the caller could grant everything the
+    /// original shape asks for. The caller is shown to be allowed to create the same rule in the
+    /// current shape, so the refusals can only come from the shape of the rule.
+    #[tokio::test]
+    async fn creating_a_mapper_refuses_the_original_shape() {
+        let engineering = group("engineering");
+        let visible = vec![engineering.clone()];
+        let mapping = mapping_context();
+        let caller = caller_with(vec![
+            VPermission::CreateMapper,
+            VPermission::ManageGroupMembershipsAll,
+            VPermission::CreateGroup,
+        ]);
+
+        let current = NewMapper {
+            rule: json!({ "rule": "default", "groups": ["engineering"] }),
+            ..mapper(vec![])
+        };
+        assert!(
+            mapping
+                .add_mapper(&caller, &visible, &current)
+                .await
+                .is_ok(),
+            "the caller must be able to create the rule in the current shape"
+        );
+
+        for rule in [
+            json!({
+                "rule": "default",
+                "permissions": serde_json::to_value(Permissions::<VPermission>::from(vec![VPermission::CreateGroup])).unwrap(),
+                "groups": ["engineering"],
+            }),
+            json!({ "rule": "default" }),
+        ] {
+            let new_mapper = NewMapper {
+                rule: rule.clone(),
+                ..mapper(vec![])
+            };
+            let refused = mapping.add_mapper(&caller, &visible, &new_mapper).await;
+            assert!(matches!(refused, Err(ResourceError::Restricted)), "{rule}");
+        }
     }
 }

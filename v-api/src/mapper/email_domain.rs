@@ -5,6 +5,7 @@
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::endpoints::login::UserInfo;
 
@@ -17,13 +18,31 @@ pub struct EmailDomainMapper {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct EmailDomainMapperData {
     domain: String,
     groups: Vec<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EmailDomainMapperDataV1 {
+    domain: String,
+    permissions: Option<Value>,
+    #[serde(default)]
+    groups: Vec<String>,
+}
+
 impl EmailDomainMapper {
     pub fn new(data: EmailDomainMapperData) -> Self {
+        Self {
+            domain: data.domain,
+            grants: MappingGrants {
+                groups: data.groups,
+            },
+        }
+    }
+
+    pub fn from_v1(data: EmailDomainMapperDataV1) -> Self {
         Self {
             domain: data.domain,
             grants: MappingGrants {
