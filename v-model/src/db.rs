@@ -9,12 +9,14 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::{
+    jwk::PublicJwk,
     permissions::Permissions,
     schema::{
         access_groups, api_key, api_user, api_user_access_token, api_user_contact_email,
         api_user_provider, link_request, login_attempt, magic_link_attempt, magic_link_client,
         magic_link_client_redirect_uri, magic_link_client_secret, mapper, mapper_event,
-        oauth_client, oauth_client_redirect_uri, oauth_client_secret,
+        oauth_client, oauth_client_assertion, oauth_client_key, oauth_client_redirect_uri,
+        oauth_client_secret, service_account, service_account_token,
     },
     schema_ext::MapperSource,
     schema_ext::{LoginAttemptState, MagicLinkAttemptState},
@@ -43,6 +45,7 @@ pub struct ApiUserModel<T> {
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
     pub groups: Vec<Option<Uuid>>,
+    pub generation: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
@@ -111,6 +114,47 @@ pub struct OAuthClientModel {
     pub id: Uuid,
     pub created_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
+#[diesel(table_name = service_account)]
+pub struct ServiceAccountModel<T> {
+    pub id: Uuid,
+    pub permissions: Permissions<T>,
+    pub generation: i64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
+#[diesel(table_name = service_account_token)]
+pub struct ServiceAccountTokenModel {
+    pub id: Uuid,
+    pub oauth_client_id: Uuid,
+    pub expires_at: DateTime<Utc>,
+    pub revoked_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
+#[diesel(table_name = oauth_client_key)]
+pub struct OAuthClientKeyModel {
+    pub id: Uuid,
+    pub oauth_client_id: Uuid,
+    pub thumbprint: String,
+    pub jwk: PublicJwk,
+    pub created_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
+#[diesel(table_name = oauth_client_assertion)]
+pub struct OAuthClientAssertionModel {
+    pub oauth_client_id: Uuid,
+    pub jti: String,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Queryable, Insertable)]
@@ -188,6 +232,7 @@ pub struct AccessGroupModel<T> {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    pub generation: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize, Queryable, QueryableByName, Insertable)]

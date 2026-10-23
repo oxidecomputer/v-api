@@ -75,7 +75,7 @@ pub trait OAuthProvider: ExtractUserInfo + Debug + Send + Sync {
     fn expires_in(&self) -> Option<u64>;
     fn default_scopes(&self) -> &[String];
 
-    /// Whether the remote OAuth provider supports PKCE (RFC 7636). Providers must
+    /// Whether the remote OAuth provider supports PKCE (RFC 7636 §4). Providers must
     /// explicitly declare this. This controls whether v-api sends a PKCE challenge
     /// to the remote provider during the authorization code exchange. Note: clients
     /// calling v-api are always required to use PKCE regardless of this setting.
@@ -219,6 +219,25 @@ pub struct OAuthProviderDeviceInfo {
     #[schemars(skip)]
     #[serde(skip)]
     remote: OAuthProviderDeviceRemoteInfo,
+}
+
+#[cfg(test)]
+impl OAuthProviderDeviceInfo {
+    /// A device flow configuration for the given client, with placeholder upstream details
+    pub(crate) fn for_test(client_id: TypedUuid<OAuthClientId>) -> Self {
+        Self {
+            client_id,
+            auth_url_endpoint: "https://test_public_url/login/oauth/test/device".to_string(),
+            token_endpoint: "https://test_public_url/login/oauth/test/device/exchange".to_string(),
+            remote: OAuthProviderDeviceRemoteInfo {
+                client_id: "remote-client".to_string(),
+                client_secret: OpenApiSecretString(SecretString::from("remote-secret")),
+                device_code_endpoint: "https://provider.test/device".to_string(),
+                token_endpoint: "https://provider.test/token".to_string(),
+                revocation_endpoint: None,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]

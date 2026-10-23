@@ -24,7 +24,10 @@ use v_api_param::ParamResolutionError;
 use v_model::permissions::PermissionStorage;
 
 use crate::{
-    authn::{jwt::Claims, key::RawKey},
+    authn::{
+        jwt::{ServiceAccountClaims, TokenClaims, UserClaims},
+        key::RawKey,
+    },
     context::ApiContext,
     permissions::VAppPermission,
     util::response::unauthorized,
@@ -32,6 +35,8 @@ use crate::{
 
 use self::jwt::Jwt;
 
+pub mod client_assertion;
+pub mod client_key;
 pub mod jwt;
 pub mod key;
 
@@ -45,15 +50,35 @@ pub enum AuthError {
 
 // A token that provides authentication and optionally (JWT) authorization claims
 pub enum AuthToken {
+    ServiceAccount(Jwt<ServiceAccountClaims>),
+    User(UserToken),
+}
+
+pub enum UserToken {
     ApiKey(RawKey),
-    Jwt(Jwt<Claims>),
+    Session(Jwt<UserClaims>),
 }
 
 impl Debug for AuthToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ApiKey(_) => f.debug_struct("AuthToken").finish(),
-            Self::Jwt(jwt) => f.debug_struct("AuthToken").field("jwt", jwt).finish(),
+            Self::User(UserToken::ApiKey(_)) => f.debug_struct("AuthToken").finish(),
+            Self::User(UserToken::Session(jwt)) => {
+                f.debug_struct("AuthToken").field("jwt", jwt).finish()
+            }
+            Self::ServiceAccount(jwt) => f
+                .debug_struct("AuthToken")
+                .field("service_account", jwt)
+                .finish(),
+        }
+    }
+}
+
+impl From<Jwt<TokenClaims>> for AuthToken {
+    fn from(jwt: Jwt<TokenClaims>) -> Self {
+        match jwt.claims {
+            TokenClaims::User(claims) => AuthToken::User(UserToken::Session(Jwt { claims })),
+            TokenClaims::ServiceAccount(claims) => AuthToken::ServiceAccount(Jwt { claims }),
         }
     }
 }
@@ -82,12 +107,12 @@ impl AuthToken {
 
         // Attempt to decode an API key from the token. If that fails then attempt to verify the
         // token as a JWT
-        let jwt = Jwt::new(ctx.v_ctx(), &token).await;
+        let jwt = Jwt::<TokenClaims>::new(ctx.v_ctx(), &token).await;
 
         match jwt {
             Ok(token) => {
                 tracing::trace!("Extracted auth token");
-                Ok(AuthToken::Jwt(token))
+                Ok(token.into())
             }
             Err(err) => {
                 tracing::debug!(
@@ -96,12 +121,12 @@ impl AuthToken {
                     "Token is not a JWT, falling back to API key"
                 );
 
-                Ok(AuthToken::ApiKey(
+                Ok(AuthToken::User(UserToken::ApiKey(
                     RawKey::try_from(token.as_str()).map_err(|err| {
                         tracing::info!(?err, "Failed to parse API key");
                         AuthError::FailedToExtract
                     })?,
-                ))
+                )))
             }
         }
     }
