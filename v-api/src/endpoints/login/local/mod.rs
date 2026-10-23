@@ -8,6 +8,7 @@ use http::{Response, StatusCode, header};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
+use uuid::Uuid;
 use v_model::permissions::PermissionStorage;
 
 use crate::{
@@ -63,7 +64,7 @@ where
                 None,
                 &api_user.user.id,
                 &api_user_provider.id,
-                "local".to_string(),
+                Uuid::new_v4(),
                 vec!["full".to_string()],
                 Utc::now() + Duration::seconds(60 * 60),
             ),
