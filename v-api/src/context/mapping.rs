@@ -15,7 +15,7 @@ use v_model::{
 use crate::{
     VApiStorage,
     endpoints::login::UserInfo,
-    mapper::{MappingEngine, MappingRulesData, resolve_mapped_groups},
+    mapper::{MappingEngine, resolve_mapped_groups},
     permissions::{VAppPermission, VPermission},
     response::{OptionalResource, ResourceError, ResourceResult, resource_restricted},
 };
@@ -71,17 +71,13 @@ where
         match &self.engine {
             Some(engine) => {
                 tracing::trace!(?value, "Validating mapping rule");
-                engine.validate_mapping_data(value) && self.is_current_mapper_version(value)
+                engine.validate_mapping_data(value) && engine.is_accepted(value)
             }
             None => {
                 tracing::warn!("No mapping rule is installed to validate rules");
                 false
             }
         }
-    }
-
-    fn is_current_mapper_version(&self, value: &Value) -> bool {
-        serde_json::from_value::<MappingRulesData>(value.clone()).is_ok()
     }
 
     pub async fn get_mappers(

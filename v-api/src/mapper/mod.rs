@@ -54,6 +54,10 @@ pub struct MappingGrants {
 /// Interface for generating mapping rules from mapper configurations
 pub trait MappingEngine: Send + Sync + 'static {
     // TODO: Would love to fix this so it isn't a Value...
+    /// Independent of a mapper rule being valid, and engine may only accept a mapper based on
+    /// arbitrary restrictions.
+    fn is_accepted(&self, value: &Value) -> bool;
+    // TODO: Would love to fix this so it isn't a Value...
     /// Creates a mapping rule from a blob of rule data. This must be backwards compatible in terms
     /// of reading and parsing rules. The output is expected to be a current rule.
     fn create_mapping(&self, rule: &Value) -> Result<Box<dyn MapperRule>, MappingEngineError>;
@@ -156,6 +160,10 @@ impl From<StoredMappingRule> for Box<dyn MapperRule> {
 }
 
 impl MappingEngine for DefaultMappingEngine {
+    fn is_accepted(&self, value: &Value) -> bool {
+        serde_json::from_value::<MappingRulesData>(value.clone()).is_ok()
+    }
+
     fn create_mapping(&self, rule: &Value) -> Result<Box<dyn MapperRule>, MappingEngineError> {
         serde_json::from_value::<StoredMappingRule>(rule.clone())
             .map_err(|err| {
