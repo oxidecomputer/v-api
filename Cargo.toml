@@ -66,7 +66,7 @@ semver = "1.0.28"
 serde = "1.0.229"
 serde_json = "1"
 serde_urlencoded = "0.7.1"
-sha2 = "0.11.0"
+sha2 = "0.11.1"
 slog = "2.8.2"
 steno = { git = "https://github.com/oxidecomputer/steno" }
 syn = "3"
