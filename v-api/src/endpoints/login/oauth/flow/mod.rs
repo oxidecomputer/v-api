@@ -7,6 +7,7 @@ use http::{
     HeaderMap, HeaderValue,
     header::{CACHE_CONTROL, PRAGMA},
 };
+use newtype_uuid::GenericUuid;
 use oauth2::{
     ClientId, ClientSecret, EndpointNotSet, EndpointSet, RevocationUrl, StandardRevocableToken,
     basic::BasicClient,
@@ -123,7 +124,7 @@ where
             &ctx.builtin_registration_user(),
             &api_user_info.user.id,
             &api_user_provider.id,
-            attempt.client_id.to_string(),
+            attempt.client_id.into_untyped_uuid(),
             scope,
         )
         .await?;

@@ -499,7 +499,7 @@ where
         &self,
         api_user: &TypedUuid<UserId>,
         api_user_provider: &TypedUuid<UserProviderId>,
-        client_id: String,
+        client_id: Uuid,
         scope: Vec<String>,
     ) -> UserClaims {
         let expires_at =
@@ -702,7 +702,7 @@ where
         caller: &Caller<T>,
         api_user: &TypedUuid<UserId>,
         api_user_provider: &TypedUuid<UserProviderId>,
-        client_id: String,
+        client_id: Uuid,
         scope: Vec<String>,
     ) -> Result<RegisteredAccessToken, ApiError> {
         let claims = self.generate_claims(api_user, api_user_provider, client_id, scope);
@@ -1338,7 +1338,7 @@ mod tests {
                 Some(token_id),
                 &user.id,
                 &provider.id,
-                "test-client".to_string(),
+                Uuid::new_v4(),
                 scope,
                 Utc::now().add(TimeDelta::try_seconds(300).unwrap()),
             ))
@@ -1608,7 +1608,7 @@ mod tests {
                 None,
                 &TypedUuid::new_v4(),
                 &TypedUuid::new_v4(),
-                "test-client".to_string(),
+                Uuid::new_v4(),
                 vec![],
                 Utc::now().add(TimeDelta::try_seconds(300).unwrap()),
             ))
@@ -3267,7 +3267,7 @@ pub(crate) mod test_mocks {
                 },
                 &api_user_id,
                 &api_user_provider_id,
-                "test-client".to_string(),
+                Uuid::new_v4(),
                 vec![],
             )
             .await;

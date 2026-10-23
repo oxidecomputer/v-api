@@ -7,7 +7,7 @@ use dropshot::{
     ClientErrorStatusCode, ErrorStatusCode, HttpError, HttpResponseHeaders, HttpResponseOk, Path,
     RequestContext, TypedBody,
 };
-use newtype_uuid::TypedUuid;
+use newtype_uuid::{GenericUuid, TypedUuid};
 use schemars::JsonSchema;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
@@ -251,7 +251,7 @@ where
                 &ctx.builtin_registration_user(),
                 &api_user_info.user.id,
                 &api_user_provider.id,
-                attempt.magic_link_client_id.to_string(),
+                attempt.magic_link_client_id.into_untyped_uuid(),
                 scope,
             )
             .await?;
