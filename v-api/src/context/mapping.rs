@@ -17,8 +17,16 @@ use crate::{
     endpoints::login::UserInfo,
     mapper::{MappingEngine, MappingRulesData, resolve_mapped_groups},
     permissions::{VAppPermission, VPermission},
-    response::{OptionalResource, ResourceResult, resource_restricted},
+    response::{OptionalResource, ResourceError, ResourceResult, resource_restricted},
 };
+
+#[derive(Debug, thiserror::Error)]
+pub enum AddMapperError {
+    #[error("Mapper rule is invalid")]
+    InvalidRule,
+    #[error(transparent)]
+    Resource(#[from] ResourceError<StoreError>),
+}
 
 pub struct MappingContext<T> {
     engine: Option<Arc<dyn MappingEngine>>,
@@ -102,14 +110,18 @@ where
         caller: &Caller<T>,
         visible_groups: &[AccessGroup<T>],
         new_mapper: &NewMapper,
-    ) -> ResourceResult<Mapper, StoreError> {
-        if caller.can(&VPermission::CreateMapper.into())
-            && self.validate(&new_mapper.rule)
-            && self.can_grant_mapping(caller, visible_groups, &new_mapper.rule)
-        {
-            Ok(MapperStore::upsert(&*self.storage, new_mapper).await?)
+    ) -> Result<Mapper, AddMapperError> {
+        if !caller.can(&VPermission::CreateMapper.into()) {
+            Err(ResourceError::Restricted.into())
+        } else if !self.validate(&new_mapper.rule) {
+            Err(AddMapperError::InvalidRule)
+        } else if !self.can_grant_mapping(caller, visible_groups, &new_mapper.rule) {
+            Err(ResourceError::Restricted.into())
         } else {
-            resource_restricted()
+            let mapper = MapperStore::upsert(&*self.storage, new_mapper)
+                .await
+                .map_err(ResourceError::from)?;
+            Ok(mapper)
         }
     }
 
@@ -306,7 +318,7 @@ mod tests {
         storage::{MockMapperEventStore, MockMapperStore},
     };
 
-    use super::MappingContext;
+    use super::{AddMapperError, MappingContext};
     use crate::{
         context::test_mocks::MockStorage,
         endpoints::login::{ExternalUserId, UserInfo},
@@ -379,7 +391,10 @@ mod tests {
 
         let no_membership = caller_with(vec![VPermission::CreateMapper, VPermission::CreateGroup]);
         let refused = mapping.add_mapper(&no_membership, &visible, &rule).await;
-        assert!(matches!(refused, Err(ResourceError::Restricted)));
+        assert!(matches!(
+            refused,
+            Err(AddMapperError::Resource(ResourceError::Restricted))
+        ));
 
         let cannot_grant_group = caller_with(vec![
             VPermission::CreateMapper,
@@ -388,7 +403,10 @@ mod tests {
         let refused = mapping
             .add_mapper(&cannot_grant_group, &visible, &rule)
             .await;
-        assert!(matches!(refused, Err(ResourceError::Restricted)));
+        assert!(matches!(
+            refused,
+            Err(AddMapperError::Resource(ResourceError::Restricted))
+        ));
 
         let can_add = caller_with(vec![
             VPermission::CreateMapper,
@@ -413,7 +431,10 @@ mod tests {
             VPermission::CreateGroup,
         ]);
         let refused = mapping.add_mapper(&caller, &visible, &rule).await;
-        assert!(matches!(refused, Err(ResourceError::Restricted)));
+        assert!(matches!(
+            refused,
+            Err(AddMapperError::Resource(ResourceError::Restricted))
+        ));
     }
 
     fn preset_mapper(name: &str, rule: serde_json::Value) -> Mapper {
@@ -530,7 +551,10 @@ mod tests {
                 ..mapper(vec![])
             };
             let refused = mapping.add_mapper(&caller, &visible, &new_mapper).await;
-            assert!(matches!(refused, Err(ResourceError::Restricted)), "{rule}");
+            assert!(
+                matches!(refused, Err(AddMapperError::InvalidRule)),
+                "{rule}"
+            );
         }
     }
 }

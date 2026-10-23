@@ -545,16 +545,13 @@ where
         client_id: &TypedUuid<OAuthClientId>,
         change: &ServiceAccountChange<T>,
     ) -> bool {
-        let can_manage = caller.can(&VPermission::ManageOAuthClient(*client_id).into());
+        let permission = match change {
+            ServiceAccountChange::AddPermission(permission) => permission,
+            ServiceAccountChange::RemovePermission(permission) => *permission,
+        };
 
-        match change {
-            ServiceAccountChange::AddPermission(permission) => {
-                can_manage && caller.can_grant(permission)
-            }
-            ServiceAccountChange::RemovePermission(permission) => {
-                can_manage && caller.can_grant(permission)
-            }
-        }
+        caller.can(&VPermission::ManageOAuthClient(*client_id).into())
+            && caller.can_grant(permission)
     }
 
     fn apply_change(update: &mut NewServiceAccount<T>, change: ServiceAccountChange<T>) {

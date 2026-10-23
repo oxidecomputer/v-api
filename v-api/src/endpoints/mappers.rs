@@ -17,7 +17,7 @@ use v_model::{
 };
 
 use crate::{
-    context::{ApiContext, VContextWithCaller},
+    context::{ApiContext, VContextWithCaller, mapping::AddMapperError},
     permissions::{VAppPermission, VPermission},
     response::{bad_request, client_error},
 };
@@ -64,30 +64,30 @@ where
     T::AppPermissions: VAppPermission,
 {
     let (ctx, caller) = rqctx.as_ctx().await?;
-    if ctx.mapping.validate(&body.rule) {
-        let visible_groups = ctx
-            .group
-            .list_groups(&caller, AccessGroupFilter::default())
-            .await?;
-        let res = ctx
-            .mapping
-            .add_mapper(
-                &caller,
-                &visible_groups,
-                &NewMapper {
-                    id: TypedUuid::new_v4(),
-                    name: body.name,
-                    rule: body.rule,
-                    activations: body.max_activations.map(|_| 0),
-                    max_activations: body.max_activations,
-                },
-            )
-            .await;
+    let visible_groups = ctx
+        .group
+        .list_groups(&caller, AccessGroupFilter::default())
+        .await?;
+    let mapper = ctx
+        .mapping
+        .add_mapper(
+            &caller,
+            &visible_groups,
+            &NewMapper {
+                id: TypedUuid::new_v4(),
+                name: body.name,
+                rule: body.rule,
+                activations: body.max_activations.map(|_| 0),
+                max_activations: body.max_activations,
+            },
+        )
+        .await
+        .map_err(|err| match err {
+            AddMapperError::InvalidRule => bad_request("Invalid rule payload"),
+            AddMapperError::Resource(err) => err.into(),
+        })?;
 
-        Ok(HttpResponseCreated(res?))
-    } else {
-        Err(bad_request("Invalid rule payload"))
-    }
+    Ok(HttpResponseCreated(mapper))
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]

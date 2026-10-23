@@ -197,12 +197,12 @@ where
         group_id: &TypedUuid<AccessGroupId>,
         change: &GroupChange<T>,
     ) -> bool {
-        let can_manage = caller.can(&VPermission::ManageGroup(*group_id).into());
+        let permission = match change {
+            GroupChange::AddPermission(permission) => permission,
+            GroupChange::RemovePermission(permission) => *permission,
+        };
 
-        match change {
-            GroupChange::AddPermission(permission) => can_manage && caller.can_grant(permission),
-            GroupChange::RemovePermission(permission) => can_manage && caller.can_grant(permission),
-        }
+        caller.can(&VPermission::ManageGroup(*group_id).into()) && caller.can_grant(permission)
     }
 
     fn apply_change(update: &mut NewAccessGroup<T>, change: GroupChange<T>) {
