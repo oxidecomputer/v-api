@@ -46,7 +46,7 @@ export type VApiAccessTokenClaims = {
   sub: string
   prv: string
   /** The client the token was issued through. For an OAuth login this is the OAuth client id. */
-  client_id: string
+  client_id?: string | null
   scp: string
   exp: number
   nbf: number
