@@ -19,6 +19,10 @@ pub struct OpenIdConfiguration {
     subject_types_supported: Vec<String>,
     id_token_signing_alg_values_supported: Vec<String>,
     claims_supported: Vec<String>,
+    token_endpoint: String,
+    grant_types_supported: Vec<String>,
+    token_endpoint_auth_methods_supported: Vec<String>,
+    token_endpoint_auth_signing_alg_values_supported: Vec<String>,
 }
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -40,6 +44,17 @@ where
             "aud".to_string(),
             "exp".to_string(),
             "iat".to_string(),
+        ],
+        token_endpoint: format!("{}/oauth/token", rqctx.v_ctx().public_url()),
+        grant_types_supported: vec![
+            "authorization_code".to_string(),
+            "client_credentials".to_string(),
+            "urn:ietf:params:oauth:grant-type:device_code".to_string(),
+        ],
+        token_endpoint_auth_methods_supported: vec!["private_key_jwt".to_string()],
+        token_endpoint_auth_signing_alg_values_supported: vec![
+            "Ed25519".to_string(),
+            "EdDSA".to_string(),
         ],
     }))
 }

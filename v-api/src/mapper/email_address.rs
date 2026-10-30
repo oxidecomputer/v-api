@@ -3,92 +3,64 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use async_trait::async_trait;
-use newtype_uuid::TypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
-use tracing::instrument;
-use v_model::{
-    AccessGroupId,
-    permissions::{Caller, Permissions},
-    storage::{AccessGroupFilter, StoreError},
-};
+use serde_json::Value;
 
-use crate::{
-    context::group::GroupContext, endpoints::login::UserInfo, permissions::VAppPermission,
-    util::response::ResourceResult,
-};
+use crate::endpoints::login::UserInfo;
 
-use super::MapperRule;
+use super::{MapperRule, MappingGrants};
 
-pub struct EmailAddressMapper<T> {
-    caller: Caller<T>,
-    group: GroupContext<T>,
-    data: EmailAddressMapperData<T>,
+/// Adds a user with a specific verified email address to a set of groups.
+pub struct EmailAddressMapper {
+    email: String,
+    grants: MappingGrants,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct EmailAddressMapperData<T> {
+#[serde(deny_unknown_fields)]
+pub struct EmailAddressMapperData {
     email: String,
-    permissions: Option<Permissions<T>>,
+    groups: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EmailAddressMapperDataV1 {
+    email: String,
+    permissions: Option<Value>,
     #[serde(default)]
     groups: Vec<String>,
 }
 
-impl<T> EmailAddressMapper<T> {
-    pub fn new(caller: Caller<T>, group: GroupContext<T>, data: EmailAddressMapperData<T>) -> Self {
+impl EmailAddressMapper {
+    pub fn new(data: EmailAddressMapperData) -> Self {
         Self {
-            caller,
-            group,
-            data,
+            email: data.email,
+            grants: MappingGrants {
+                groups: data.groups,
+            },
+        }
+    }
+
+    pub fn from_v1(data: EmailAddressMapperDataV1) -> Self {
+        Self {
+            email: data.email,
+            grants: MappingGrants {
+                groups: data.groups,
+            },
         }
     }
 }
 
 #[async_trait]
-impl<T> MapperRule<T> for EmailAddressMapper<T>
-where
-    T: VAppPermission,
-{
-    #[instrument(skip(self, user), field(data = ?self.data))]
-    async fn permissions_for(&self, user: &UserInfo) -> Result<Permissions<T>, StoreError> {
-        tracing::trace!("Running email address mapper");
-
-        if user
-            .verified_emails
-            .iter()
-            .any(|email| email == &self.data.email)
-        {
-            Ok(self.data.permissions.clone().unwrap_or_default())
-        } else {
-            Ok(Permissions::new())
-        }
+impl MapperRule for EmailAddressMapper {
+    fn grants(&self) -> &MappingGrants {
+        &self.grants
     }
 
-    #[instrument(skip(self, user), field(data = ?self.data))]
-    async fn groups_for(
-        &self,
-        user: &UserInfo,
-    ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError> {
-        tracing::trace!("Running email address mapper");
-
-        let found_email = user
-            .verified_emails
+    async fn matches(&self, user: &UserInfo) -> bool {
+        user.verified_emails
             .iter()
-            .any(|email| email == &self.data.email);
-
-        if found_email {
-            let known_groups = self
-                .group
-                .list_groups(&self.caller, AccessGroupFilter::default())
-                .await?;
-
-            Ok(super::resolve_mapped_groups(
-                &self.data.groups,
-                &known_groups,
-            ))
-        } else {
-            Ok(BTreeSet::new())
-        }
+            .any(|email| email == &self.email)
     }
 }

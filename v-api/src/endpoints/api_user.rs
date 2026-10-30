@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::{BTreeSet, HashMap, hash_map::Entry};
+use std::collections::{HashMap, hash_map::Entry};
 
 use chrono::{DateTime, Utc};
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
-    RequestContext, TypedBody,
+    RequestContext,
 };
 use newtype_uuid::{GenericUuid, TypedUuid};
 use partial_struct::partial;
@@ -19,7 +19,7 @@ use uuid::Uuid;
 use v_model::{
     AccessGroupId, ApiKeyId, ApiUser, ApiUserContactEmail, ApiUserProvider, NewApiKey, UserId,
     permissions::{Caller, Permission, PermissionStorage, Permissions},
-    storage::{AccessGroupFilter, ApiUserFilter, ApiUserProviderFilter, ListPagination},
+    storage::{ApiUserFilter, ApiUserProviderFilter, ListPagination},
 };
 
 use crate::{
@@ -29,7 +29,7 @@ use crate::{
     error::ApiError,
     permissions::{VAppPermission, VAppPermissionResponse},
     secrets::OpenApiSecretString,
-    util::response::{bad_request, not_found, to_internal_error, unauthorized},
+    util::response::{bad_request, forbidden, not_found, to_internal_error, unauthorized},
 };
 
 fn into_user_response<T, U>(user: ApiUser<T>) -> ApiUser<U>
@@ -48,6 +48,7 @@ where
         created_at: user.created_at,
         updated_at: user.updated_at,
         deleted_at: user.deleted_at,
+        generation: user.generation,
     }
 }
 
@@ -83,7 +84,10 @@ where
     U: VAppPermissionResponse + From<T> + JsonSchema,
 {
     let (ctx, caller) = rqctx.as_ctx().await?;
-    let info = ctx.user.get_api_user(&caller, &caller.id).await?;
+
+    // Only a user has a user record to describe
+    let user_id = caller.user_id().ok_or_else(forbidden)?;
+    let info = ctx.user.get_api_user(&caller, &user_id).await?;
 
     let filter = ApiUserProviderFilter {
         api_user_id: Some(vec![info.user.id]),
@@ -189,122 +193,9 @@ where
     Ok(HttpResponseOk(responses))
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
-pub struct ApiUserUpdateParams<T> {
-    permissions: Permissions<T>,
-    #[serde(default)]
-    group_ids: BTreeSet<TypedUuid<AccessGroupId>>,
-}
-
-/// Creates a new API user with the specified permissions and group memberships.
-///
-/// Returns the newly created user's information along with any associated providers.
-#[instrument(skip(rqctx), err(Debug))]
-pub async fn create_api_user_op<T, U>(
-    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
-    body: TypedBody<ApiUserUpdateParams<T>>,
-) -> Result<HttpResponseCreated<GetUserResponse<U>>, HttpError>
-where
-    T: VAppPermission + JsonSchema + PermissionStorage,
-    U: VAppPermissionResponse + From<T> + JsonSchema,
-{
-    let (ctx, caller) = rqctx.as_ctx().await?;
-    let body = body.into_inner();
-
-    create_api_user_inner(ctx, caller, body).await
-}
-
-#[instrument(skip(ctx, body))]
-pub async fn create_api_user_inner<T, U>(
-    ctx: &VContext<T>,
-    caller: Caller<T>,
-    body: ApiUserUpdateParams<T>,
-) -> Result<HttpResponseCreated<GetUserResponse<U>>, HttpError>
-where
-    T: VAppPermission + JsonSchema + PermissionStorage,
-    U: VAppPermissionResponse + From<T> + JsonSchema,
-{
-    // Resolve the full groups so that create_api_user can verify the caller
-    // is allowed to grant the permissions they carry.
-    let groups = ctx
-        .group
-        .list_groups(
-            &caller,
-            AccessGroupFilter {
-                id: Some(body.group_ids.into_iter().collect()),
-                ..Default::default()
-            },
-        )
-        .await?;
-
-    let info = ctx
-        .user
-        .create_api_user(&caller, TypedUuid::new_v4(), body.permissions, groups)
-        .await?;
-
-    let filter = ApiUserProviderFilter {
-        api_user_id: Some(vec![info.user.id]),
-        ..Default::default()
-    };
-    let providers = ctx
-        .user
-        .list_api_user_provider(&caller, filter, &ListPagination::default().limit(10))
-        .await?;
-
-    Ok(HttpResponseCreated(GetUserResponse::new(
-        info.user, providers,
-    )))
-}
-
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct ApiUserPath {
     user_id: TypedUuid<UserId>,
-}
-
-/// Updates an existing API user's direct permissions. Group membership is managed
-/// separately via the group membership endpoints.
-///
-/// Returns the updated user's information along with their associated providers.
-#[instrument(skip(rqctx), err(Debug))]
-pub async fn update_api_user_op<T, U>(
-    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
-    path: ApiUserPath,
-    body: ApiUserUpdateParams<T>,
-) -> Result<HttpResponseOk<GetUserResponse<U>>, HttpError>
-where
-    T: VAppPermission + PermissionStorage,
-    U: VAppPermissionResponse + From<T> + JsonSchema,
-{
-    let (ctx, caller) = rqctx.as_ctx().await?;
-    update_api_user_inner(ctx, caller, path, body).await
-}
-
-#[instrument(skip(ctx, body))]
-pub async fn update_api_user_inner<T, U>(
-    ctx: &VContext<T>,
-    caller: Caller<T>,
-    path: ApiUserPath,
-    body: ApiUserUpdateParams<T>,
-) -> Result<HttpResponseOk<GetUserResponse<U>>, HttpError>
-where
-    T: VAppPermission + PermissionStorage,
-    U: VAppPermissionResponse + From<T> + JsonSchema,
-{
-    let info = ctx
-        .user
-        .set_api_user_permissions(&caller, &path.user_id, body.permissions)
-        .await?;
-
-    let filter = ApiUserProviderFilter {
-        api_user_id: Some(vec![info.user.id]),
-        ..Default::default()
-    };
-    let providers = ctx
-        .user
-        .list_api_user_provider(&caller, filter, &ListPagination::default().limit(10))
-        .await?;
-
-    Ok(HttpResponseOk(GetUserResponse::new(info.user, providers)))
 }
 
 /// Lists all API tokens for a specific user.
@@ -795,7 +686,7 @@ where
     //
     // This endpoint can only be called by the user themselves, it can not be performed on behalf
     // of a user
-    if path.user_id == caller.id {
+    if caller.is(&path.user_id) {
         let secret = RawKey::try_from(body.token.as_str()).map_err(|err| {
             tracing::debug!(?err, "Invalid link request token");
             bad_request("Malformed link request token")
@@ -818,7 +709,7 @@ where
 
         // Verify that the found link request is assigned to the user calling the endpoint and that
         // the token provided matches the stored signature
-        if link_request.target_user_id == caller.id
+        if caller.is(&link_request.target_user_id)
             && secret
                 .verify(ctx, link_request.secret_signature.as_bytes())
                 .is_ok()
@@ -868,7 +759,7 @@ where
 mod tests {
     use std::{
         collections::{BTreeSet, HashMap},
-        sync::Arc,
+        sync::{Arc, Mutex},
     };
 
     use chrono::{TimeDelta, Utc};
@@ -876,27 +767,25 @@ mod tests {
     use mockall::predicate::eq;
     use newtype_uuid::TypedUuid;
     use v_model::{
-        ApiKey, ApiUser, ApiUserContactEmail, ApiUserInfo, ApiUserProvider, NewApiUser,
-        permissions::{Caller, Permissions},
+        ApiKey, ApiUser, ApiUserContactEmail, ApiUserInfo, ApiUserProvider, UserId,
+        permissions::{Caller, PermissionStorage, Permissions, Principal},
         storage::{
-            ApiKeyFilter, ListPagination, MockAccessGroupStore, MockApiKeyStore,
-            MockApiUserContactEmailStore, MockApiUserProviderStore, MockApiUserStore, StoreError,
+            ApiKeyFilter, ListPagination, MockApiKeyStore, MockApiUserContactEmailStore,
+            MockApiUserProviderStore, MockApiUserStore, MockOAuthClientStore, StoreError,
         },
     };
 
     use crate::{
         context::test_mocks::{MockStorage, mock_context},
         endpoints::api_user::{
-            ApiKeyCreateParams, ApiUserEmailUpdateParams, ApiUserPath, ApiUserTokenPath,
-            create_api_user_inner, create_api_user_token_inner, delete_api_user_token_inner,
-            get_api_user_token_inner, list_api_user_tokens_inner, set_api_user_contact_email_inner,
-            update_api_user_inner,
+            ApiKeyCreateParams, ApiUserEmailUpdateParams, ApiUserPath, ApiUserPermissionParams,
+            ApiUserTokenPath, add_api_user_permission_inner, create_api_user_token_inner,
+            delete_api_user_token_inner, get_api_user_token_inner, list_api_user_tokens_inner,
+            remove_api_user_permission_inner, set_api_user_contact_email_inner,
         },
         permissions::{VPermission, VPermissionResponse},
         util::tests::get_status,
     };
-
-    use super::ApiUserUpdateParams;
 
     fn mock_user() -> ApiUser<VPermission> {
         ApiUser {
@@ -906,258 +795,8 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             deleted_at: None,
+            generation: 0,
         }
-    }
-
-    #[tokio::test]
-    async fn test_create_api_user_permissions() {
-        let successful_update = ApiUserUpdateParams {
-            permissions: vec![VPermission::CreateApiUser].into(),
-            group_ids: BTreeSet::new(),
-        };
-
-        let failure_update = ApiUserUpdateParams {
-            permissions: vec![VPermission::GetApiUsersAll].into(),
-            group_ids: BTreeSet::new(),
-        };
-
-        let mut store = MockApiUserStore::new();
-        store
-            .expect_upsert()
-            .withf(|x: &NewApiUser<VPermission>| x.permissions.can(&VPermission::CreateApiUser))
-            .returning(|user| {
-                Ok(ApiUserInfo {
-                    user: ApiUser {
-                        id: user.id,
-                        permissions: user.permissions,
-                        groups: BTreeSet::new(),
-                        created_at: Utc::now(),
-                        updated_at: Utc::now(),
-                        deleted_at: None,
-                    },
-                    email: None,
-                    providers: vec![],
-                })
-            });
-        store
-            .expect_upsert()
-            .withf(|x: &NewApiUser<VPermission>| x.permissions.can(&VPermission::GetApiUsersAll))
-            .returning(|_| Err(StoreError::Unknown));
-        let mut api_user_provider_store = MockApiUserProviderStore::new();
-        api_user_provider_store
-            .expect_list()
-            .returning(|_, _| Ok(vec![]));
-
-        let mut access_group_store = MockAccessGroupStore::new();
-        access_group_store
-            .expect_list()
-            .returning(|_, _| Ok(vec![]));
-
-        let mut storage = MockStorage::new();
-        storage.api_user_store = Some(Arc::new(store));
-        storage.api_user_provider_store = Some(Arc::new(api_user_provider_store));
-        storage.access_group_store = Some(Arc::new(access_group_store));
-
-        let ctx = mock_context(Arc::new(storage)).await;
-
-        let user1 = mock_user();
-
-        // 1. Fail to create due to lack of permissions
-        let no_permissions = Caller {
-            id: user1.id,
-            permissions: Permissions::new(),
-            extensions: HashMap::default(),
-        };
-
-        let resp = create_api_user_inner::<VPermission, VPermissionResponse>(
-            &ctx,
-            no_permissions,
-            successful_update.clone(),
-        )
-        .await;
-
-        assert!(resp.is_err());
-        assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
-
-        let user2 = mock_user();
-
-        // 2. Succeed in creating new api user
-        let with_permissions = Caller {
-            id: user2.id,
-            permissions: vec![VPermission::CreateApiUser].into(),
-            extensions: HashMap::default(),
-        };
-
-        let resp = create_api_user_inner::<VPermission, VPermissionResponse>(
-            &ctx,
-            with_permissions.clone(),
-            successful_update.clone(),
-        )
-        .await;
-
-        assert!(resp.is_ok());
-        assert_eq!(get_status(&resp), StatusCode::CREATED);
-
-        // 3. Handle storage failure and return error
-        let resp = create_api_user_inner::<VPermission, VPermissionResponse>(
-            &ctx,
-            with_permissions,
-            failure_update.clone(),
-        )
-        .await;
-
-        assert!(resp.is_err());
-        assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
-    }
-
-    #[tokio::test]
-    async fn test_update_api_user_permissions() {
-        let success_id = TypedUuid::new_v4();
-        let successful_update = ApiUserUpdateParams {
-            permissions: Permissions::new(),
-            group_ids: BTreeSet::new(),
-        };
-
-        let failure_id = TypedUuid::new_v4();
-        let failure_update = ApiUserUpdateParams {
-            permissions: Permissions::new(),
-            group_ids: BTreeSet::new(),
-        };
-
-        let mut store = MockApiUserStore::new();
-        store.expect_get().returning(|id, _| {
-            Ok(Some(ApiUserInfo {
-                user: ApiUser {
-                    id: *id,
-                    permissions: Permissions::new(),
-                    groups: BTreeSet::new(),
-                    created_at: Utc::now(),
-                    updated_at: Utc::now(),
-                    deleted_at: None,
-                },
-                email: None,
-                providers: vec![],
-            }))
-        });
-        store
-            .expect_upsert()
-            .withf(move |x: &NewApiUser<VPermission>| x.id == success_id)
-            .returning(|user| {
-                Ok(ApiUserInfo {
-                    user: ApiUser {
-                        id: user.id,
-                        permissions: user.permissions,
-                        groups: BTreeSet::new(),
-                        created_at: Utc::now(),
-                        updated_at: Utc::now(),
-                        deleted_at: None,
-                    },
-                    email: None,
-                    providers: vec![],
-                })
-            });
-        store
-            .expect_upsert()
-            .withf(move |x: &NewApiUser<VPermission>| x.id == failure_id)
-            .returning(|_| Err(StoreError::Unknown));
-        let mut api_user_provider_store = MockApiUserProviderStore::new();
-        api_user_provider_store
-            .expect_list()
-            .returning(|_, _| Ok(vec![]));
-        let mut access_group_store = MockAccessGroupStore::new();
-        access_group_store
-            .expect_list()
-            .returning(|_, _| Ok(vec![]));
-
-        let mut storage = MockStorage::new();
-        storage.api_user_store = Some(Arc::new(store));
-        storage.api_user_provider_store = Some(Arc::new(api_user_provider_store));
-        storage.access_group_store = Some(Arc::new(access_group_store));
-
-        let ctx = mock_context(Arc::new(storage)).await;
-
-        let success_path = ApiUserPath {
-            user_id: success_id,
-        };
-        let failure_path = ApiUserPath {
-            user_id: failure_id,
-        };
-
-        let user1 = mock_user();
-
-        // 1. Fail to create due to lack of permissions
-        let no_permissions = Caller {
-            id: user1.id,
-            permissions: Permissions::new(),
-            extensions: HashMap::default(),
-        };
-
-        let resp = update_api_user_inner::<VPermission, VPermissionResponse>(
-            &ctx,
-            no_permissions,
-            success_path.clone(),
-            successful_update.clone(),
-        )
-        .await;
-
-        assert!(resp.is_err());
-        assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
-
-        let user2 = mock_user();
-
-        // 2. Succeed in updating api user with direct permission
-        let with_specific_permissions = Caller {
-            id: user2.id,
-            permissions: vec![
-                VPermission::GetApiUser(success_path.user_id),
-                VPermission::ManageApiUser(success_path.user_id),
-            ]
-            .into(),
-            extensions: HashMap::default(),
-        };
-
-        let resp = update_api_user_inner::<VPermission, VPermissionResponse>(
-            &ctx,
-            with_specific_permissions,
-            success_path.clone(),
-            successful_update.clone(),
-        )
-        .await;
-
-        assert!(resp.is_ok());
-        assert_eq!(get_status(&resp), StatusCode::OK);
-
-        let user3 = mock_user();
-
-        // 3. Succeed in updating api user with general permission
-        let with_general_permissions = Caller {
-            id: user3.id,
-            permissions: vec![VPermission::GetApiUsersAll, VPermission::ManageApiUsersAll].into(),
-            extensions: HashMap::default(),
-        };
-
-        let resp = update_api_user_inner::<VPermission, VPermissionResponse>(
-            &ctx,
-            with_general_permissions.clone(),
-            success_path,
-            successful_update.clone(),
-        )
-        .await;
-
-        assert!(resp.is_ok());
-        assert_eq!(get_status(&resp), StatusCode::OK);
-
-        // 4. Handle storage failure and return error
-        let resp = update_api_user_inner::<VPermission, VPermissionResponse>(
-            &ctx,
-            with_general_permissions,
-            failure_path,
-            failure_update.clone(),
-        )
-        .await;
-
-        assert!(resp.is_err());
-        assert_eq!(get_status(&resp), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[tokio::test]
@@ -1194,7 +833,7 @@ mod tests {
 
         // 1. Fail to list due to lack of permissions
         let no_permissions = Caller {
-            id: user1.id,
+            principal: Principal::User(user1.id),
             permissions: Permissions::new(),
             extensions: HashMap::default(),
         };
@@ -1215,7 +854,7 @@ mod tests {
 
         // 2. Fail to list due to incorrect permissions
         let incorrect_permissions = Caller {
-            id: user2.id,
+            principal: Principal::User(user2.id),
             permissions: vec![VPermission::GetApiKey(TypedUuid::new_v4())].into(),
             extensions: HashMap::default(),
         };
@@ -1236,7 +875,7 @@ mod tests {
 
         // 3. Succeed in list tokens
         let success_permissions = Caller {
-            id: user3.id,
+            principal: Principal::User(user3.id),
             permissions: vec![VPermission::GetApiKey(TypedUuid::new_v4())].into(),
             extensions: HashMap::default(),
         };
@@ -1257,7 +896,7 @@ mod tests {
 
         // 4. Handle storage failure and return error
         let failure_permissions = Caller {
-            id: user4.id,
+            principal: Principal::User(user4.id),
             permissions: vec![VPermission::GetApiKey(TypedUuid::new_v4())].into(),
             extensions: HashMap::default(),
         };
@@ -1287,6 +926,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             deleted_at: None,
+            generation: 0,
         };
 
         let api_user_path = ApiUserPath {
@@ -1345,6 +985,7 @@ mod tests {
                         created_at: Utc::now(),
                         updated_at: Utc::now(),
                         deleted_at: None,
+                        generation: 0,
                     },
                     email: None,
                     providers: vec![],
@@ -1383,7 +1024,7 @@ mod tests {
 
         // 1. Fail to create due to lack of permissions
         let no_permissions = Caller {
-            id: user1.id,
+            principal: Principal::User(user1.id),
             permissions: Permissions::new(),
             extensions: HashMap::default(),
         };
@@ -1403,7 +1044,7 @@ mod tests {
 
         // 2. Fail to create due to incorrect permissions
         let incorrect_permissions = Caller {
-            id: user2.id,
+            principal: Principal::User(user2.id),
             permissions: vec![VPermission::CreateApiKey(TypedUuid::new_v4())].into(),
             extensions: HashMap::default(),
         };
@@ -1423,7 +1064,7 @@ mod tests {
 
         // 3. Fail to create due to unknown user
         let incorrect_permissions = Caller {
-            id: user3.id,
+            principal: Principal::User(user3.id),
             permissions: vec![
                 VPermission::GetApiUser(unknown_api_user_path.user_id),
                 VPermission::CreateApiKey(unknown_api_user_path.user_id),
@@ -1445,7 +1086,7 @@ mod tests {
 
         // 4. Succeed in creating token
         let success_permissions = Caller {
-            id: allowed_user_path.user_id,
+            principal: Principal::User(allowed_user_path.user_id),
             permissions: vec![
                 VPermission::GetApiUser(allowed_user_path.user_id),
                 VPermission::CreateApiKey(allowed_user_path.user_id),
@@ -1473,7 +1114,7 @@ mod tests {
 
         // 5. Handle storage failure and return error
         let failure_permissions = Caller {
-            id: user5.id,
+            principal: Principal::User(user5.id),
             permissions: vec![
                 VPermission::GetApiUser(failure_api_user_path.user_id),
                 VPermission::CreateApiKey(failure_api_user_path.user_id),
@@ -1547,7 +1188,7 @@ mod tests {
 
         // 1. Fail to get due to lack of permissions
         let no_permissions = Caller {
-            id: user1.id,
+            principal: Principal::User(user1.id),
             permissions: Permissions::new(),
             extensions: HashMap::default(),
         };
@@ -1566,7 +1207,7 @@ mod tests {
 
         // 2. Fail to get due to incorrect permissions
         let incorrect_permissions = Caller {
-            id: user2.id,
+            principal: Principal::User(user2.id),
             permissions: vec![VPermission::GetApiKey(TypedUuid::new_v4())].into(),
             extensions: HashMap::default(),
         };
@@ -1585,7 +1226,7 @@ mod tests {
 
         // 3. Fail to get due to unknown token id
         let incorrect_permissions = Caller {
-            id: user3.id,
+            principal: Principal::User(user3.id),
             permissions: vec![VPermission::GetApiKey(
                 unknown_api_user_token_path.api_key_id,
             )]
@@ -1607,7 +1248,7 @@ mod tests {
 
         // 4. Succeed in getting token
         let success_permissions = Caller {
-            id: user4.id,
+            principal: Principal::User(user4.id),
             permissions: vec![VPermission::GetApiKey(api_user_token_path.api_key_id)].into(),
             extensions: HashMap::default(),
         };
@@ -1626,7 +1267,7 @@ mod tests {
 
         // 5. Handle storage failure and return error
         let failure_permissions = Caller {
-            id: user5.id,
+            principal: Principal::User(user5.id),
             permissions: vec![VPermission::GetApiKey(
                 failure_api_user_token_path.api_key_id,
             )]
@@ -1698,7 +1339,7 @@ mod tests {
 
         // 1. Fail to get due to lack of permissions
         let no_permissions = Caller {
-            id: user1.id,
+            principal: Principal::User(user1.id),
             permissions: Permissions::new(),
             extensions: HashMap::default(),
         };
@@ -1717,7 +1358,7 @@ mod tests {
 
         // 2. Fail to get due to incorrect permissions
         let incorrect_permissions = Caller {
-            id: user2.id,
+            principal: Principal::User(user2.id),
             permissions: vec![VPermission::ManageApiKey(TypedUuid::new_v4())].into(),
             extensions: HashMap::default(),
         };
@@ -1736,7 +1377,7 @@ mod tests {
 
         // 3. Fail to get due to unknown token id
         let incorrect_permissions = Caller {
-            id: user3.id,
+            principal: Principal::User(user3.id),
             permissions: vec![VPermission::ManageApiKey(
                 unknown_api_user_token_path.api_key_id,
             )]
@@ -1758,7 +1399,7 @@ mod tests {
 
         // 4. Succeed in getting token
         let success_permissions = Caller {
-            id: user4.id,
+            principal: Principal::User(user4.id),
             permissions: vec![VPermission::ManageApiKey(api_user_token_path.api_key_id)].into(),
             extensions: HashMap::default(),
         };
@@ -1777,7 +1418,7 @@ mod tests {
 
         // 5. Handle storage failure and return error
         let failure_permissions = Caller {
-            id: user5.id,
+            principal: Principal::User(user5.id),
             permissions: vec![VPermission::ManageApiKey(
                 failure_api_user_token_path.api_key_id,
             )]
@@ -1814,6 +1455,7 @@ mod tests {
                         created_at: Utc::now(),
                         updated_at: Utc::now(),
                         deleted_at: None,
+                        generation: 0,
                     },
                     email: None,
                     providers: vec![ApiUserProvider {
@@ -1852,7 +1494,7 @@ mod tests {
 
         // 1. Fail to update due to no access
         let no_permissions = Caller {
-            id: user.id,
+            principal: Principal::User(user.id),
             permissions: Permissions::new(),
             extensions: HashMap::default(),
         };
@@ -1871,7 +1513,7 @@ mod tests {
 
         // 2. Fail due to lack of write permission
         let no_write_permissions = Caller {
-            id: user.id,
+            principal: Principal::User(user.id),
             permissions: vec![VPermission::GetApiUser(user.id)].into(),
             extensions: HashMap::default(),
         };
@@ -1890,7 +1532,7 @@ mod tests {
 
         // 4. Fail to update to non-owned email
         let write_permission = Caller {
-            id: user.id,
+            principal: Principal::User(user.id),
             permissions: vec![VPermission::GetApiUser(user.id)].into(),
             extensions: HashMap::default(),
         };
@@ -1909,7 +1551,7 @@ mod tests {
 
         // 5. Succeed in creating email
         let write_permission = Caller {
-            id: user.id,
+            principal: Principal::User(user.id),
             permissions: vec![
                 VPermission::GetApiUser(user.id),
                 VPermission::ManageApiUser(user.id),
@@ -1930,5 +1572,201 @@ mod tests {
         assert!(resp.is_ok());
         assert_eq!(get_status(&resp), StatusCode::OK);
         assert_eq!("user@company".to_string(), resp.unwrap().0.email);
+    }
+
+    fn stored_user(
+        id: TypedUuid<UserId>,
+        permissions: Permissions<VPermission>,
+    ) -> ApiUserInfo<VPermission> {
+        ApiUserInfo {
+            user: ApiUser {
+                id,
+                permissions,
+                groups: BTreeSet::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                deleted_at: None,
+                generation: 0,
+            },
+            email: None,
+            providers: vec![],
+        }
+    }
+
+    fn caller_with(permissions: Vec<VPermission>) -> Caller<VPermission> {
+        Caller {
+            principal: Principal::User(TypedUuid::new_v4()),
+            permissions: permissions.into(),
+            extensions: HashMap::default(),
+        }
+    }
+
+    /// The permissions written by each successful permission change
+    type Writes = Arc<Mutex<Vec<Permissions<VPermission>>>>;
+
+    /// A context holding a single user. When `client` is set, that OAuth client is backed by the
+    /// user. Every write succeeds and is recorded.
+    async fn permission_ctx(
+        user: ApiUserInfo<VPermission>,
+    ) -> (crate::VContext<VPermission>, Writes) {
+        let writes: Writes = Arc::new(Mutex::new(vec![]));
+
+        let mut user_store = MockApiUserStore::new();
+        let current = user.clone();
+        user_store
+            .expect_get()
+            .returning(move |_, _| Ok(Some(current.clone())));
+        let recorder = writes.clone();
+        user_store.expect_update().returning(move |update, _| {
+            recorder.lock().unwrap().push(update.permissions.clone());
+            Ok(Some(stored_user(update.id, update.permissions)))
+        });
+
+        let mut provider_store = MockApiUserProviderStore::new();
+        provider_store.expect_list().returning(|_, _| Ok(vec![]));
+
+        let mut storage = MockStorage::new();
+        storage.api_user_store = Some(Arc::new(user_store));
+        storage.api_user_provider_store = Some(Arc::new(provider_store));
+
+        (mock_context(Arc::new(storage)).await, writes)
+    }
+
+    /// Adding a permission requires managing the user and being able to grant the permission
+    #[tokio::test]
+    async fn test_add_api_user_permission_requires_grant() {
+        let user_id = TypedUuid::new_v4();
+        let (ctx, writes) = permission_ctx(stored_user(user_id, Permissions::new())).await;
+        let body = || ApiUserPermissionParams {
+            permission: VPermission::CreateGroup,
+        };
+
+        let cannot_grant = caller_with(vec![VPermission::ManageApiUser(user_id)]);
+        let resp = add_api_user_permission_inner::<VPermission, VPermissionResponse>(
+            &ctx,
+            cannot_grant,
+            ApiUserPath { user_id },
+            body(),
+        )
+        .await;
+        assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
+
+        let cannot_manage = caller_with(vec![VPermission::CreateGroup]);
+        let resp = add_api_user_permission_inner::<VPermission, VPermissionResponse>(
+            &ctx,
+            cannot_manage,
+            ApiUserPath { user_id },
+            body(),
+        )
+        .await;
+        assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
+        assert!(writes.lock().unwrap().is_empty());
+
+        let can_grant = caller_with(vec![
+            VPermission::GetApiUser(user_id),
+            VPermission::ManageApiUser(user_id),
+            VPermission::CreateGroup,
+        ]);
+        let resp = add_api_user_permission_inner::<VPermission, VPermissionResponse>(
+            &ctx,
+            can_grant,
+            ApiUserPath { user_id },
+            body(),
+        )
+        .await;
+        assert_eq!(get_status(&resp), StatusCode::OK);
+        assert!(writes.lock().unwrap()[0].can(&VPermission::CreateGroup));
+    }
+
+    /// Removing a permission requires being able to grant it, so a caller can never take away
+    /// permissions outside of their own authority. Removing one value of a stored set keeps the
+    /// rest of that set.
+    #[tokio::test]
+    async fn test_remove_api_user_permission_requires_grant() {
+        let user_id = TypedUuid::new_v4();
+        let (a, b) = (TypedUuid::new_v4(), TypedUuid::new_v4());
+        let user = stored_user(
+            user_id,
+            vec![VPermission::ManageGroups(BTreeSet::from([a, b]))].into(),
+        );
+        let (ctx, writes) = permission_ctx(user).await;
+        let body = || ApiUserPermissionParams {
+            permission: VPermission::ManageGroup(a),
+        };
+
+        let cannot_grant = caller_with(vec![VPermission::ManageApiUser(user_id)]);
+        let resp = remove_api_user_permission_inner::<VPermission, VPermissionResponse>(
+            &ctx,
+            cannot_grant,
+            ApiUserPath { user_id },
+            body(),
+        )
+        .await;
+        assert_eq!(get_status(&resp), StatusCode::FORBIDDEN);
+        assert!(writes.lock().unwrap().is_empty());
+
+        // Holding only `a` is enough to remove `a`, and leaves `b` with the user
+        let can_grant = caller_with(vec![
+            VPermission::GetApiUser(user_id),
+            VPermission::ManageApiUser(user_id),
+            VPermission::ManageGroup(a),
+        ]);
+        let resp = remove_api_user_permission_inner::<VPermission, VPermissionResponse>(
+            &ctx,
+            can_grant,
+            ApiUserPath { user_id },
+            body(),
+        )
+        .await;
+        assert_eq!(get_status(&resp), StatusCode::OK);
+
+        let written = writes.lock().unwrap()[0].clone();
+        assert!(!written.can(&VPermission::ManageGroup(a)));
+        assert!(written.can(&VPermission::ManageGroup(b)));
+        assert_eq!(
+            written,
+            VPermission::contract(&written),
+            "write was not contracted"
+        );
+    }
+
+    /// A write against a generation that has moved on is refused as a conflict after a single
+    /// attempt, and is never retried
+    #[tokio::test]
+    async fn test_permission_change_is_a_conflict_when_stale() {
+        let user_id = TypedUuid::new_v4();
+        let mut user_store = MockApiUserStore::new();
+        user_store
+            .expect_get()
+            .times(1)
+            .returning(move |_, _| Ok(Some(stored_user(user_id, Permissions::new()))));
+        user_store
+            .expect_update()
+            .times(1)
+            .returning(|_, _| Ok(None));
+
+        let mut client_store = MockOAuthClientStore::new();
+        client_store.expect_list().returning(|_, _| Ok(vec![]));
+
+        let mut storage = MockStorage::new();
+        storage.api_user_store = Some(Arc::new(user_store));
+        storage.oauth_client_store = Some(Arc::new(client_store));
+        let ctx = mock_context(Arc::new(storage)).await;
+
+        let caller = caller_with(vec![
+            VPermission::GetApiUsersAll,
+            VPermission::ManageApiUsersAll,
+            VPermission::CreateGroup,
+        ]);
+        let resp = add_api_user_permission_inner::<VPermission, VPermissionResponse>(
+            &ctx,
+            caller,
+            ApiUserPath { user_id },
+            ApiUserPermissionParams {
+                permission: VPermission::CreateGroup,
+            },
+        )
+        .await;
+        assert_eq!(get_status(&resp), StatusCode::CONFLICT);
     }
 }
