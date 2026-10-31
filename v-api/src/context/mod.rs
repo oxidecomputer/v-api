@@ -2165,6 +2165,17 @@ pub(crate) mod test_mocks {
                 .upsert(token)
                 .await
         }
+
+        async fn revoke(
+            &self,
+            filter: v_model::storage::AccessTokenFilter,
+        ) -> Result<usize, v_model::storage::StoreError> {
+            self.access_token_store
+                .as_ref()
+                .unwrap()
+                .revoke(filter)
+                .await
+        }
     }
 
     #[async_trait]

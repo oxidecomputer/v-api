@@ -260,6 +260,7 @@ pub trait AccessTokenStore {
         pagination: &ListPagination,
     ) -> Result<Vec<AccessToken>, StoreError>;
     async fn upsert(&self, token: NewAccessToken) -> Result<AccessToken, StoreError>;
+    async fn revoke(&self, filter: AccessTokenFilter) -> Result<usize, StoreError>;
 }
 
 #[derive(Debug, Default)]

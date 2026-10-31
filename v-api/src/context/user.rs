@@ -15,9 +15,9 @@ use v_model::{
     NewApiUserProvider, Permissions, UserId, UserProviderId,
     permissions::{AsScope, Caller, Permission, PermissionError, PermissionStorage},
     storage::{
-        AccessGroupFilter, AccessGroupStore, AccessTokenStore, ApiKeyFilter, ApiKeyStore,
-        ApiUserContactEmailStore, ApiUserFilter, ApiUserProviderFilter, ApiUserProviderStore,
-        ApiUserStore, ListPagination, StoreError,
+        AccessGroupFilter, AccessGroupStore, AccessTokenFilter, AccessTokenStore, ApiKeyFilter,
+        ApiKeyStore, ApiUserContactEmailStore, ApiUserFilter, ApiUserProviderFilter,
+        ApiUserProviderStore, ApiUserStore, ListPagination, StoreError,
     },
 };
 
@@ -698,6 +698,44 @@ where
             signed_token: signed,
             expires_in: claims.exp - Utc::now().timestamp(),
         })
+    }
+
+    pub async fn list_access_tokens(
+        &self,
+        caller: &Caller<T>,
+        api_user: &TypedUuid<UserId>,
+    ) -> ResourceResult<Vec<AccessToken>, UserContextError> {
+        if caller.can(&VPermission::GetApiUser(*api_user).into()) {
+            let filter = AccessTokenFilter {
+                api_user_id: Some(vec![*api_user]),
+                revoked: true,
+                ..Default::default()
+            };
+
+            let tokens =
+                AccessTokenStore::list(&*self.storage, filter, &ListPagination::unlimited())
+                    .await?;
+            Ok(tokens)
+        } else {
+            resource_restricted()
+        }
+    }
+
+    pub async fn revoke_access_tokens(
+        &self,
+        caller: &Caller<T>,
+        api_user: &TypedUuid<UserId>,
+    ) -> ResourceResult<usize, UserContextError> {
+        if caller.can(&VPermission::ManageApiUser(*api_user).into()) {
+            let filter = AccessTokenFilter {
+                api_user_id: Some(vec![*api_user]),
+                ..Default::default()
+            };
+
+            Ok(AccessTokenStore::revoke(&*self.storage, filter).await?)
+        } else {
+            resource_restricted()
+        }
     }
 }
 
