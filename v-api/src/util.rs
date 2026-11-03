@@ -36,22 +36,19 @@ pub mod request {
     use http::header::COOKIE;
 
     pub trait RequestCookies {
-        /// Return every cookie with the given name. A client may present more
-        /// than one cookie with the same name (for example when it is holding
-        /// stale cookies issued under previous cookie settings).
-        fn cookies(&'_ self, name: &str) -> Vec<Cookie<'_>>;
+        /// Return the first cookie with the given name, if any.
+        fn cookie(&'_ self, name: &str) -> Option<Cookie<'_>>;
     }
 
     impl RequestCookies for RequestInfo {
-        fn cookies(&'_ self, name: &str) -> Vec<Cookie<'_>> {
+        fn cookie(&'_ self, name: &str) -> Option<Cookie<'_>> {
             self.headers()
                 .get_all(COOKIE)
                 .iter()
                 .filter_map(|value| value.to_str().ok())
                 .flat_map(|header| Cookie::split_parse(header.to_string()))
                 .filter_map(Result::ok)
-                .filter(|cookie| cookie.name() == name)
-                .collect()
+                .find(|cookie| cookie.name() == name)
         }
     }
 }
