@@ -39,6 +39,7 @@ where
         created_at: group.created_at,
         updated_at: group.updated_at,
         deleted_at: group.deleted_at,
+        generation: group.generation,
     }
 }
 
@@ -97,11 +98,24 @@ pub struct AccessGroupPath {
     group_id: TypedUuid<AccessGroupId>,
 }
 
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+pub struct AccessGroupPermissionParams<T> {
+    permission: T,
+}
+
+fn preset_group_error() -> HttpError {
+    client_error(
+        ClientErrorStatusCode::CONFLICT,
+        "Preset groups are managed via service configuration and cannot be modified at runtime",
+    )
+}
+
+/// Adds a single permission to a group. The caller must be able to grant it.
 #[instrument(skip(rqctx), err(Debug))]
-pub async fn update_group_op<T, U>(
+pub async fn add_group_permission_op<T, U>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     path: AccessGroupPath,
-    body: AccessGroupUpdateParams<T>,
+    body: AccessGroupPermissionParams<T>,
 ) -> Result<HttpResponseOk<AccessGroup<U>>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
@@ -110,25 +124,40 @@ where
     let (ctx, caller) = rqctx.as_ctx().await?;
 
     if ctx.group.is_preset(&path.group_id) {
-        return Err(client_error(
-            ClientErrorStatusCode::CONFLICT,
-            "Preset groups are managed via service configuration and cannot be updated at runtime",
-        ));
+        Err(preset_group_error())
+    } else {
+        Ok(HttpResponseOk(
+            ctx.group
+                .add_permission_to_group(&caller, &path.group_id, body.permission)
+                .await
+                .map(into_group_response)?,
+        ))
     }
+}
 
-    Ok(HttpResponseOk(
-        ctx.group
-            .update_group(
-                &caller,
-                NewAccessGroup {
-                    id: path.group_id,
-                    name: body.name,
-                    permissions: body.permissions,
-                },
-            )
-            .await
-            .map(into_group_response)?,
-    ))
+/// Removes a single permission from a group. The caller must be able to grant it.
+#[instrument(skip(rqctx), err(Debug))]
+pub async fn remove_group_permission_op<T, U>(
+    rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
+    path: AccessGroupPath,
+    body: AccessGroupPermissionParams<T>,
+) -> Result<HttpResponseOk<AccessGroup<U>>, HttpError>
+where
+    T: VAppPermission + PermissionStorage,
+    U: From<T> + Permission + JsonSchema,
+{
+    let (ctx, caller) = rqctx.as_ctx().await?;
+
+    if ctx.group.is_preset(&path.group_id) {
+        Err(preset_group_error())
+    } else {
+        Ok(HttpResponseOk(
+            ctx.group
+                .remove_permission_from_group(&caller, &path.group_id, &body.permission)
+                .await
+                .map(into_group_response)?,
+        ))
+    }
 }
 
 #[instrument(skip(rqctx), err(Debug))]

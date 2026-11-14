@@ -448,7 +448,7 @@ mod tests {
     use uuid::Uuid;
     use v_model::{
         MagicLink, MagicLinkAttempt, MagicLinkId, MagicLinkRedirectUri, MagicLinkSecret,
-        permissions::Caller,
+        permissions::{Caller, Principal},
         schema_ext::{MagicLinkAttemptState, MagicLinkMedium},
         storage::{
             MockMagicLinkAttemptStore, MockMagicLinkRedirectUriStore, MockMagicLinkSecretStore,
@@ -764,7 +764,7 @@ mod tests {
 
     fn caller_for_client(client_id: TypedUuid<MagicLinkId>) -> Caller<VPermission> {
         Caller {
-            id: TypedUuid::new_v4(),
+            principal: Principal::User(TypedUuid::new_v4()),
             permissions: vec![
                 VPermission::GetMagicLinkClient(client_id),
                 VPermission::ManageMagicLinkClient(client_id),

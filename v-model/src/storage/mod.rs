@@ -7,6 +7,7 @@ use std::fmt::Debug;
 pub use async_bb8_diesel::{ConnectionError, PoolError};
 use async_trait::async_trait;
 use bb8::RunError;
+use chrono::{DateTime, Utc};
 pub use diesel::result::Error as DbError;
 use diesel::result::{DatabaseErrorKind, Error as DieselError};
 #[cfg(feature = "mock")]
@@ -23,9 +24,11 @@ use crate::{
     MapperId, MapperSource, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
     NewApiUserContactEmail, NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMagicLink,
     NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, NewMapperEvent,
-    NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
-    OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId,
-    UserContactEmailId, UserId, UserProviderId,
+    NewOAuthClient, NewOAuthClientAssertion, NewOAuthClientKey, NewOAuthClientRedirectUri,
+    NewOAuthClientSecret, NewServiceAccount, NewServiceAccountToken, OAuthClient,
+    OAuthClientAssertion, OAuthClientId, OAuthClientKey, OAuthClientKeyId, OAuthClientRedirectUri,
+    OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId, ServiceAccount, ServiceAccountToken,
+    ServiceAccountTokenId, UserContactEmailId, UserId, UserProviderId,
     schema_ext::{LoginAttemptState, MagicLinkAttemptState},
 };
 
@@ -144,7 +147,12 @@ pub trait ApiUserStore<T: Send + Sync> {
         filter: ApiUserFilter,
         pagination: &ListPagination,
     ) -> Result<Vec<ApiUserInfo<T>>, StoreError>;
-    async fn upsert(&self, api_user: NewApiUser<T>) -> Result<ApiUserInfo<T>, StoreError>;
+    async fn create(&self, api_user: NewApiUser<T>) -> Result<ApiUserInfo<T>, StoreError>;
+    async fn update(
+        &self,
+        api_user: NewApiUser<T>,
+        expected_generation: i64,
+    ) -> Result<Option<ApiUserInfo<T>>, StoreError>;
     async fn delete(&self, id: &TypedUuid<UserId>) -> Result<Option<ApiUserInfo<T>>, StoreError>;
 }
 
@@ -343,6 +351,108 @@ pub trait OAuthClientRedirectUriStore {
     ) -> Result<Option<OAuthClientRedirectUri>, StoreError>;
 }
 
+#[cfg_attr(feature = "mock", automock)]
+#[async_trait]
+pub trait ServiceAccountStore<T: Send + Sync> {
+    /// The service account of an OAuth client, or `None` when the client has never been granted
+    /// a permission
+    async fn get(
+        &self,
+        id: &TypedUuid<OAuthClientId>,
+    ) -> Result<Option<ServiceAccount<T>>, StoreError>;
+    /// Store the first permissions of a service account. Fails with [`StoreError::Conflict`] when
+    /// the service account already exists, which means a concurrent change wrote it first.
+    async fn create(&self, account: NewServiceAccount<T>) -> Result<ServiceAccount<T>, StoreError>;
+    /// Write the service account's permissions only if its generation is still
+    /// `expected_generation`. Returns `None` without writing when another write has landed since
+    /// the read.
+    async fn update(
+        &self,
+        account: NewServiceAccount<T>,
+        expected_generation: i64,
+    ) -> Result<Option<ServiceAccount<T>>, StoreError>;
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct ServiceAccountTokenFilter {
+    pub oauth_client_id: Option<Vec<TypedUuid<OAuthClientId>>>,
+    /// Include tokens that have been revoked
+    pub revoked: bool,
+    /// Include tokens whose expiration has passed
+    pub expired: bool,
+}
+
+#[cfg_attr(feature = "mock", automock)]
+#[async_trait]
+pub trait ServiceAccountTokenStore {
+    /// A token by its id. Revoked tokens are only returned when `revoked` is true.
+    async fn get(
+        &self,
+        id: &TypedUuid<ServiceAccountTokenId>,
+        revoked: bool,
+    ) -> Result<Option<ServiceAccountToken>, StoreError>;
+    /// Tokens matching the filter, newest first
+    async fn list(
+        &self,
+        filter: ServiceAccountTokenFilter,
+        pagination: &ListPagination,
+    ) -> Result<Vec<ServiceAccountToken>, StoreError>;
+    /// Record a newly issued token. Fails with [`StoreError::Conflict`] when a token with the same
+    /// id already exists.
+    async fn create(
+        &self,
+        token: NewServiceAccountToken,
+    ) -> Result<ServiceAccountToken, StoreError>;
+    /// Revoke a token. Returns `None` when there is no unrevoked token with the id.
+    async fn revoke(
+        &self,
+        id: &TypedUuid<ServiceAccountTokenId>,
+    ) -> Result<Option<ServiceAccountToken>, StoreError>;
+}
+
+#[derive(Debug, Default)]
+pub struct OAuthClientKeyFilter {
+    pub id: Option<Vec<TypedUuid<OAuthClientKeyId>>>,
+    pub oauth_client_id: Option<Vec<TypedUuid<OAuthClientId>>>,
+    pub thumbprint: Option<Vec<String>>,
+    pub deleted: bool,
+}
+
+#[cfg_attr(feature = "mock", automock)]
+#[async_trait]
+pub trait OAuthClientKeyStore {
+    async fn get(
+        &self,
+        id: &TypedUuid<OAuthClientKeyId>,
+        deleted: bool,
+    ) -> Result<Option<OAuthClientKey>, StoreError>;
+    async fn list(
+        &self,
+        filter: OAuthClientKeyFilter,
+        pagination: &ListPagination,
+    ) -> Result<Vec<OAuthClientKey>, StoreError>;
+    /// Store a new key. A key whose thumbprint is already registered to any client, even as a
+    /// deleted key must fail with [`StoreError::Conflict`].
+    async fn insert(&self, key: NewOAuthClientKey) -> Result<OAuthClientKey, StoreError>;
+    async fn delete(
+        &self,
+        id: &TypedUuid<OAuthClientKeyId>,
+    ) -> Result<Option<OAuthClientKey>, StoreError>;
+}
+
+#[cfg_attr(feature = "mock", automock)]
+#[async_trait]
+pub trait OAuthClientAssertionStore {
+    /// Record an accepted assertion. This must fail with [`StoreError::Conflict`] when an
+    /// assertion with the same jti, for a given client, already exists.
+    async fn record(
+        &self,
+        assertion: NewOAuthClientAssertion,
+    ) -> Result<OAuthClientAssertion, StoreError>;
+    /// Returning how many assertions were removed.
+    async fn delete_expired(&self, before: DateTime<Utc>) -> Result<usize, StoreError>;
+}
+
 #[derive(Debug, Default)]
 pub struct MagicLinkFilter {
     pub id: Option<Vec<TypedUuid<MagicLinkId>>>,
@@ -443,7 +553,18 @@ pub trait AccessGroupStore<T: Send + Sync> {
         filter: AccessGroupFilter,
         pagination: &ListPagination,
     ) -> Result<Vec<AccessGroup<T>>, StoreError>;
+    /// Store a group. When a group with the same id already exists only its permissions are
+    /// replaced, and its name is kept.
     async fn upsert(&self, group: &NewAccessGroup<T>) -> Result<AccessGroup<T>, StoreError>;
+    /// Write the group's permissions only if its generation is still `expected_generation`.
+    ///
+    /// A group's name is never changed after it is created. Mappers resolve groups by name, so
+    /// renaming a group would silently change which users mappers place into it.
+    async fn update(
+        &self,
+        group: &NewAccessGroup<T>,
+        expected_generation: i64,
+    ) -> Result<Option<AccessGroup<T>>, StoreError>;
     async fn delete(
         &self,
         id: &TypedUuid<AccessGroupId>,

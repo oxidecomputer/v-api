@@ -585,112 +585,37 @@ fn test_can_grant_all_empty_targets() {
     assert!(caller.can_grant_all(&targets));
 }
 
-/// Construct an `ApiUser` that holds the dynamic `GetGroupsJoined` permission
-/// and is currently a member of `group_id`.
-fn joined_actor(
-    user_id: TypedUuid<UserId>,
-    group_id: TypedUuid<v_model::AccessGroupId>,
-) -> v_model::ApiUser<VPermission> {
-    use chrono::Utc;
-
-    let mut groups = BTreeSet::new();
-    groups.insert(group_id);
-
-    v_model::ApiUser::<VPermission> {
-        id: user_id,
-        permissions: vec![VPermission::GetGroupsJoined].into(),
-        groups,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-        deleted_at: None,
-    }
-}
-
-/// Exploit for the broken `contract(kind = drop, ...)` handling.
-///
-/// `GetGroup(id)` is annotated `contract(kind = drop, variant = GetGroupsJoined)`
-/// and is the inverse of `GetGroupsJoined`'s
-/// `expand(kind = iter, variant = GetGroup, source = actor, field = groups)`.
-///
-/// v-api round-trips permissions through `expand` -> `contract` on every login
-/// of an existing user (`register_api_user` -> `add_permissions_to_user` ->
-/// `save_api_user`). `contract()` MUST be the exact inverse of `expand()` so
-/// that permissions derived from dynamic group membership are never persisted
-/// as static grants.
-///
-/// Because the `ContractKind::Drop` arm emits no match branch, the concrete
-/// `GetGroup(id)` produced by expansion falls through to the catch-all and is
-/// stored verbatim. After an admin removes the user from the group, this stale
-/// direct grant still authorizes `get_group` (and member enumeration) forever.
-///
-/// This assertion currently FAILS, demonstrating the broken revocation. Once
-/// the Drop arm discards the concrete variant, it will hold.
+/// `contract` keeps a permission over one specific group exactly as it was granted, and keeps the
+/// dynamic `GetGroupsJoined` as well. Neither is ever rewritten into the other. Granting
+/// visibility of a single group must never widen into visibility of every group the holder has
+/// joined, and nothing in the write paths contracts an expanded set, so there is no expansion
+/// derived `GetGroup` that would need discarding.
 #[test]
-fn test_contract_drops_dynamic_get_group_grant() {
-    use std::collections::HashMap;
+fn test_contract_keeps_group_permissions_as_written() {
     use v_model::{AccessGroupId, Permissions};
 
-    let user_id = TypedUuid::<UserId>::new_v4();
     let group_id = TypedUuid::<AccessGroupId>::new_v4();
-    let actor = joined_actor(user_id, group_id);
+    let stored: Permissions<VPermission> = vec![
+        VPermission::GetGroup(group_id),
+        VPermission::GetGroupsJoined,
+    ]
+    .into();
 
-    // The user's stored permissions contain only the dynamic GetGroupsJoined.
-    let stored: Permissions<VPermission> = vec![VPermission::GetGroupsJoined].into();
-
-    // On login, stored permissions are expanded against current group membership.
-    let expanded = VPermission::expand(&stored, &actor, Some(&actor.permissions), &HashMap::new());
-    assert!(
-        expanded
-            .iter()
-            .any(|p| matches!(p, VPermission::GetGroup(g) if *g == group_id)),
-        "precondition: expand() should produce a concrete GetGroup for the joined group, \
-         got {:?}",
-        expanded,
-    );
-
-    // Before persisting, the expanded set is contracted. The concrete
-    // GetGroup(group_id) must NOT survive — it is purely derived from dynamic
-    // group membership and would otherwise become a permanent direct grant.
-    let contracted = VPermission::contract(&expanded);
-
-    assert!(
-        !contracted
-            .iter()
-            .any(|p| matches!(p, VPermission::GetGroup(g) if *g == group_id)),
-        "broken revocation: contract() persisted a concrete GetGroup({:?}) derived from group \
-         membership. This stale direct grant survives removal from the group, so the user \
-         keeps get_group access forever. contracted = {:?}",
-        group_id,
-        contracted,
-    );
-}
-
-/// Companion property: `contract()` must restore the dynamic `GetGroupsJoined`
-/// so that the permission survives the login round trip. The current Drop arm
-/// neither drops the concrete variant nor re-inserts the target, so
-/// `GetGroupsJoined` is silently lost from the persisted set.
-///
-/// This assertion currently FAILS.
-#[test]
-fn test_contract_restores_get_groups_joined() {
-    use std::collections::HashMap;
-    use v_model::{AccessGroupId, Permissions};
-
-    let user_id = TypedUuid::<UserId>::new_v4();
-    let group_id = TypedUuid::<AccessGroupId>::new_v4();
-    let actor = joined_actor(user_id, group_id);
-
-    let stored: Permissions<VPermission> = vec![VPermission::GetGroupsJoined].into();
-    let expanded = VPermission::expand(&stored, &actor, Some(&actor.permissions), &HashMap::new());
-    let contracted = VPermission::contract(&expanded);
+    let contracted = VPermission::contract(&stored);
 
     assert!(
         contracted
             .iter()
-            .any(|p| matches!(p, VPermission::GetGroupsJoined)),
-        "contract() failed to restore the dynamic GetGroupsJoined permission, so it is lost on \
-         the next login and the user's group visibility is no longer tied to membership. \
-         contracted = {:?}",
+            .any(|p| matches!(p, VPermission::GetGroup(g) if *g == group_id)),
+        "a single group grant was not stored as written: {:?}",
         contracted,
     );
+    assert!(
+        contracted
+            .iter()
+            .any(|p| matches!(p, VPermission::GetGroupsJoined)),
+        "the dynamic joined groups permission was lost: {:?}",
+        contracted,
+    );
+    assert_eq!(2, contracted.iter().count());
 }

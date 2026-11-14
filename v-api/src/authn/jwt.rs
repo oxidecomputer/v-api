@@ -15,7 +15,8 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{fmt::Debug, sync::Arc};
 use thiserror::Error;
 use tracing::instrument;
-use v_model::{AccessTokenId, UserId, UserProviderId};
+use uuid::Uuid;
+use v_model::{AccessTokenId, OAuthClientId, ServiceAccountTokenId, UserId, UserProviderId};
 
 use crate::{ApiContext, authn::Signer, context::VContext, permissions::VAppPermission};
 
@@ -46,12 +47,17 @@ pub struct Jwt<T> {
     pub claims: T,
 }
 
+/// The claims of an access token issued to a user.
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Claims {
+pub struct UserClaims {
     pub iss: String,
     pub aud: String,
     pub sub: TypedUuid<UserId>,
     pub prv: TypedUuid<UserProviderId>,
+    // Required by RFC 9068 §2.2. For backwards compatibility this must be optional in this release
+    // and it can become enforced in the next release. This is either an OAuth client id or a
+    // Magic Link client id, currently we do not have a way to differentiate during deserialization.
+    pub client_id: Option<Uuid>,
     #[serde(with = "scp_format")]
     pub scp: Vec<String>,
     pub exp: i64,
@@ -59,9 +65,60 @@ pub struct Claims {
     pub jti: TypedUuid<AccessTokenId>,
 }
 
+/// The claims of an access token issued to an OAuth client acting as a service account.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceAccountClaims {
+    pub iss: String,
+    pub aud: String,
+    pub sub: TypedUuid<OAuthClientId>,
+    // Required by RFC 9068 §2.2. Because there are no service account tokens prior to v0.6.0 it is
+    // safe the make this required as all issued tokens will have it.
+    pub client_id: TypedUuid<OAuthClientId>,
+    #[serde(with = "scp_format")]
+    pub scp: Vec<String>,
+    pub exp: i64,
+    pub nbf: i64,
+    pub jti: TypedUuid<ServiceAccountTokenId>,
+}
+
+impl ServiceAccountClaims {
+    pub fn new<T>(
+        ctx: &VContext<T>,
+        id: Option<TypedUuid<ServiceAccountTokenId>>,
+        client_id: &TypedUuid<OAuthClientId>,
+        scope: Vec<String>,
+        expires_at: DateTime<Utc>,
+    ) -> Self
+    where
+        T: VAppPermission,
+    {
+        ServiceAccountClaims {
+            iss: ctx.issuer(),
+            aud: ctx.public_url().to_string(),
+            sub: *client_id,
+            client_id: *client_id,
+            scp: scope,
+            exp: expires_at.timestamp(),
+            nbf: Utc::now().timestamp(),
+            jti: id.unwrap_or_else(TypedUuid::new_v4),
+        }
+    }
+}
+
+/// User and service account tokens do not overlap in their structure, and this is critical to
+/// correctness. Both carry `client_id`, but a user token always carries `prv`, which a service
+/// account token refuses as an unknown claim.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum TokenClaims {
+    ServiceAccount(ServiceAccountClaims),
+    User(UserClaims),
+}
+
 /// Serialize and deserialize the `scp` claim as a space-delimited string per
 /// RFC 9068 §2.2.2 / RFC 6749 §3.3. Internally the claim is stored as a
-/// `Vec<String>` for convenient iteration, but on the wire it is always a
+/// `Vec<String>` for convenience, but on the wire it is always a
 /// single space-separated string (empty string when there are no scopes).
 mod scp_format {
     use serde::{self, Deserialize, Deserializer, Serializer};
@@ -89,23 +146,25 @@ mod scp_format {
     }
 }
 
-impl Claims {
+impl UserClaims {
     pub fn new<T>(
         ctx: &VContext<T>,
         id: Option<TypedUuid<AccessTokenId>>,
         user: &TypedUuid<UserId>,
         provider: &TypedUuid<UserProviderId>,
+        client_id: Uuid,
         scope: Vec<String>,
         expires_at: DateTime<Utc>,
     ) -> Self
     where
         T: VAppPermission,
     {
-        Claims {
+        UserClaims {
             iss: ctx.issuer(),
             aud: ctx.public_url().to_string(),
             sub: *user,
             prv: *provider,
+            client_id: Some(client_id),
             scp: scope,
             exp: expires_at.timestamp(),
             nbf: Utc::now().timestamp(),
@@ -266,12 +325,13 @@ mod tests {
 
     /// Build a minimal `Claims` value for serialization tests. The non-scp
     /// fields are placeholders — only the `scp` field matters here.
-    fn test_claims(scp: Vec<String>) -> Claims {
-        Claims {
+    fn test_claims(client_id: Uuid, scp: Vec<String>) -> UserClaims {
+        UserClaims {
             iss: "test".into(),
             aud: "test".into(),
             sub: TypedUuid::new_v4(),
             prv: TypedUuid::new_v4(),
+            client_id: Some(client_id),
             scp,
             exp: 0,
             nbf: 0,
@@ -281,7 +341,10 @@ mod tests {
 
     #[test]
     fn scp_serializes_as_space_delimited_string() {
-        let claims = test_claims(vec!["user:info:r".into(), "group:info:w".into()]);
+        let claims = test_claims(
+            Uuid::new_v4(),
+            vec!["user:info:r".into(), "group:info:w".into()],
+        );
         let json: Value = serde_json::to_value(&claims).unwrap();
         assert_eq!(
             json["scp"],
@@ -292,7 +355,7 @@ mod tests {
 
     #[test]
     fn scp_single_scope_serializes_as_string() {
-        let claims = test_claims(vec!["full".into()]);
+        let claims = test_claims(Uuid::new_v4(), vec!["full".into()]);
         let json: Value = serde_json::to_value(&claims).unwrap();
         assert_eq!(
             json["scp"],
@@ -303,7 +366,7 @@ mod tests {
 
     #[test]
     fn scp_empty_vec_serializes_as_empty_string() {
-        let claims = test_claims(vec![]);
+        let claims = test_claims(Uuid::new_v4(), vec![]);
         let json: Value = serde_json::to_value(&claims).unwrap();
         assert_eq!(
             json["scp"],
@@ -336,9 +399,20 @@ mod tests {
 
     #[test]
     fn scp_round_trips_through_json() {
-        let original = test_claims(vec!["user:info:r".into(), "full".into()]);
+        let original = test_claims(Uuid::new_v4(), vec!["user:info:r".into(), "full".into()]);
         let json_str = serde_json::to_string(&original).unwrap();
-        let decoded: Claims = serde_json::from_str(&json_str).unwrap();
+        let decoded: UserClaims = serde_json::from_str(&json_str).unwrap();
         assert_eq!(decoded.scp, original.scp);
+    }
+
+    /// The client a user token was issued through is named on the wire, as RFC 9068 §2.2 asks
+    #[test]
+    fn user_claims_name_their_client() {
+        let client_id = Uuid::new_v4();
+        let value = serde_json::to_value(test_claims(client_id, vec![])).unwrap();
+        assert_eq!(Value::String(client_id.to_string()), value["client_id"]);
+
+        let claims: UserClaims = serde_json::from_value(value).unwrap();
+        assert_eq!(Some(client_id), claims.client_id);
     }
 }

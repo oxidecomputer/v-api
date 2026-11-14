@@ -23,7 +23,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
-use crate::{ApiUser, UserId};
+use crate::{ApiUser, OAuthClientId, UserId};
 
 pub trait Permission:
     Clone + Debug + Serialize + DeserializeOwned + PartialEq + Send + Sync + 'static
@@ -36,9 +36,18 @@ impl<T> Permission for T where
 
 pub type ArcMap = HashMap<TypeId, Arc<dyn Any + Send + Sync>>;
 
+/// Who a caller is acting as
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Principal {
+    /// A person, signed in through a login provider or acting through one of their API keys
+    User(TypedUuid<UserId>),
+    /// An OAuth client acting as itself through client credentials
+    ServiceAccount(TypedUuid<OAuthClientId>),
+}
+
 #[derive(Debug, Clone)]
 pub struct Caller<T> {
-    pub id: TypedUuid<UserId>,
+    pub principal: Principal,
     pub permissions: Permissions<T>,
     pub extensions: ArcMap,
 }
@@ -47,8 +56,17 @@ impl<T> Caller<T>
 where
     T: Permission,
 {
+    /// The user the caller is acting as, or `None` when the caller is a service account
+    pub fn user_id(&self) -> Option<TypedUuid<UserId>> {
+        match self.principal {
+            Principal::User(id) => Some(id),
+            Principal::ServiceAccount(_) => None,
+        }
+    }
+
+    /// Returns true if the caller is the given user. A service account is never a user.
     pub fn is(&self, id: &TypedUuid<UserId>) -> bool {
-        &self.id == id
+        self.user_id().as_ref() == Some(id)
     }
 
     pub fn insert<U>(&mut self, value: U) -> Option<Arc<U>>
@@ -107,13 +125,12 @@ where
         result
     }
 
-    /// Alias for [`can`](Self::can). A caller can grant any permission they hold.
+    /// Returns true if the caller could grant the target. See [`Permissions::can_grant`].
     pub fn can_grant(&self, target: &T) -> bool {
-        self.can(target)
+        self.permissions.can_grant(target)
     }
 
-    /// Alias for [`all`](Self::all). A caller can grant a set of permissions if they hold
-    /// every one of them.
+    /// Returns true if the caller could grant every permission in the targets
     pub fn can_grant_all(&self, targets: &Permissions<T>) -> bool {
         self.permissions.can_grant_all(targets)
     }
@@ -122,7 +139,7 @@ where
 impl<T> From<Permissions<T>> for Caller<T> {
     fn from(value: Permissions<T>) -> Self {
         Self {
-            id: TypedUuid::new_v4(),
+            principal: Principal::User(TypedUuid::new_v4()),
             permissions: value,
             extensions: HashMap::new(),
         }
@@ -220,22 +237,57 @@ where
     }
 
     /// Returns true if any held permission implies the target, either by exact match
-    /// or through the permission hierarchy (e.g., an "All" variant implies specific instances).
+    /// or through a permission definition.
     pub fn can(&self, permission: &T) -> bool {
         let res = self.iter().any(|held| T::implies(held, permission));
         tracing::trace!(available = ?self.0, requested = ?permission, result = ?res, "Permissions existence check");
         res
     }
 
-    /// Alias for [`can`](Self::can). A permission set can grant any permission it holds.
+    /// Returns true if this set could grant the target to someone else.
     pub fn can_grant(&self, target: &T) -> bool {
-        self.can(target)
+        // We need to expand the target to verify that every permission it expresses is covered by
+        // this permission set. We can not use equality as this permission set may contain supersets
+        // for value carrying permissions compared to the target permission.
+        match target.expand_value() {
+            Some(values) => values.iter().all(|value| self.can(value)),
+            None => self.can(target),
+        }
     }
 
-    /// Alias for [`all`](Self::all). A permission set can grant a collection of permissions
-    /// if it holds every one of them.
+    /// Returns true if this set could grant every permission in the targets
     pub fn can_grant_all(&self, targets: &Permissions<T>) -> bool {
-        targets.iter().all(|target| self.can(target))
+        targets.iter().all(|target| self.can_grant(target))
+    }
+
+    /// Splits every permission that carries a set of values into one permission per value.
+    pub fn expand_values(&self) -> Permissions<T> {
+        let mut expanded = Permissions::new();
+        for permission in self.iter() {
+            match permission.expand_value() {
+                Some(values) => values.into_iter().for_each(|value| {
+                    expanded.insert(value);
+                }),
+                None => {
+                    expanded.insert(permission.clone());
+                }
+            }
+        }
+
+        expanded
+    }
+
+    /// Returns this set with the target removed.
+    pub fn without(&self, target: &T) -> Permissions<T> {
+        let removed = target
+            .expand_value()
+            .unwrap_or_else(|| vec![target.clone()]);
+        let mut remaining = self.expand_values();
+        removed.iter().for_each(|value| {
+            remaining.remove(value);
+        });
+
+        remaining
     }
 }
 
@@ -344,9 +396,12 @@ pub trait PermissionStorage {
     fn contract(_collection: &Permissions<Self>) -> Permissions<Self>
     where
         Self: Sized;
+    /// Resolves the permissions in a collection that are relative to whoever holds them. A caller
+    /// that is not a user has no actor, and permissions that refer to the actor's own user record
+    /// expand to nothing for them.
     fn expand(
         collection: &Permissions<Self>,
-        actor: &ApiUser<Self>,
+        actor: Option<&ApiUser<Self>>,
         actor_permissions: Option<&Permissions<Self>>,
         extensions: &ArcMap,
     ) -> Permissions<Self>
@@ -359,4 +414,49 @@ pub trait PermissionStorage {
     fn implies(held: &Self, target: &Self) -> bool
     where
         Self: Sized;
+
+    /// Splits a permission that carries a set of values into one permission per value. Returns
+    /// `None` for any permission that does not carry a set of values, which includes permissions
+    /// whose meaning is relative to whoever holds them.
+    fn expand_value(&self) -> Option<Vec<Self>>
+    where
+        Self: Sized,
+    {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use newtype_uuid::{GenericUuid, TypedUuid};
+
+    use super::{Caller, Permissions, Principal};
+
+    fn caller(principal: Principal) -> Caller<()> {
+        Caller {
+            principal,
+            permissions: Permissions::default(),
+            extensions: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_user_caller_is_that_user() {
+        let user_id = TypedUuid::new_v4();
+        let user = caller(Principal::User(user_id));
+
+        assert_eq!(Some(user_id), user.user_id());
+        assert!(user.is(&user_id));
+        assert!(!user.is(&TypedUuid::new_v4()));
+    }
+
+    /// A service account is never treated as a user, even one whose id has the same value
+    #[test]
+    fn a_service_account_is_never_a_user() {
+        let client_id = TypedUuid::new_v4();
+        let service_account = caller(Principal::ServiceAccount(client_id));
+
+        assert_eq!(None, service_account.user_id());
+        assert!(!service_account.is(&TypedUuid::from_untyped_uuid(client_id.into_untyped_uuid())));
+    }
 }

@@ -55,6 +55,7 @@ yup-oauth2 = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
+aws-lc-rs = { workspace = true }
 mockall = { workspace = true }
 rsa = { workspace = true, features = ["pem"] }
 tracing-subscriber = { workspace = true }

@@ -18,7 +18,7 @@ use rsa::{
 };
 use secrecy::{ExposeSecret, SecretString};
 use serde::{
-    Deserialize, Deserializer,
+    Deserialize, Deserializer, Serialize,
     de::{self, Visitor},
 };
 use std::path::{Path, PathBuf};
@@ -447,6 +447,26 @@ impl ResolvedAsymmetricKey {
                 project, location, keyring, key, version
             )),
             _ => None,
+        }
+    }
+}
+
+/// Limits that apply to the client credentials grant
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+pub struct ClientCredentialsConfig {
+    /// How long an access token issued to a service account remains valid, in seconds
+    pub token_expiration: i64,
+    /// The largest allowed number of seconds between now and the expiration of a client
+    /// assertion. This keeps assertions from being used as long lived credentials, and bounds how
+    /// long their jti must be remembered.
+    pub max_assertion_lifetime: i64,
+}
+
+impl Default for ClientCredentialsConfig {
+    fn default() -> Self {
+        Self {
+            token_expiration: 3600,
+            max_assertion_lifetime: 300,
         }
     }
 }

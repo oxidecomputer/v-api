@@ -7,7 +7,7 @@ use dropshot::RequestContext;
 use jsonwebtoken::jwk::JwkSet;
 use serde::Serialize;
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
-use v_model::permissions::Caller;
+use v_model::permissions::{Caller, Principal};
 
 use crate::{
     ApiContext,
@@ -65,12 +65,12 @@ where
         ]);
         Ok(Self {
             unauthenticated_caller: Caller {
-                id: "00000000-0000-4000-8000-000000000000".parse().unwrap(),
+                principal: Principal::User("00000000-0000-4000-8000-000000000000".parse().unwrap()),
                 permissions: vec![].into(),
                 extensions: HashMap::default(),
             },
             registration_caller: Caller {
-                id: "00000000-0000-4000-8000-000000000001".parse().unwrap(),
+                principal: Principal::User("00000000-0000-4000-8000-000000000001".parse().unwrap()),
                 permissions: registration_caller_additional_permissions.into(),
                 extensions: HashMap::default(),
             },

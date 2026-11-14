@@ -5,7 +5,7 @@
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionError, ConnectionManager};
 use async_trait::async_trait;
 use bb8::Pool;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use diesel::{
     ExpressionMethods, OptionalExtension as OptionalExtension2, PgArrayExpressionMethods,
     insert_into, pg::PgConnection, query_dsl::QueryDsl, update, upsert::excluded,
@@ -24,22 +24,26 @@ use crate::{
     MapperEvent, MapperId, NewAccessGroup, NewAccessToken, NewApiKey, NewApiUser,
     NewApiUserContactEmail, NewApiUserProvider, NewLinkRequest, NewLoginAttempt, NewMagicLink,
     NewMagicLinkAttempt, NewMagicLinkRedirectUri, NewMagicLinkSecret, NewMapper, NewMapperEvent,
-    NewOAuthClient, NewOAuthClientRedirectUri, NewOAuthClientSecret, OAuthClient, OAuthClientId,
-    OAuthClientRedirectUri, OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId,
-    UserContactEmailId, UserId, UserProviderId,
+    NewOAuthClient, NewOAuthClientAssertion, NewOAuthClientKey, NewOAuthClientRedirectUri,
+    NewOAuthClientSecret, NewServiceAccount, NewServiceAccountToken, OAuthClient,
+    OAuthClientAssertion, OAuthClientId, OAuthClientKey, OAuthClientKeyId, OAuthClientRedirectUri,
+    OAuthClientSecret, OAuthRedirectUriId, OAuthSecretId, ServiceAccount, ServiceAccountToken,
+    ServiceAccountTokenId, UserContactEmailId, UserId, UserProviderId,
     db::{
         AccessGroupModel, ApiKeyModel, ApiUserAccessTokenModel, ApiUserContactEmailModel,
         ApiUserModel, ApiUserProviderModel, LinkRequestModel, LoginAttemptModel,
         MagicLinkAttemptModel, MagicLinkModel, MagicLinkRedirectUriModel, MagicLinkSecretModel,
-        MapperEventModel, MapperModel, OAuthClientModel, OAuthClientRedirectUriModel,
-        OAuthClientSecretModel,
+        MapperEventModel, MapperModel, OAuthClientAssertionModel, OAuthClientKeyModel,
+        OAuthClientModel, OAuthClientRedirectUriModel, OAuthClientSecretModel, ServiceAccountModel,
+        ServiceAccountTokenModel,
     },
     permissions::Permission,
     schema::{
         access_groups, api_key, api_user, api_user_access_token, api_user_contact_email,
         api_user_provider, link_request, login_attempt, magic_link_attempt, magic_link_client,
         magic_link_client_redirect_uri, magic_link_client_secret, mapper, mapper_event,
-        oauth_client, oauth_client_redirect_uri, oauth_client_secret,
+        oauth_client, oauth_client_assertion, oauth_client_key, oauth_client_redirect_uri,
+        oauth_client_secret, service_account, service_account_token,
     },
     schema_ext::{LoginAttemptState, MagicLinkAttemptState},
     storage::{LinkRequestFilter, LinkRequestStore, StoreError},
@@ -51,8 +55,9 @@ use super::{
     ApiUserProviderFilter, ApiUserProviderStore, ApiUserStore, ListPagination, LoginAttemptFilter,
     LoginAttemptStore, MagicLinkAttemptFilter, MagicLinkAttemptStore, MagicLinkFilter,
     MagicLinkRedirectUriStore, MagicLinkSecretStore, MagicLinkStore, MapperEventFilter,
-    MapperEventStore, MapperFilter, MapperStore, OAuthClientFilter, OAuthClientRedirectUriStore,
-    OAuthClientSecretStore, OAuthClientStore,
+    MapperEventStore, MapperFilter, MapperStore, OAuthClientAssertionStore, OAuthClientFilter,
+    OAuthClientKeyFilter, OAuthClientKeyStore, OAuthClientRedirectUriStore, OAuthClientSecretStore,
+    OAuthClientStore, ServiceAccountStore, ServiceAccountTokenFilter, ServiceAccountTokenStore,
 };
 
 pub type DbPool = Pool<ConnectionManager<PgConnection>>;
@@ -209,10 +214,7 @@ where
         Ok(users)
     }
 
-    #[instrument(skip(self), fields(id = ?user.id, permissions = ?user.permissions, groups = ?user.groups))]
-    async fn upsert(&self, user: NewApiUser<T>) -> Result<ApiUserInfo<T>, StoreError> {
-        tracing::trace!("Upserting user");
-
+    async fn create(&self, user: NewApiUser<T>) -> Result<ApiUserInfo<T>, StoreError> {
         insert_into(api_user::dsl::api_user)
             .values((
                 api_user::id.eq(user.id.into_untyped_uuid()),
@@ -223,24 +225,46 @@ where
                     .map(|g| g.into_untyped_uuid())
                     .collect::<Vec<_>>()),
             ))
-            .on_conflict(api_user::id)
-            .do_update()
+            .execute_async(&*self.pool.get().await?)
+            .await?;
+
+        Ok(ApiUserStore::get(self, &user.id, false).await?.unwrap())
+    }
+
+    async fn update(
+        &self,
+        user: NewApiUser<T>,
+        expected_generation: i64,
+    ) -> Result<Option<ApiUserInfo<T>>, StoreError> {
+        let updated = update(api_user::dsl::api_user)
+            .filter(api_user::id.eq(user.id.into_untyped_uuid()))
+            .filter(api_user::generation.eq(expected_generation))
+            .filter(api_user::deleted_at.is_null())
             .set((
-                api_user::permissions.eq(excluded(api_user::permissions)),
-                api_user::groups.eq(excluded(api_user::groups)),
+                api_user::permissions.eq(user.permissions.clone()),
+                api_user::groups.eq(user
+                    .groups
+                    .into_iter()
+                    .map(|g| g.into_untyped_uuid())
+                    .collect::<Vec<_>>()),
+                api_user::generation.eq(api_user::generation + 1),
             ))
             .execute_async(&*self.pool.get().await?)
             .await?;
 
-        tracing::trace!("Upserted api user");
-
-        Ok(ApiUserStore::get(self, &user.id, false).await?.unwrap())
+        match updated {
+            0 => Ok(None),
+            _ => ApiUserStore::get(self, &user.id, false).await,
+        }
     }
 
     async fn delete(&self, id: &TypedUuid<UserId>) -> Result<Option<ApiUserInfo<T>>, StoreError> {
         let _ = update(api_user::dsl::api_user)
             .filter(api_user::id.eq(id.into_untyped_uuid()))
-            .set(api_user::deleted_at.eq(Utc::now()))
+            .set((
+                api_user::deleted_at.eq(Utc::now()),
+                api_user::generation.eq(api_user::generation + 1),
+            ))
             .execute_async(&*self.pool.get().await?)
             .await?;
 
@@ -855,6 +879,7 @@ impl OAuthClientStore for PostgresStore {
         let mut query = oauth_client::dsl::oauth_client
             .left_join(oauth_client_secret::table)
             .left_join(oauth_client_redirect_uri::table)
+            .left_join(oauth_client_key::table)
             .into_boxed();
 
         let OAuthClientFilter { id, deleted } = filter;
@@ -875,18 +900,20 @@ impl OAuthClientStore for PostgresStore {
                 OAuthClientModel,
                 Option<OAuthClientSecretModel>,
                 Option<OAuthClientRedirectUriModel>,
+                Option<OAuthClientKeyModel>,
             )>(&*self.pool.get().await?)
             .await?
             .into_iter()
             .fold(
                 BTreeMap::new(),
-                |mut clients, (client, secret, redirect)| {
-                    // The joins produce a row per secret x redirect uri combination, so each
-                    // list is keyed by id to drop the duplicate entries
+                |mut clients, (client, secret, redirect, key)| {
+                    // The joins produce a row per secret x redirect uri x key combination, so
+                    // each list is keyed by id to drop the duplicate entries
                     let value = clients.entry(client.id).or_insert((
                         client,
                         BTreeMap::<Uuid, OAuthClientSecret>::new(),
                         BTreeMap::<Uuid, OAuthClientRedirectUri>::new(),
+                        BTreeMap::<Uuid, OAuthClientKey>::new(),
                     ));
 
                     // Only include secrets that have not been deleted
@@ -906,15 +933,23 @@ impl OAuthClientStore for PostgresStore {
                             .or_insert_with(|| redirect.into());
                     }
 
+                    // Only include keys that have not been deleted
+                    if let Some(key) = key
+                        && key.deleted_at.is_none()
+                    {
+                        value.3.entry(key.id).or_insert_with(|| key.into());
+                    }
+
                     clients
                 },
             )
             .into_iter()
-            .map(|(_, (client, secrets, redirect_uris))| {
+            .map(|(_, (client, secrets, redirect_uris, keys))| {
                 OAuthClient::new(
                     client,
                     secrets.into_values().collect(),
                     redirect_uris.into_values().collect(),
+                    keys.into_values().collect(),
                 )
             })
             .skip(pagination.offset as usize)
@@ -944,6 +979,281 @@ impl OAuthClientStore for PostgresStore {
             .await?;
 
         OAuthClientStore::get(self, id, true).await
+    }
+}
+
+#[async_trait]
+impl<T> ServiceAccountStore<T> for PostgresStore
+where
+    T: Permission,
+{
+    async fn get(
+        &self,
+        id: &TypedUuid<OAuthClientId>,
+    ) -> Result<Option<ServiceAccount<T>>, StoreError> {
+        let account = service_account::dsl::service_account
+            .filter(service_account::id.eq(id.into_untyped_uuid()))
+            .get_result_async::<ServiceAccountModel<T>>(&*self.pool.get().await?)
+            .await
+            .optional()?;
+
+        Ok(account.map(|account| account.into()))
+    }
+
+    async fn create(&self, account: NewServiceAccount<T>) -> Result<ServiceAccount<T>, StoreError> {
+        let account_m: ServiceAccountModel<T> = insert_into(service_account::dsl::service_account)
+            .values((
+                service_account::id.eq(account.id.into_untyped_uuid()),
+                service_account::permissions.eq(account.permissions),
+            ))
+            .get_result_async(&*self.pool.get().await?)
+            .await?;
+
+        Ok(account_m.into())
+    }
+
+    async fn update(
+        &self,
+        account: NewServiceAccount<T>,
+        expected_generation: i64,
+    ) -> Result<Option<ServiceAccount<T>>, StoreError> {
+        let account_m: Option<ServiceAccountModel<T>> =
+            update(service_account::dsl::service_account)
+                .filter(service_account::id.eq(account.id.into_untyped_uuid()))
+                .filter(service_account::generation.eq(expected_generation))
+                .set((
+                    service_account::permissions.eq(account.permissions),
+                    service_account::generation.eq(service_account::generation + 1),
+                ))
+                .get_result_async(&*self.pool.get().await?)
+                .await
+                .optional()?;
+
+        Ok(account_m.map(|account| account.into()))
+    }
+}
+
+#[async_trait]
+impl ServiceAccountTokenStore for PostgresStore {
+    async fn get(
+        &self,
+        id: &TypedUuid<ServiceAccountTokenId>,
+        revoked: bool,
+    ) -> Result<Option<ServiceAccountToken>, StoreError> {
+        let mut query = service_account_token::dsl::service_account_token
+            .into_boxed()
+            .filter(service_account_token::id.eq(id.into_untyped_uuid()));
+
+        if !revoked {
+            query = query.filter(service_account_token::revoked_at.is_null());
+        }
+
+        let token = query
+            .get_result_async::<ServiceAccountTokenModel>(&*self.pool.get().await?)
+            .await
+            .optional()?;
+
+        Ok(token.map(|token| token.into()))
+    }
+
+    async fn list(
+        &self,
+        filter: ServiceAccountTokenFilter,
+        pagination: &ListPagination,
+    ) -> Result<Vec<ServiceAccountToken>, StoreError> {
+        let mut query = service_account_token::dsl::service_account_token.into_boxed();
+
+        let ServiceAccountTokenFilter {
+            oauth_client_id,
+            revoked,
+            expired,
+        } = filter;
+
+        if let Some(oauth_client_id) = oauth_client_id {
+            query = query.filter(
+                service_account_token::oauth_client_id
+                    .eq_any(oauth_client_id.into_iter().map(|id| id.into_untyped_uuid())),
+            );
+        }
+
+        if !revoked {
+            query = query.filter(service_account_token::revoked_at.is_null());
+        }
+
+        if !expired {
+            query = query.filter(service_account_token::expires_at.gt(Utc::now()));
+        }
+
+        let tokens = query
+            .offset(pagination.offset)
+            .limit(pagination.limit)
+            .order(service_account_token::created_at.desc())
+            .get_results_async::<ServiceAccountTokenModel>(&*self.pool.get().await?)
+            .await?;
+
+        Ok(tokens.into_iter().map(|token| token.into()).collect())
+    }
+
+    async fn create(
+        &self,
+        token: NewServiceAccountToken,
+    ) -> Result<ServiceAccountToken, StoreError> {
+        let token_m: ServiceAccountTokenModel =
+            insert_into(service_account_token::dsl::service_account_token)
+                .values((
+                    service_account_token::id.eq(token.id.into_untyped_uuid()),
+                    service_account_token::oauth_client_id
+                        .eq(token.oauth_client_id.into_untyped_uuid()),
+                    service_account_token::expires_at.eq(token.expires_at),
+                ))
+                .get_result_async(&*self.pool.get().await?)
+                .await?;
+
+        Ok(token_m.into())
+    }
+
+    async fn revoke(
+        &self,
+        id: &TypedUuid<ServiceAccountTokenId>,
+    ) -> Result<Option<ServiceAccountToken>, StoreError> {
+        let token_m: Option<ServiceAccountTokenModel> =
+            update(service_account_token::dsl::service_account_token)
+                .filter(service_account_token::id.eq(id.into_untyped_uuid()))
+                .filter(service_account_token::revoked_at.is_null())
+                .set(service_account_token::revoked_at.eq(Utc::now()))
+                .get_result_async(&*self.pool.get().await?)
+                .await
+                .optional()?;
+
+        Ok(token_m.map(|token| token.into()))
+    }
+}
+
+#[async_trait]
+impl OAuthClientKeyStore for PostgresStore {
+    async fn get(
+        &self,
+        id: &TypedUuid<OAuthClientKeyId>,
+        deleted: bool,
+    ) -> Result<Option<OAuthClientKey>, StoreError> {
+        let key = OAuthClientKeyStore::list(
+            self,
+            OAuthClientKeyFilter {
+                id: Some(vec![*id]),
+                deleted,
+                ..Default::default()
+            },
+            &ListPagination::default().limit(1),
+        )
+        .await?;
+
+        Ok(key.into_iter().nth(0))
+    }
+
+    async fn list(
+        &self,
+        filter: OAuthClientKeyFilter,
+        pagination: &ListPagination,
+    ) -> Result<Vec<OAuthClientKey>, StoreError> {
+        let mut query = oauth_client_key::dsl::oauth_client_key.into_boxed();
+
+        let OAuthClientKeyFilter {
+            id,
+            oauth_client_id,
+            thumbprint,
+            deleted,
+        } = filter;
+
+        if let Some(id) = id {
+            query = query.filter(
+                oauth_client_key::id.eq_any(id.into_iter().map(|key| key.into_untyped_uuid())),
+            );
+        }
+
+        if let Some(oauth_client_id) = oauth_client_id {
+            query = query.filter(
+                oauth_client_key::oauth_client_id.eq_any(
+                    oauth_client_id
+                        .into_iter()
+                        .map(|client| client.into_untyped_uuid()),
+                ),
+            );
+        }
+
+        if let Some(thumbprint) = thumbprint {
+            query = query.filter(oauth_client_key::thumbprint.eq_any(thumbprint));
+        }
+
+        if !deleted {
+            query = query.filter(oauth_client_key::deleted_at.is_null());
+        }
+
+        let results = query
+            .offset(pagination.offset)
+            .limit(pagination.limit)
+            .order(oauth_client_key::created_at.desc())
+            .get_results_async::<OAuthClientKeyModel>(&*self.pool.get().await?)
+            .await?;
+
+        Ok(results.into_iter().map(|key| key.into()).collect())
+    }
+
+    async fn insert(&self, key: NewOAuthClientKey) -> Result<OAuthClientKey, StoreError> {
+        let key_m: OAuthClientKeyModel = insert_into(oauth_client_key::dsl::oauth_client_key)
+            .values((
+                oauth_client_key::id.eq(key.id.into_untyped_uuid()),
+                oauth_client_key::oauth_client_id.eq(key.oauth_client_id.into_untyped_uuid()),
+                oauth_client_key::thumbprint.eq(key.thumbprint),
+                oauth_client_key::jwk.eq(key.jwk),
+            ))
+            .get_result_async(&*self.pool.get().await?)
+            .await?;
+
+        Ok(key_m.into())
+    }
+
+    async fn delete(
+        &self,
+        id: &TypedUuid<OAuthClientKeyId>,
+    ) -> Result<Option<OAuthClientKey>, StoreError> {
+        let _ = update(oauth_client_key::dsl::oauth_client_key)
+            .filter(oauth_client_key::id.eq(id.into_untyped_uuid()))
+            .filter(oauth_client_key::deleted_at.is_null())
+            .set(oauth_client_key::deleted_at.eq(Utc::now()))
+            .execute_async(&*self.pool.get().await?)
+            .await?;
+
+        OAuthClientKeyStore::get(self, id, true).await
+    }
+}
+
+#[async_trait]
+impl OAuthClientAssertionStore for PostgresStore {
+    async fn record(
+        &self,
+        assertion: NewOAuthClientAssertion,
+    ) -> Result<OAuthClientAssertion, StoreError> {
+        let assertion_m: OAuthClientAssertionModel =
+            insert_into(oauth_client_assertion::dsl::oauth_client_assertion)
+                .values((
+                    oauth_client_assertion::oauth_client_id
+                        .eq(assertion.oauth_client_id.into_untyped_uuid()),
+                    oauth_client_assertion::jti.eq(assertion.jti),
+                    oauth_client_assertion::expires_at.eq(assertion.expires_at),
+                ))
+                .get_result_async(&*self.pool.get().await?)
+                .await?;
+
+        Ok(assertion_m.into())
+    }
+
+    async fn delete_expired(&self, before: DateTime<Utc>) -> Result<usize, StoreError> {
+        Ok(
+            diesel::delete(oauth_client_assertion::dsl::oauth_client_assertion)
+                .filter(oauth_client_assertion::expires_at.lt(before))
+                .execute_async(&*self.pool.get().await?)
+                .await?,
+        )
     }
 }
 
@@ -1438,13 +1748,34 @@ where
             .on_conflict(access_groups::id)
             .do_update()
             .set((
-                access_groups::name.eq(excluded(access_groups::name)),
+                // The name of an existing group is never changed, see AccessGroupStore::update
                 access_groups::permissions.eq(excluded(access_groups::permissions)),
+                access_groups::generation.eq(access_groups::generation + 1),
             ))
             .get_result_async(&*self.pool.get().await?)
             .await?;
 
         Ok(group_m.into())
+    }
+
+    async fn update(
+        &self,
+        group: &NewAccessGroup<T>,
+        expected_generation: i64,
+    ) -> Result<Option<AccessGroup<T>>, StoreError> {
+        let group_m: Option<AccessGroupModel<T>> = update(access_groups::dsl::access_groups)
+            .filter(access_groups::id.eq(group.id.into_untyped_uuid()))
+            .filter(access_groups::generation.eq(expected_generation))
+            .filter(access_groups::deleted_at.is_null())
+            .set((
+                access_groups::permissions.eq(group.permissions.clone()),
+                access_groups::generation.eq(access_groups::generation + 1),
+            ))
+            .get_result_async(&*self.pool.get().await?)
+            .await
+            .optional()?;
+
+        Ok(group_m.map(|group| group.into()))
     }
 
     async fn delete(
@@ -1453,7 +1784,10 @@ where
     ) -> Result<Option<AccessGroup<T>>, StoreError> {
         let _ = update(access_groups::dsl::access_groups)
             .filter(access_groups::id.eq(id.into_untyped_uuid()))
-            .set(access_groups::deleted_at.eq(Utc::now()))
+            .set((
+                access_groups::deleted_at.eq(Utc::now()),
+                access_groups::generation.eq(access_groups::generation + 1),
+            ))
             .execute_async(&*self.pool.get().await?)
             .await?;
 

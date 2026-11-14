@@ -21,7 +21,7 @@ use crate::{
     permissions::{VAppPermission, VPermission},
     response::ResourceError,
     secrets::OpenApiSecretString,
-    util::response::{bad_request, to_internal_error},
+    util::response::{bad_request, forbidden, to_internal_error},
 };
 
 #[instrument(skip(rqctx), err(Debug))]
@@ -56,7 +56,10 @@ pub async fn create_magic_link_inner<T>(
 where
     T: VAppPermission + From<VPermission> + PermissionStorage,
 {
-    // Create the new client
+    // Only users are allowed to create clients.
+    let creator = caller.user_id().ok_or_else(forbidden)?;
+
+    // Create the new client.
     let client = ctx.magic_link.create_magic_link(&caller).await?;
 
     // Give the caller permission to perform actions on the client they just created.
@@ -66,7 +69,7 @@ where
     ctx.user
         .add_permissions_to_user(
             &registration_caller,
-            &caller.id,
+            &creator,
             vec![
                 VPermission::GetMagicLinkClient(client.id),
                 VPermission::ManageMagicLinkClient(client.id),
@@ -245,7 +248,7 @@ mod tests {
     use newtype_uuid::TypedUuid;
     use v_model::{
         ApiUser, ApiUserInfo, MagicLink, MagicLinkSecret,
-        permissions::Caller,
+        permissions::{Caller, Principal},
         storage::{MockApiUserStore, MockMagicLinkSecretStore, MockMagicLinkStore},
     };
 
@@ -273,6 +276,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             deleted_at: None,
+            generation: 0,
         }
     }
 
@@ -280,7 +284,7 @@ mod tests {
     async fn test_create_client_with_secret() {
         let user = mock_user();
         let mut caller = Caller {
-            id: user.id,
+            principal: Principal::User(user.id),
             permissions: user.permissions.clone(),
             extensions: HashMap::default(),
         };
@@ -296,8 +300,8 @@ mod tests {
                     providers: vec![],
                 }))
             });
-        user_store.expect_upsert().returning(|user| {
-            Ok(ApiUserInfo {
+        user_store.expect_update().returning(|user, _| {
+            Ok(Some(ApiUserInfo {
                 user: ApiUser {
                     id: user.id,
                     permissions: user.permissions,
@@ -305,10 +309,11 @@ mod tests {
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
                     deleted_at: None,
+                    generation: 0,
                 },
                 email: None,
                 providers: vec![],
-            })
+            }))
         });
 
         let mut store = MockMagicLinkStore::new();

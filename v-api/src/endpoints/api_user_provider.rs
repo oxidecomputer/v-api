@@ -13,6 +13,7 @@ use crate::{
     context::{ApiContext, VContextWithCaller},
     permissions::VAppPermission,
     secrets::OpenApiSecretString,
+    util::response::forbidden,
 };
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -44,20 +45,17 @@ where
     let path = path.into_inner();
     let body = body.into_inner();
 
+    // Login providers belong to users, so only a user can link one of theirs elsewhere
+    let user_id = caller.user_id().ok_or_else(forbidden)?;
+
     let provider = ctx
         .user
-        .get_api_user_provider(&caller, &caller.id, &path.provider_id)
+        .get_api_user_provider(&caller, &user_id, &path.provider_id)
         .await?;
 
     let token = ctx
         .link
-        .create_link_request_token(
-            &caller,
-            ctx.signer(),
-            &provider.id,
-            &caller.id,
-            &body.user_id,
-        )
+        .create_link_request_token(&caller, ctx.signer(), &provider.id, &user_id, &body.user_id)
         .await?;
 
     Ok(HttpResponseOk(ApiUserLinkRequestResponse {

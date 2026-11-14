@@ -9,7 +9,7 @@ use v_model::storage::StoreError;
 use crate::{
     authn::{SigningKeyError, jwt::JwtSignerError},
     endpoints::login::{LoginError, oauth::OAuthProviderError},
-    response::conflict,
+    response::{ResourceError, conflict},
     util::response::{forbidden, internal_error, not_found},
 };
 
@@ -41,6 +41,8 @@ pub enum ApiError {
     OAuth(#[from] OAuthProviderError),
     #[error("Internal storage failed {0}")]
     Storage(#[from] StoreError),
+    #[error("Internal error")]
+    Internal(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl From<ApiError> for HttpError {
@@ -54,6 +56,21 @@ impl From<ApiError> for HttpError {
             ApiError::NotFound => not_found(""),
             ApiError::OAuth(_) => internal_error("OAuth provider failed"),
             ApiError::Storage(_) => internal_error("Internal storage failed"),
+            ApiError::Internal(_) => internal_error("Internal error"),
+        }
+    }
+}
+
+impl<T> From<ResourceError<T>> for ApiError
+where
+    T: std::error::Error + Send + Sync + 'static,
+{
+    fn from(value: ResourceError<T>) -> ApiError {
+        match value {
+            ResourceError::Conflict => ApiError::Conflict,
+            ResourceError::DoesNotExist => ApiError::NotFound,
+            ResourceError::Restricted => ApiError::Forbidden,
+            ResourceError::InternalError(err) => ApiError::Internal(Box::new(err)),
         }
     }
 }

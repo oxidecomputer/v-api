@@ -8,12 +8,16 @@ use http::{Response, StatusCode, header};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
+use uuid::Uuid;
 use v_model::permissions::PermissionStorage;
 
 use crate::{
-    authn::jwt::Claims,
+    authn::jwt::UserClaims,
     context::ApiContext,
-    endpoints::login::{ExternalUserId, UserInfo, oauth::flow::device_token::ProxyTokenResponse},
+    endpoints::login::{
+        ExternalUserId, UserInfo,
+        oauth::flow::{device_token::ProxyTokenResponse, mark_uncacheable},
+    },
     permissions::{VAppPermission, VPermission},
 };
 
@@ -55,11 +59,12 @@ where
             &ctx.v_ctx().builtin_registration_user(),
             ctx.v_ctx().jwt_signer(),
             &api_user.user.id,
-            &Claims::new(
+            &UserClaims::new(
                 ctx.v_ctx(),
                 None,
                 &api_user.user.id,
                 &api_user_provider.id,
+                Uuid::new_v4(),
                 vec!["full".to_string()],
                 Utc::now() + Duration::seconds(60 * 60),
             ),
@@ -68,7 +73,7 @@ where
 
     tracing::info!(provider = "local", api_user_id = ?api_user.user.id, "Generated access token");
 
-    Ok(Response::builder()
+    let mut token_response = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/json")
         .body(
@@ -81,5 +86,8 @@ where
             })
             .unwrap()
             .into(),
-        )?)
+        )?;
+    mark_uncacheable(token_response.headers_mut());
+
+    Ok(token_response)
 }

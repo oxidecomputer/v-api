@@ -4,10 +4,10 @@
 
 use chrono::{Duration, Utc};
 use dropshot::{
-    ClientErrorStatusCode, ErrorStatusCode, HttpError, HttpResponseOk, Path, RequestContext,
-    TypedBody,
+    ClientErrorStatusCode, ErrorStatusCode, HttpError, HttpResponseHeaders, HttpResponseOk, Path,
+    RequestContext, TypedBody,
 };
-use newtype_uuid::TypedUuid;
+use newtype_uuid::{GenericUuid, TypedUuid};
 use schemars::JsonSchema;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,7 @@ use crate::{
     ApiContext, VContext,
     authn::{Verify, key::RawKey},
     context::magic_link::{MagicLinkSendError, MagicLinkTransitionError},
-    endpoints::login::{ExternalUserId, UserInfo},
+    endpoints::login::{ExternalUserId, UserInfo, oauth::flow::token_response},
     permissions::VAppPermission,
     response::{ResourceError, bad_request, internal_error, to_internal_error},
     secrets::OpenApiSecretString,
@@ -184,7 +184,7 @@ pub struct MagicLinkExchangeResponse {
 pub async fn magic_link_exchange_op<T>(
     rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
     body: TypedBody<MagicLinkExchangeRequest>,
-) -> Result<HttpResponseOk<MagicLinkExchangeResponse>, HttpError>
+) -> Result<HttpResponseHeaders<HttpResponseOk<MagicLinkExchangeResponse>>, HttpError>
 where
     T: VAppPermission + PermissionStorage,
 {
@@ -251,15 +251,16 @@ where
                 &ctx.builtin_registration_user(),
                 &api_user_info.user.id,
                 &api_user_provider.id,
+                attempt.magic_link_client_id.into_untyped_uuid(),
                 scope,
             )
             .await?;
 
-        Ok(HttpResponseOk(MagicLinkExchangeResponse {
+        Ok(token_response(HttpResponseOk(MagicLinkExchangeResponse {
             token_type: "Bearer".to_string(),
             access_token: token.signed_token,
             expires_in: token.expires_in,
-        }))
+        })))
     } else {
         Err(bad_request("Invalid reciption"))
     }
