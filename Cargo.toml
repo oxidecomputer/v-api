@@ -45,10 +45,10 @@ mockall = "0.15.0"
 newtype-uuid = { version = "1.4.0", features = ["schemars08", "serde", "v4"] }
 oauth2 = { version = "5.0.0", default-features = false }
 oauth2-reqwest = "0.1.0-alpha.3"
-opentelemetry = "0.32"
-opentelemetry_sdk = "0.32"
-opentelemetry-otlp = { version = "0.32", default-features = false, features = ["http-json", "reqwest-blocking-client", "logs", "trace", "internal-logs"] }
-opentelemetry-appender-tracing = "0.32"
+opentelemetry = "0.33"
+opentelemetry_sdk = "0.33"
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["http-json", "reqwest-blocking-client", "logs", "trace", "internal-logs"] }
+opentelemetry-appender-tracing = "0.33"
 owo-colors = "4.4.0"
 partial-struct = { git = "https://github.com/oxidecomputer/partial-struct" }
 proc-macro2 = "1"
