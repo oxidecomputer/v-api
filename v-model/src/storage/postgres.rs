@@ -676,6 +676,38 @@ impl AccessTokenStore for PostgresStore {
 
         Ok(token_m.into())
     }
+
+    async fn revoke(&self, filter: AccessTokenFilter) -> Result<usize, StoreError> {
+        let mut query = update(api_user_access_token::table).into_boxed();
+
+        let AccessTokenFilter {
+            id,
+            api_user_id,
+            // The revoked filter in this context is not useful as we do not
+            // revoke already revoked tokens
+            revoked: _,
+        } = filter;
+
+        if let Some(id) = id {
+            query = query.filter(
+                api_user_access_token::id
+                    .eq_any(id.into_iter().map(|token| token.into_untyped_uuid())),
+            );
+        }
+
+        if let Some(api_user_id) = api_user_id {
+            query = query.filter(
+                api_user_access_token::api_user_id
+                    .eq_any(api_user_id.into_iter().map(|user| user.into_untyped_uuid())),
+            );
+        }
+
+        Ok(query
+            .filter(api_user_access_token::revoked_at.is_null())
+            .set(api_user_access_token::revoked_at.eq(Utc::now()))
+            .execute_async(&*self.pool.get().await?)
+            .await?)
+    }
 }
 
 #[async_trait]

@@ -62,8 +62,10 @@ mod system {
     }
 }
 
-/// The paths of the registered endpoints, taken from the generated OpenAPI document.
-fn registered_paths(api: &ApiDescription<Context>) -> BTreeSet<String> {
+/// Extract the methods from a described dropshot API. This creates a set of
+/// (method, pattern) pairs that each map to an #endpoint definition that has
+/// been registered with the description.
+fn registered_endpoints(api: &ApiDescription<Context>) -> BTreeSet<(String, String)> {
     let document = api
         .openapi("v-api endpoint macros", Version::new(0, 0, 1))
         .json()
@@ -72,57 +74,127 @@ fn registered_paths(api: &ApiDescription<Context>) -> BTreeSet<String> {
     document["paths"]
         .as_object()
         .expect("OpenAPI document has no paths object")
-        .keys()
-        .cloned()
+        .iter()
+        .flat_map(|(path, item)| {
+            item.as_object()
+                .expect("OpenAPI path item is not an object")
+                .keys()
+                .filter(|key| {
+                    matches!(
+                        key.as_str(),
+                        "get" | "put" | "post" | "delete" | "options" | "head" | "patch" | "trace"
+                    )
+                })
+                .map(|method| (method.to_uppercase(), path.clone()))
+        })
         .collect()
 }
 
-/// The endpoints of `v_system_endpoints` are reachable once `inject_endpoints` has run
-#[test]
-fn system_endpoints_are_registered() {
-    let paths = registered_paths(&system::api());
+/// Every endpoint our inject macros define
+fn expected_endpoints() -> BTreeSet<(String, String)> {
+    let mut endpoints = vec![
+        // OAuth clients
+        ("GET", "/oauth/client"),
+        ("POST", "/oauth/client"),
+        ("GET", "/oauth/client/{client_id}"),
+        ("POST", "/oauth/client/{client_id}/secret"),
+        ("DELETE", "/oauth/client/{client_id}/secret/{secret_id}"),
+        ("POST", "/oauth/client/{client_id}/redirect_uri"),
+        (
+            "DELETE",
+            "/oauth/client/{client_id}/redirect_uri/{redirect_uri_id}",
+        ),
+        // Magic link clients
+        ("GET", "/magic/client"),
+        ("POST", "/magic/client"),
+        ("GET", "/magic/client/{client_id}"),
+        ("POST", "/magic/client/{client_id}/secret"),
+        ("DELETE", "/magic/client/{client_id}/secret/{secret_id}"),
+        ("POST", "/magic/client/{client_id}/redirect_uri"),
+        (
+            "DELETE",
+            "/magic/client/{client_id}/redirect_uri/{redirect_uri_id}",
+        ),
+        // OAuth login
+        ("GET", "/login/oauth/{provider}/code/authorize"),
+        ("GET", "/login/oauth/{provider}/code/callback"),
+        ("POST", "/login/oauth/{provider}/code/token"),
+        ("GET", "/login/oauth/{provider}/public-pkce"),
+        ("GET", "/login/oauth/{provider}/device"),
+        ("POST", "/login/oauth/{provider}/device"),
+        ("POST", "/login/oauth/{provider}/device/exchange"),
+        // Magic link login
+        ("POST", "/login/magic/{channel}/send"),
+        ("POST", "/login/magic/{channel}/exchange"),
+        // Well known
+        ("GET", "/.well-known/openid-configuration"),
+        ("GET", "/.well-known/jwks.json"),
+        // Users
+        ("POST", "/api-user-provider/{provider_id}/link-token"),
+        ("GET", "/self"),
+        ("GET", "/api-user"),
+        ("POST", "/api-user"),
+        ("GET", "/api-user/{user_id}"),
+        ("POST", "/api-user/{user_id}"),
+        ("GET", "/api-user/{user_id}/session"),
+        ("POST", "/api-user/{user_id}/logout"),
+        ("POST", "/api-user/{user_id}/permission"),
+        ("DELETE", "/api-user/{user_id}/permission"),
+        ("GET", "/api-user/{user_id}/token"),
+        ("POST", "/api-user/{user_id}/token"),
+        ("GET", "/api-user/{user_id}/token/{api_key_id}"),
+        ("DELETE", "/api-user/{user_id}/token/{api_key_id}"),
+        ("PUT", "/api-user/{user_id}/contact/email"),
+        ("POST", "/api-user/{user_id}/group"),
+        ("DELETE", "/api-user/{user_id}/group/{group_id}"),
+        ("POST", "/api-user/{user_id}/link"),
+        // Groups
+        ("GET", "/group"),
+        ("POST", "/group"),
+        ("PUT", "/group/{group_id}"),
+        ("DELETE", "/group/{group_id}"),
+        ("GET", "/group-membership/{group_id}"),
+        // Mappers
+        ("GET", "/mapper"),
+        ("POST", "/mapper"),
+        ("DELETE", "/mapper/{mapper_id}"),
+    ];
 
-    for expected in [
-        "/.well-known/jwks.json",
-        "/.well-known/openid-configuration",
-        "/api-user",
-        "/api-user/{user_id}",
-        "/api-user/{user_id}/token/{api_key_id}",
-        "/group",
-        "/group/{group_id}",
-        "/login/magic/{channel}/send",
-        "/login/oauth/{provider}/code/token",
-        "/login/oauth/{provider}/device",
-        "/magic/client",
-        "/mapper",
-        "/oauth/client/{client_id}/secret",
-        "/self",
-    ] {
-        assert!(paths.contains(expected), "{expected} was not registered");
-    }
+    #[cfg(feature = "local-dev")]
+    endpoints.push(("POST", "/login/local"));
+
+    #[cfg(feature = "sagas")]
+    endpoints.extend([("GET", "/saga"), ("GET", "/saga/{saga}")]);
+
+    #[cfg(feature = "metrics")]
+    endpoints.push(("GET", "/v/metrics"));
+
+    endpoints
+        .into_iter()
+        .map(|(method, path)| (method.to_string(), path.to_string()))
+        .collect()
 }
 
-/// The endpoints of `v_saga_endpoints` are reachable once `inject_v_saga_endpoints` has run
-#[cfg(feature = "sagas")]
+/// Checks that endpoints registered by the inject macros match exactly to our
+/// endpoint map. If this test is failing and the new endpoint has not been
+/// added to `expected_endpoints` then you will need to add it there.
 #[test]
-fn saga_endpoints_are_registered() {
-    let paths = registered_paths(&system::api());
+fn registered_endpoints_match_the_expected_set() {
+    let registered = registered_endpoints(&system::api());
+    let expected = expected_endpoints();
 
-    assert!(paths.contains("/saga"), "/saga was not registered");
-    assert!(
-        paths.contains("/saga/{saga}"),
-        "/saga/{{saga}} was not registered"
-    );
-}
+    // Ensure that every expected endpoint in our map is present in the api.
+    // This catches cases where an endpoint is created but not registered, or
+    // accidentally removed.
+    let missing = expected.difference(&registered).collect::<Vec<_>>();
 
-/// The endpoint of `v_metrics_endpoints` is reachable once `inject_v_metrics_endpoints` has run
-#[cfg(feature = "metrics")]
-#[test]
-fn metrics_endpoint_is_registered() {
-    let paths = registered_paths(&system::api());
+    // Ensures that no new endpoint is added without it being added to our test
+    // set above. This is our "checkin" for endpoints we use to make sure we
+    // do not break / remove endpoints unexpectedly.
+    let unexpected = registered.difference(&expected).collect::<Vec<_>>();
 
     assert!(
-        paths.contains("/v/metrics"),
-        "/v/metrics was not registered"
+        missing.is_empty() && unexpected.is_empty(),
+        "registered endpoints do not match\n  missing {missing:?}\n  unexpected {unexpected:?}"
     );
 }
