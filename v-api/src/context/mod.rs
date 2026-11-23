@@ -239,7 +239,7 @@ where
 {
     fn as_ctx(
         &self,
-    ) -> impl Future<Output = Result<(&VContext<T>, Caller<T>), VContextCallerError>>;
+    ) -> impl Future<Output = Result<(&VContext<T>, Caller<T>), VContextCallerError<T>>>;
 }
 
 #[derive(Debug, Error)]
@@ -249,18 +249,24 @@ pub enum VContextError {
 }
 
 #[derive(Debug, Error)]
-pub enum VContextCallerError {
+pub enum VContextCallerError<T> {
     #[error(transparent)]
     Auth(#[from] AuthError),
     #[error(transparent)]
     Caller(#[from] UserContextError),
+    Unauthenticated(Caller<T>),
 }
 
-impl From<VContextCallerError> for HttpError {
-    fn from(value: VContextCallerError) -> Self {
+impl<T> From<VContextCallerError<T>> for HttpError {
+    fn from(value: VContextCallerError<T>) -> Self {
         match value {
             VContextCallerError::Auth(inner) => inner.into(),
             VContextCallerError::Caller(inner) => inner.into(),
+            VContextCallerError::Unauthenticated(_) => HttpError::for_client_error(
+                None,
+                ClientErrorStatusCode::UNAUTHORIZED,
+                "unathentticated".to_string(),
+            ),
         }
     }
 }
@@ -270,7 +276,7 @@ where
     T: VAppPermission,
     U: ApiContext<AppPermissions = T>,
 {
-    async fn as_ctx(&self) -> Result<(&VContext<T>, Caller<T>), VContextCallerError> {
+    async fn as_ctx(&self) -> Result<(&VContext<T>, Caller<T>), VContextCallerError<T>> {
         let ctx = self.v_ctx();
         let caller = ctx.get_caller(self).await?;
         Ok((ctx, caller))
@@ -452,7 +458,7 @@ where
     pub async fn get_caller(
         &self,
         rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
-    ) -> Result<Caller<T>, VContextCallerError> {
+    ) -> Result<Caller<T>, VContextCallerError<T>> {
         self.get_caller_from_token(self.auth.authn_token(rqctx).await?.as_ref())
             .await
     }
@@ -460,7 +466,7 @@ where
     pub async fn get_caller_from_token(
         &self,
         auth: Option<&AuthToken>,
-    ) -> Result<Caller<T>, VContextCallerError> {
+    ) -> Result<Caller<T>, VContextCallerError<T>> {
         Ok(match auth {
             Some(token) => {
                 self.user
@@ -751,6 +757,20 @@ where
             )
         } else {
             resource_restricted()
+        }
+    }
+}
+
+pub trait UnathenticateCaller<T> {
+    fn allow_unathenticated(self) -> Result<Caller<T>, VContextCallerError<T>>;
+}
+
+impl<T> UnathenticateCaller<T> for Result<Caller<T>, VContextCallerError<T>> {
+    fn allow_unathenticated(self) -> Result<Caller<T>, VContextCallerError<T>> {
+        match self {
+            Ok(caller) => Ok(caller),
+            Err(VContextCallerError::Unauthenticated(caller)) => Ok(caller),
+            Err(err) => Err(err),
         }
     }
 }
