@@ -89,11 +89,11 @@ where
         })
     }
 
-    pub fn builtin_unauthenticated_caller(&self) -> Caller<T> {
+    pub(super) fn builtin_unauthenticated_caller(&self) -> Caller<T> {
         self.unauthenticated_caller.clone()
     }
 
-    pub fn builtin_unauthenticated_caller_mut(&mut self) -> &mut Caller<T> {
+    pub(super) fn builtin_unauthenticated_caller_mut(&mut self) -> &mut Caller<T> {
         &mut self.unauthenticated_caller
     }
 

@@ -254,6 +254,7 @@ pub enum VContextCallerError<T> {
     Auth(#[from] AuthError),
     #[error(transparent)]
     Caller(#[from] UserContextError),
+    #[error("Request is unauthenticated")]
     Unauthenticated(Caller<T>),
 }
 
@@ -262,11 +263,9 @@ impl<T> From<VContextCallerError<T>> for HttpError {
         match value {
             VContextCallerError::Auth(inner) => inner.into(),
             VContextCallerError::Caller(inner) => inner.into(),
-            VContextCallerError::Unauthenticated(_) => HttpError::for_client_error(
-                None,
-                ClientErrorStatusCode::UNAUTHORIZED,
-                "unathentticated".to_string(),
-            ),
+            VContextCallerError::Unauthenticated(_) => {
+                client_error(ClientErrorStatusCode::UNAUTHORIZED, "Unauthenticated")
+            }
         }
     }
 }
@@ -388,7 +387,7 @@ where
         self
     }
 
-    pub fn builtin_unauthenticated_caller(&self) -> Caller<T> {
+    fn builtin_unauthenticated_caller(&self) -> Caller<T> {
         self.auth.builtin_unauthenticated_caller()
     }
 
@@ -467,17 +466,18 @@ where
         &self,
         auth: Option<&AuthToken>,
     ) -> Result<Caller<T>, VContextCallerError<T>> {
-        Ok(match auth {
-            Some(token) => {
-                self.user
-                    .get_caller(&self.builtin_registration_user(), &self.auth, token)
-                    .await?
-            }
+        match auth {
+            Some(token) => Ok(self
+                .user
+                .get_caller(&self.builtin_registration_user(), &self.auth, token)
+                .await?),
             None => {
-                tracing::debug!("No token found in request. Falling back to unauthenticated user");
-                self.builtin_unauthenticated_caller()
+                tracing::debug!("No token found in request");
+                Err(VContextCallerError::Unauthenticated(
+                    self.builtin_unauthenticated_caller(),
+                ))
             }
-        })
+        }
     }
 
     #[instrument(skip(self, info), fields(info.external_id))]
@@ -761,17 +761,17 @@ where
     }
 }
 
-pub trait UnathenticateCaller<T> {
-    fn allow_unathenticated(self) -> Result<Caller<T>, VContextCallerError<T>>;
+pub trait UnauthenticatedCaller<T> {
+    /// Call to allow an unathenticated caller to be returned.
+    fn allow_unauthenticated(self) -> Result<Caller<T>, VContextCallerError<T>>;
 }
 
-impl<T> UnathenticateCaller<T> for Result<Caller<T>, VContextCallerError<T>> {
-    fn allow_unathenticated(self) -> Result<Caller<T>, VContextCallerError<T>> {
-        match self {
-            Ok(caller) => Ok(caller),
-            Err(VContextCallerError::Unauthenticated(caller)) => Ok(caller),
-            Err(err) => Err(err),
-        }
+impl<T> UnauthenticatedCaller<T> for Result<Caller<T>, VContextCallerError<T>> {
+    fn allow_unauthenticated(self) -> Result<Caller<T>, VContextCallerError<T>> {
+        self.or_else(|err| match err {
+            VContextCallerError::Unauthenticated(caller) => Ok(caller),
+            err => Err(err),
+        })
     }
 }
 
@@ -1272,8 +1272,10 @@ mod tests {
         util::tests::{MockKey, mock_key},
     };
 
+    use dropshot::HttpError;
+
     use super::{
-        PresetGroupConfig, VContext, VContextCallerError,
+        PresetGroupConfig, UnauthenticatedCaller, VContext, VContextCallerError,
         test_mocks::{MockStorage, build_ctx_with_groups, mock_context, mock_context_with_groups},
     };
 
@@ -1461,6 +1463,56 @@ mod tests {
             VContextCallerError::Caller(UserContextError::InvalidToken) => (),
             other => panic!(
                 "Exected to receive UserContextError::InvalidToken error. Instead found {:?}",
+                other
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_missing_token_is_rejected_as_unauthenticated() {
+        let ctx = mock_context(Arc::new(MockStorage::new())).await;
+
+        let err = ctx.get_caller_from_token(None).await.unwrap_err();
+        match &err {
+            VContextCallerError::Unauthenticated(caller) => {
+                assert_eq!(ctx.builtin_unauthenticated_caller().id, caller.id)
+            }
+            other => panic!(
+                "Expected an unauthenticated error. Instead found {:?}",
+                other
+            ),
+        }
+
+        assert_eq!(401, HttpError::from(err).status_code.as_u16());
+    }
+
+    #[tokio::test]
+    async fn test_allow_unauthenticated_opts_in_to_the_unauthenticated_caller() {
+        let ctx = mock_context(Arc::new(MockStorage::new())).await;
+
+        let caller = ctx
+            .get_caller_from_token(None)
+            .await
+            .allow_unauthenticated()
+            .unwrap();
+
+        assert_eq!(ctx.builtin_unauthenticated_caller().id, caller.id);
+        assert_eq!(
+            ctx.builtin_unauthenticated_caller().permissions,
+            caller.permissions
+        );
+    }
+
+    /// Opting in to unauthenticated callers must not hide a token that failed to verify
+    #[test]
+    fn test_allow_unauthenticated_keeps_other_errors() {
+        let result: Result<Caller<VPermission>, VContextCallerError<VPermission>> =
+            Err(VContextCallerError::Caller(UserContextError::InvalidToken));
+
+        match result.allow_unauthenticated() {
+            Err(VContextCallerError::Caller(UserContextError::InvalidToken)) => (),
+            other => panic!(
+                "Expected the token error to be kept. Instead found {:?}",
                 other
             ),
         }

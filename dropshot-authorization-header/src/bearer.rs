@@ -4,9 +4,10 @@
 
 use async_trait::async_trait;
 use dropshot::{
-    ApiEndpointBodyContentType, ExtensionMode, ExtractorMetadata, HttpError, RequestContext,
-    ServerContext, SharedExtractor,
+    ApiEndpointBodyContentType, ClientErrorStatusCode, ExtensionMode, ExtractorMetadata, HttpError,
+    RequestContext, ServerContext, SharedExtractor,
 };
+use http::{HeaderValue, header::AUTHORIZATION};
 
 /// A token used for bearer authentication
 pub struct BearerAuth(Option<String>);
@@ -25,41 +26,37 @@ impl BearerAuth {
     }
 }
 
-/// Extracting a bearer token should never fail, it should always return `Ok(BearerAuth(Some(token))))`
-/// or `Ok(BearerAuth(None))`. `None` will be returned in any of the cases that a valid string can not
-/// be extracted. This extractor is not responsible for checking the value of the token.
+fn bearer_from_header(header: Option<&HeaderValue>) -> Result<BearerAuth, HttpError> {
+    let token = header
+        .map(|header| {
+            header
+                .to_str()
+                .ok()
+                .and_then(|value| value.strip_prefix("Bearer "))
+                .map(|token| token.to_string())
+                .ok_or_else(|| {
+                    tracing::info!("Authorization header is not a bearer token");
+                    HttpError::for_client_error(
+                        None,
+                        ClientErrorStatusCode::UNAUTHORIZED,
+                        "Authorization header is not a bearer token".to_string(),
+                    )
+                })
+        })
+        .transpose()?;
+
+    Ok(BearerAuth(token))
+}
+
+/// A request without an Authorization header extracts as `BearerAuth(None)`. A request whose
+/// Authorization header is not a readable bearer token is rejected as unauthorized. This extractor
+/// is not responsible for checking the value of the token.
 #[async_trait]
 impl SharedExtractor for BearerAuth {
     async fn from_request<Context: ServerContext>(
         rqctx: &RequestContext<Context>,
     ) -> Result<BearerAuth, HttpError> {
-        // Similarly we only care about the presence of the Authorization header
-        let header_value = rqctx
-            .request
-            .headers()
-            .get("Authorization")
-            .and_then(|header| {
-                // If the value provided is not a readable string we will throw it out
-                header
-                    .to_str()
-                    .map(|s| s.to_string())
-                    .inspect_err(|err| {
-                        tracing::info!(?err, "Failed to turn Authorization header into string");
-                    })
-                    .ok()
-            });
-
-        // Finally ensure that the value we found is properly formed
-        let contents = header_value.and_then(|value| {
-            let parts = value.split_once(' ');
-
-            match parts {
-                Some(("Bearer", token)) => Some(token.to_string()),
-                _ => None,
-            }
-        });
-
-        Ok(BearerAuth(contents))
+        bearer_from_header(rqctx.request.headers().get(AUTHORIZATION))
     }
 
     fn metadata(_body_content_type: ApiEndpointBodyContentType) -> ExtractorMetadata {
@@ -67,5 +64,49 @@ impl SharedExtractor for BearerAuth {
             parameters: vec![],
             extension_mode: ExtensionMode::None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use http::HeaderValue;
+
+    use super::bearer_from_header;
+
+    #[test]
+    fn missing_header_has_no_token() {
+        assert_eq!(None, bearer_from_header(None).unwrap().consume());
+    }
+
+    #[test]
+    fn bearer_header_yields_token() {
+        let header = HeaderValue::from_static("Bearer token");
+
+        assert_eq!(
+            Some("token".to_string()),
+            bearer_from_header(Some(&header)).unwrap().consume()
+        );
+    }
+
+    /// A header that is present but is not a bearer token must not be mistaken for a missing one
+    #[test]
+    fn other_schemes_are_rejected() {
+        let header = HeaderValue::from_static("Basic dXNlcjpwYXNz");
+
+        assert_eq!(
+            401,
+            bearer_from_header(Some(&header))
+                .err()
+                .unwrap()
+                .status_code
+                .as_u16()
+        );
+    }
+
+    #[test]
+    fn unreadable_header_is_rejected() {
+        let header = HeaderValue::from_bytes(b"Bearer \xff").unwrap();
+
+        assert!(bearer_from_header(Some(&header)).is_err());
     }
 }

@@ -66,17 +66,12 @@ impl AuthToken {
     where
         T: VAppPermission + PermissionStorage,
     {
-        // Ensure there is a bearer, without it there is nothing else to do
         let bearer = BearerAuth::from_request(rqctx).await.map_err(|err| {
             tracing::info!(?err, "Failed to extract bearer auth");
-            AuthError::NoToken
+            AuthError::FailedToExtract
         })?;
 
-        // Check that the extracted token actually contains a value
-        let token = bearer.consume().ok_or_else(|| {
-            tracing::debug!("Bearer auth is empty");
-            AuthError::NoToken
-        })?;
+        let token = bearer.consume().ok_or(AuthError::NoToken)?;
 
         let ctx = rqctx.context();
 

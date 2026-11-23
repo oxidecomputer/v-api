@@ -16,7 +16,7 @@ mod util;
 pub use context::{
     ApiContext, BasePermissions, CallerExtension, ExtensionError, GroupContext, LinkContext,
     LoginContext, MagicLinkContext, MagicLinkMessage, MagicLinkTarget, MappingContext,
-    OAuthContext, OAuthError, PresetGroupConfig, PresetMapperConfig, UnathenticateCaller,
+    OAuthContext, OAuthError, PresetGroupConfig, PresetMapperConfig, UnauthenticatedCaller,
     UserContext, VApiStorage, VContext, VContextBuilder, VContextBuilderError, VContextError,
     VContextWithCaller, auth::SecretContext,
 };
