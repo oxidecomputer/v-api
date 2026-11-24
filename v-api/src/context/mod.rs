@@ -53,7 +53,7 @@ use crate::{
     error::ApiError,
     mapper::DefaultMappingEngine,
     permissions::{VAppPermission, VPermission},
-    response::{OptionalResource, ResourceErrorInner},
+    response::{OptionalResource, ResourceErrorInner, unauthorized},
     util::response::{
         ResourceResult, client_error, internal_error, resource_error, resource_restricted,
     },
@@ -263,9 +263,7 @@ impl<T> From<VContextCallerError<T>> for HttpError {
         match value {
             VContextCallerError::Auth(inner) => inner.into(),
             VContextCallerError::Caller(inner) => inner.into(),
-            VContextCallerError::Unauthenticated(_) => {
-                client_error(ClientErrorStatusCode::UNAUTHORIZED, "Unauthenticated")
-            }
+            VContextCallerError::Unauthenticated(_) => unauthorized(),
         }
     }
 }
@@ -762,7 +760,7 @@ where
 }
 
 pub trait UnauthenticatedCaller<T> {
-    /// Call to allow an unathenticated caller to be returned.
+    /// Call to allow an unauthenticated caller to be returned.
     fn allow_unauthenticated(self) -> Result<Caller<T>, VContextCallerError<T>>;
 }
 
