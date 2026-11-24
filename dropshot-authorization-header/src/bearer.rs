@@ -37,7 +37,7 @@ fn bearer_from_header(header: Option<&HeaderValue>) -> Result<BearerAuth, HttpEr
                 .map(|(_, token)| token)
                 .map(|token| token.to_string())
                 .ok_or_else(|| {
-                    tracing::info!("Authorization header is not a bearer token");
+                    tracing::debug!("Authorization header is not a bearer token");
                     HttpError::for_client_error(
                         None,
                         ClientErrorStatusCode::UNAUTHORIZED,

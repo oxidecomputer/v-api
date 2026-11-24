@@ -67,7 +67,7 @@ impl AuthToken {
         T: VAppPermission + PermissionStorage,
     {
         let bearer = BearerAuth::from_request(rqctx).await.map_err(|err| {
-            tracing::info!(?err, "Failed to extract bearer auth");
+            tracing::info!(?err, "Failed to extract bearer auth for auth token");
             AuthError::FailedToExtract
         })?;
 
