@@ -5,6 +5,7 @@
 pub mod authn;
 pub mod config;
 mod context;
+mod email;
 pub mod endpoints;
 pub mod error;
 pub mod mapper;
