@@ -7,7 +7,7 @@ use dropshot::{
     ApiEndpointBodyContentType, ClientErrorStatusCode, ExtensionMode, ExtractorMetadata, HttpError,
     RequestContext, ServerContext, SharedExtractor,
 };
-use http::{HeaderValue, header::AUTHORIZATION};
+use http::{HeaderMap, header::AUTHORIZATION};
 
 /// A token used for bearer authentication
 pub struct BearerAuth(Option<String>);
@@ -26,8 +26,9 @@ impl BearerAuth {
     }
 }
 
-fn bearer_from_header(header: Option<&HeaderValue>) -> Result<BearerAuth, HttpError> {
-    let token = header
+fn bearer_from_headers(headers: &HeaderMap) -> Result<BearerAuth, HttpError> {
+    let token = headers
+        .get(AUTHORIZATION)
         .map(|header| {
             header
                 .to_str()
@@ -58,7 +59,7 @@ impl SharedExtractor for BearerAuth {
     async fn from_request<Context: ServerContext>(
         rqctx: &RequestContext<Context>,
     ) -> Result<BearerAuth, HttpError> {
-        bearer_from_header(rqctx.request.headers().get(AUTHORIZATION))
+        bearer_from_headers(rqctx.request.headers())
     }
 
     fn metadata(_body_content_type: ApiEndpointBodyContentType) -> ExtractorMetadata {
@@ -71,13 +72,22 @@ impl SharedExtractor for BearerAuth {
 
 #[cfg(test)]
 mod tests {
-    use http::HeaderValue;
+    use http::{HeaderMap, HeaderValue, header::AUTHORIZATION};
 
-    use super::bearer_from_header;
+    use super::bearer_from_headers;
+
+    fn authorization(value: HeaderValue) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, value);
+        headers
+    }
 
     #[test]
     fn missing_header_has_no_token() {
-        assert_eq!(None, bearer_from_header(None).unwrap().consume());
+        assert_eq!(
+            None,
+            bearer_from_headers(&HeaderMap::new()).unwrap().consume()
+        );
     }
 
     #[test]
@@ -86,7 +96,9 @@ mod tests {
 
         assert_eq!(
             Some("token".to_string()),
-            bearer_from_header(Some(&header)).unwrap().consume()
+            bearer_from_headers(&authorization(header))
+                .unwrap()
+                .consume()
         );
     }
 
@@ -98,7 +110,9 @@ mod tests {
 
             assert_eq!(
                 Some("token".to_string()),
-                bearer_from_header(Some(&header)).unwrap().consume()
+                bearer_from_headers(&authorization(header))
+                    .unwrap()
+                    .consume()
             );
         }
     }
@@ -110,7 +124,7 @@ mod tests {
 
         assert_eq!(
             401,
-            bearer_from_header(Some(&header))
+            bearer_from_headers(&authorization(header))
                 .err()
                 .unwrap()
                 .status_code
@@ -122,6 +136,6 @@ mod tests {
     fn unreadable_header_is_rejected() {
         let header = HeaderValue::from_bytes(b"Bearer \xff").unwrap();
 
-        assert!(bearer_from_header(Some(&header)).is_err());
+        assert!(bearer_from_headers(&authorization(header)).is_err());
     }
 }
