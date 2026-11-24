@@ -53,7 +53,7 @@ use crate::{
     error::ApiError,
     mapper::DefaultMappingEngine,
     permissions::{VAppPermission, VPermission},
-    response::{OptionalResource, ResourceErrorInner},
+    response::{OptionalResource, ResourceErrorInner, unauthorized},
     util::response::{
         ResourceResult, client_error, internal_error, resource_error, resource_restricted,
     },
@@ -239,7 +239,7 @@ where
 {
     fn as_ctx(
         &self,
-    ) -> impl Future<Output = Result<(&VContext<T>, Caller<T>), VContextCallerError>>;
+    ) -> impl Future<Output = Result<(&VContext<T>, Caller<T>), VContextCallerError<T>>>;
 }
 
 #[derive(Debug, Error)]
@@ -249,18 +249,21 @@ pub enum VContextError {
 }
 
 #[derive(Debug, Error)]
-pub enum VContextCallerError {
+pub enum VContextCallerError<T> {
     #[error(transparent)]
     Auth(#[from] AuthError),
     #[error(transparent)]
     Caller(#[from] UserContextError),
+    #[error("Request is unauthenticated")]
+    Unauthenticated(Caller<T>),
 }
 
-impl From<VContextCallerError> for HttpError {
-    fn from(value: VContextCallerError) -> Self {
+impl<T> From<VContextCallerError<T>> for HttpError {
+    fn from(value: VContextCallerError<T>) -> Self {
         match value {
             VContextCallerError::Auth(inner) => inner.into(),
             VContextCallerError::Caller(inner) => inner.into(),
+            VContextCallerError::Unauthenticated(_) => unauthorized(),
         }
     }
 }
@@ -270,7 +273,7 @@ where
     T: VAppPermission,
     U: ApiContext<AppPermissions = T>,
 {
-    async fn as_ctx(&self) -> Result<(&VContext<T>, Caller<T>), VContextCallerError> {
+    async fn as_ctx(&self) -> Result<(&VContext<T>, Caller<T>), VContextCallerError<T>> {
         let ctx = self.v_ctx();
         let caller = ctx.get_caller(self).await?;
         Ok((ctx, caller))
@@ -382,7 +385,7 @@ where
         self
     }
 
-    pub fn builtin_unauthenticated_caller(&self) -> Caller<T> {
+    fn builtin_unauthenticated_caller(&self) -> Caller<T> {
         self.auth.builtin_unauthenticated_caller()
     }
 
@@ -452,7 +455,7 @@ where
     pub async fn get_caller(
         &self,
         rqctx: &RequestContext<impl ApiContext<AppPermissions = T>>,
-    ) -> Result<Caller<T>, VContextCallerError> {
+    ) -> Result<Caller<T>, VContextCallerError<T>> {
         self.get_caller_from_token(self.auth.authn_token(rqctx).await?.as_ref())
             .await
     }
@@ -460,18 +463,19 @@ where
     pub async fn get_caller_from_token(
         &self,
         auth: Option<&AuthToken>,
-    ) -> Result<Caller<T>, VContextCallerError> {
-        Ok(match auth {
-            Some(token) => {
-                self.user
-                    .get_caller(&self.builtin_registration_user(), &self.auth, token)
-                    .await?
-            }
+    ) -> Result<Caller<T>, VContextCallerError<T>> {
+        match auth {
+            Some(token) => Ok(self
+                .user
+                .get_caller(&self.builtin_registration_user(), &self.auth, token)
+                .await?),
             None => {
-                tracing::debug!("No token found in request. Falling back to unauthenticated user");
-                self.builtin_unauthenticated_caller()
+                tracing::debug!("No token found in request");
+                Err(VContextCallerError::Unauthenticated(
+                    self.builtin_unauthenticated_caller(),
+                ))
             }
-        })
+        }
     }
 
     #[instrument(skip(self, info), fields(info.external_id))]
@@ -752,6 +756,20 @@ where
         } else {
             resource_restricted()
         }
+    }
+}
+
+pub trait UnauthenticatedCaller<T> {
+    /// Call to allow an unauthenticated caller to be returned.
+    fn allow_unauthenticated(self) -> Result<Caller<T>, VContextCallerError<T>>;
+}
+
+impl<T> UnauthenticatedCaller<T> for Result<Caller<T>, VContextCallerError<T>> {
+    fn allow_unauthenticated(self) -> Result<Caller<T>, VContextCallerError<T>> {
+        self.or_else(|err| match err {
+            VContextCallerError::Unauthenticated(caller) => Ok(caller),
+            err => Err(err),
+        })
     }
 }
 
@@ -1252,8 +1270,10 @@ mod tests {
         util::tests::{MockKey, mock_key},
     };
 
+    use dropshot::HttpError;
+
     use super::{
-        PresetGroupConfig, VContext, VContextCallerError,
+        PresetGroupConfig, UnauthenticatedCaller, VContext, VContextCallerError,
         test_mocks::{MockStorage, build_ctx_with_groups, mock_context, mock_context_with_groups},
     };
 
@@ -1441,6 +1461,56 @@ mod tests {
             VContextCallerError::Caller(UserContextError::InvalidToken) => (),
             other => panic!(
                 "Exected to receive UserContextError::InvalidToken error. Instead found {:?}",
+                other
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_missing_token_is_rejected_as_unauthenticated() {
+        let ctx = mock_context(Arc::new(MockStorage::new())).await;
+
+        let err = ctx.get_caller_from_token(None).await.unwrap_err();
+        match &err {
+            VContextCallerError::Unauthenticated(caller) => {
+                assert_eq!(ctx.builtin_unauthenticated_caller().id, caller.id)
+            }
+            other => panic!(
+                "Expected an unauthenticated error. Instead found {:?}",
+                other
+            ),
+        }
+
+        assert_eq!(401, HttpError::from(err).status_code.as_u16());
+    }
+
+    #[tokio::test]
+    async fn test_allow_unauthenticated_opts_in_to_the_unauthenticated_caller() {
+        let ctx = mock_context(Arc::new(MockStorage::new())).await;
+
+        let caller = ctx
+            .get_caller_from_token(None)
+            .await
+            .allow_unauthenticated()
+            .unwrap();
+
+        assert_eq!(ctx.builtin_unauthenticated_caller().id, caller.id);
+        assert_eq!(
+            ctx.builtin_unauthenticated_caller().permissions,
+            caller.permissions
+        );
+    }
+
+    /// Opting in to unauthenticated callers must not hide a token that failed to verify
+    #[test]
+    fn test_allow_unauthenticated_keeps_other_errors() {
+        let result: Result<Caller<VPermission>, VContextCallerError<VPermission>> =
+            Err(VContextCallerError::Caller(UserContextError::InvalidToken));
+
+        match result.allow_unauthenticated() {
+            Err(VContextCallerError::Caller(UserContextError::InvalidToken)) => (),
+            other => panic!(
+                "Expected the token error to be kept. Instead found {:?}",
                 other
             ),
         }

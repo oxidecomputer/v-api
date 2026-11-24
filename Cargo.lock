@@ -998,6 +998,7 @@ dependencies = [
  "async-trait",
  "base64 0.23.1",
  "dropshot",
+ "http",
  "tracing",
 ]
 

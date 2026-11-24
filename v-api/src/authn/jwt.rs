@@ -37,6 +37,8 @@ pub enum JwtError {
     NoMatchingKey,
     #[error("No token found")]
     NoToken,
+    #[error("Authorization header is not a bearer token")]
+    NotBearer,
     #[error("Unsupported algorithm")]
     UnsupportedAlgorithm,
 }
@@ -177,17 +179,12 @@ where
     where
         T: VAppPermission,
     {
-        // Ensure there is a bearer, without it there is nothing else to do
         let bearer = BearerAuth::from_request(rqctx).await.map_err(|err| {
-            tracing::info!(?err, "Failed to extract bearer auth");
-            JwtError::NoToken
+            tracing::info!(?err, "Failed to extract bearer auth for jwt");
+            JwtError::NotBearer
         })?;
 
-        // Check that the extracted token actually contains a value
-        let token = bearer.consume().ok_or_else(|| {
-            tracing::debug!("Bearer auth is empty");
-            JwtError::NoToken
-        })?;
+        let token = bearer.consume().ok_or(JwtError::NoToken)?;
 
         Self::new(rqctx.v_ctx(), &token).await
     }
