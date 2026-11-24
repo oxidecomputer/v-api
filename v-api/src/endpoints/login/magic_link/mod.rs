@@ -25,7 +25,7 @@ use crate::{
     ApiContext, VContext,
     authn::{Verify, key::RawKey},
     context::magic_link::{MagicLinkSendError, MagicLinkTransitionError},
-    email::is_plain_email,
+    email::email_domain,
     endpoints::login::{ExternalUserId, UserInfo},
     permissions::VAppPermission,
     response::{ResourceError, bad_request, internal_error, to_internal_error},
@@ -109,7 +109,7 @@ where
     }
 
     // The recipient becomes a verified email that mappers match on, so it must be unambiguous
-    if !is_plain_email(&recipient) {
+    if email_domain(&recipient).is_none() {
         tracing::info!("Client submitted an invalid recipient");
         return Err(bad_request("Invalid recipient"));
     }
@@ -199,7 +199,7 @@ where
     let body = body.into_inner();
 
     // Also checked at send, but attempts created before that check existed may be outstanding
-    if !is_plain_email(&body.recipient) {
+    if email_domain(&body.recipient).is_none() {
         tracing::info!("Client submitted an invalid recipient");
         return Err(bad_request("Invalid recipient"));
     }

@@ -17,10 +17,6 @@ pub fn email_domain(value: &str) -> Option<&str> {
     (is_local_part(local) && is_domain(domain)).then_some(domain)
 }
 
-pub fn is_plain_email(value: &str) -> bool {
-    email_domain(value).is_some()
-}
-
 // RFC 5322 dot-atom with atext, plus non-ASCII alphanumerics. `%` and `!` are excluded as they
 // can source-route mail to another host.
 fn is_local_part(local: &str) -> bool {
@@ -49,7 +45,7 @@ fn is_domain(domain: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{email_domain, is_plain_email};
+    use super::email_domain;
 
     #[test]
     fn test_accepts_plain_addresses() {
@@ -107,16 +103,16 @@ mod tests {
             "a%evil.com@example.com",
             "evil.com!a@example.com",
         ] {
-            assert!(!is_plain_email(email), "{email:?}");
+            assert_eq!(email_domain(email), None, "{email:?}");
         }
     }
 
     #[test]
     fn test_rejects_overlong_parts() {
         let local = "a".repeat(65);
-        assert!(!is_plain_email(&format!("{local}@example.com")));
+        assert_eq!(email_domain(&format!("{local}@example.com")), None);
 
         let label = "a".repeat(64);
-        assert!(!is_plain_email(&format!("a@{label}.com")));
+        assert_eq!(email_domain(&format!("a@{label}.com")), None);
     }
 }
