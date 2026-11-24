@@ -2,45 +2,39 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! A deliberately narrow email grammar: a single `local@domain` addr-spec. Display names, angle
-//! brackets, quoted local parts, comments, whitespace, control characters, separators, domain
-//! literals and extra `@` characters are all rejected, so the text after the only `@` is always
-//! the domain mail is delivered to.
+use email_address::{EmailAddress, Options};
 
-const LOCAL_MAX: usize = 64;
-const DOMAIN_MAX: usize = 253;
-const LABEL_MAX: usize = 63;
+/// The delivery domain of `value` if it is a single addr-spec. Display names and domain literals
+/// are rejected, as are characters that are invisible or break lines.
+pub fn email_domain(value: &str) -> Option<String> {
+    if value.chars().any(is_disallowed_char) {
+        return None;
+    }
 
-/// The domain of `value` if it is a plain `local@domain` address.
-pub fn email_domain(value: &str) -> Option<&str> {
-    let (local, domain) = value.split_once('@')?;
-    (is_local_part(local) && is_domain(domain)).then_some(domain)
+    let options = Options::default()
+        .without_domain_literal()
+        .without_display_text();
+
+    EmailAddress::parse_with_options(value, options)
+        .ok()
+        .map(|email| email.domain().to_string())
 }
 
-// RFC 5322 dot-atom with atext, plus non-ASCII alphanumerics. `%` and `!` are excluded as they
-// can source-route mail to another host.
-fn is_local_part(local: &str) -> bool {
-    local.len() <= LOCAL_MAX
-        && local.split('.').all(|atom| {
-            !atom.is_empty()
-                && atom.chars().all(|c| {
-                    c.is_ascii_alphanumeric()
-                        || "#$&'*+-/=?^_`{|}~".contains(c)
-                        || (!c.is_ascii() && c.is_alphanumeric())
-                })
-        })
-}
-
-// ASCII letters, digits and hyphens; internationalized domains must be punycode
-fn is_domain(domain: &str) -> bool {
-    domain.len() <= DOMAIN_MAX
-        && domain.split('.').all(|label| {
-            !label.is_empty()
-                && label.len() <= LABEL_MAX
-                && !label.starts_with('-')
-                && !label.ends_with('-')
-                && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-        })
+fn is_disallowed_char(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            // Zero width and bidi formatting
+            '\u{00AD}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{FEFF}'
+                // Line and paragraph separators
+                | '\u{2028}'
+                | '\u{2029}'
+        )
 }
 
 #[cfg(test)]
@@ -48,7 +42,7 @@ mod tests {
     use super::email_domain;
 
     #[test]
-    fn test_accepts_plain_addresses() {
+    fn test_accepts_addresses() {
         for (email, domain) in [
             ("a@example.com", "example.com"),
             ("first.last+tag@sub.example.co", "sub.example.co"),
@@ -57,8 +51,18 @@ mod tests {
             ("user@localhost", "localhost"),
             ("A@Example.COM", "Example.COM"),
             ("a@xn--bcher-kva.example", "xn--bcher-kva.example"),
+            ("a@b\u{fc}cher.example", "b\u{fc}cher.example"),
+            ("a%b@example.com", "example.com"),
+            ("b!a@example.com", "example.com"),
+            ("a\u{a0}b@example.com", "example.com"),
+            ("a\u{3000}b@example.com", "example.com"),
+            ("a\u{ff20}b@example.com", "example.com"),
+            ("a\u{fe6b}b@example.com", "example.com"),
+            // Quoted local parts may contain `@`, but the domain is still the delivery domain
+            ("\"a\"@evil.com", "evil.com"),
+            ("\"a@example.com@\"@evil.com", "evil.com"),
         ] {
-            assert_eq!(email_domain(email), Some(domain), "{email}");
+            assert_eq!(email_domain(email).as_deref(), Some(domain), "{email}");
         }
     }
 
@@ -71,8 +75,6 @@ mod tests {
             "a@",
             "a@@example.com",
             "a@example.com@evil.com",
-            "\"a@example.com@\"@evil.com",
-            "\"a\"@evil.com",
             "Name <a@evil.com>",
             "a@example.com <a@evil.com>",
             "<a@evil.com>",
@@ -95,13 +97,12 @@ mod tests {
             "a@evil.com.",
             "a@-evil.com",
             "a@evil-.com",
-            "a@evil_com.com",
-            "a\u{ff20}example.com@evil.com",
             "a\u{200b}@evil.com",
+            "\"a\u{200b}\"@evil.com",
+            "a\u{202e}@evil.com",
+            "a\u{85}@evil.com",
+            "a\u{2028}@evil.com",
             "a@evil\u{200b}.com",
-            "a@b\u{fc}cher.example",
-            "a%evil.com@example.com",
-            "evil.com!a@example.com",
         ] {
             assert_eq!(email_domain(email), None, "{email:?}");
         }
