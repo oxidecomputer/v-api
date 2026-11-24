@@ -15,8 +15,8 @@ use v_model::{
 };
 
 use crate::{
-    context::group::GroupContext, endpoints::login::UserInfo, permissions::VAppPermission,
-    util::response::ResourceResult,
+    context::group::GroupContext, email::email_domain, endpoints::login::UserInfo,
+    permissions::VAppPermission, util::response::ResourceResult,
 };
 
 use super::MapperRule;
@@ -62,11 +62,7 @@ where
     ) -> ResourceResult<BTreeSet<TypedUuid<AccessGroupId>>, StoreError> {
         tracing::trace!("Running email domain mapper");
         let has_email_in_domain = user.verified_emails.iter().any(|email| {
-            let mut parts = email.split('@');
-            parts
-                .nth(1)
-                .map(|domain| domain == self.data.domain)
-                .unwrap_or(false)
+            email_domain(email).is_some_and(|domain| domain.eq_ignore_ascii_case(&self.data.domain))
         });
 
         if has_email_in_domain {
@@ -237,5 +233,54 @@ mod tests {
              'example.com' and granted {:?}",
             groups,
         );
+    }
+
+    fn example_mapper(
+        group_id: TypedUuid<v_model::AccessGroupId>,
+    ) -> EmailDomainMapper<VPermission> {
+        EmailDomainMapper::new(
+            registration_caller(),
+            group_context_with_group(group_id, "employees"),
+            EmailDomainMapperData::<VPermission> {
+                domain: "example.com".to_string(),
+                permissions: None,
+                groups: vec!["employees".to_string()],
+            },
+        )
+    }
+
+    /// Only the text after the single `@` is the delivery domain. Addresses that place the
+    /// configured domain anywhere else must not match.
+    #[tokio::test]
+    async fn ambiguous_addresses_are_not_granted_reserved_group() {
+        let mapper = example_mapper(TypedUuid::new_v4());
+
+        for email in [
+            "a@example.com@evil.com",
+            "\"a@example.com@\"@evil.com",
+            "Name <a@evil.com>",
+            "a@example.com <a@evil.com>",
+            "\"a@example.com\" <a@evil.com>",
+            "a(a@example.com@)@evil.com",
+            "a@evil.com(example.com)",
+            "a@evil.com,b@example.com",
+            "a@example.com ",
+        ] {
+            let groups = mapper.groups_for(&user_with_email(email)).await.unwrap();
+            assert!(groups.is_empty(), "{email:?} was granted {groups:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn domain_match_is_case_insensitive() {
+        let group_id = TypedUuid::new_v4();
+        let mapper = example_mapper(group_id);
+
+        let groups = mapper
+            .groups_for(&user_with_email("Alice@Example.COM"))
+            .await
+            .unwrap();
+
+        assert_eq!(groups, BTreeSet::from([group_id]));
     }
 }

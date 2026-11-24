@@ -25,6 +25,7 @@ use crate::{
     ApiContext, VContext,
     authn::{Verify, key::RawKey},
     context::magic_link::{MagicLinkSendError, MagicLinkTransitionError},
+    email::is_plain_email,
     endpoints::login::{ExternalUserId, UserInfo},
     permissions::VAppPermission,
     response::{ResourceError, bad_request, internal_error, to_internal_error},
@@ -105,6 +106,12 @@ where
     if let Err(err) = T::from_scope_arg(&scope) {
         tracing::warn!(?err, ?scope, "Client submitted an invalid scope");
         return Err(bad_request(format!("Invalid scope: {}", scope)));
+    }
+
+    // The recipient becomes a verified email that mappers match on, so it must be unambiguous
+    if !is_plain_email(&recipient) {
+        tracing::info!("Client submitted an invalid recipient");
+        return Err(bad_request("Invalid recipient"));
     }
 
     // Any caller may create a magic link attempt by supplying the clients secret
@@ -190,6 +197,12 @@ where
 {
     let ctx = rqctx.v_ctx();
     let body = body.into_inner();
+
+    // Also checked at send, but attempts created before that check existed may be outstanding
+    if !is_plain_email(&body.recipient) {
+        tracing::info!("Client submitted an invalid recipient");
+        return Err(bad_request("Invalid recipient"));
+    }
 
     // Any caller may consume a magic link by supplying the attempt secret
     let key: RawKey = body
