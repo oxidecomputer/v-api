@@ -32,7 +32,9 @@ fn bearer_from_header(header: Option<&HeaderValue>) -> Result<BearerAuth, HttpEr
             header
                 .to_str()
                 .ok()
-                .and_then(|value| value.strip_prefix("Bearer "))
+                .and_then(|value| value.split_once(' '))
+                .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("Bearer"))
+                .map(|(_, token)| token)
                 .map(|token| token.to_string())
                 .ok_or_else(|| {
                     tracing::info!("Authorization header is not a bearer token");
@@ -86,6 +88,19 @@ mod tests {
             Some("token".to_string()),
             bearer_from_header(Some(&header)).unwrap().consume()
         );
+    }
+
+    /// The authentication scheme name is case insensitive
+    #[test]
+    fn scheme_is_case_insensitive() {
+        for value in ["bearer token", "BEARER token", "BeArEr token"] {
+            let header = HeaderValue::from_static(value);
+
+            assert_eq!(
+                Some("token".to_string()),
+                bearer_from_header(Some(&header)).unwrap().consume()
+            );
+        }
     }
 
     /// A header that is present but is not a bearer token must not be mistaken for a missing one
